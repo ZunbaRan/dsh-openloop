@@ -1,0 +1,29 @@
+- insert:
+    - id: openloop-dsh-mcp
+      name: '@openloop/dsh-mcp'
+      config:
+        servers:
+          - id: fixture
+            transport:
+              kind: stdio
+              command: !!js process.execPath
+              args:
+                - !!js new URL('./node_modules/@openloop/dsh-mcp-app-fixture/dist/server.js', ctx.baseUrl).pathname
+          - id: tldraw
+            protocol: 2026-07-28
+            transport:
+              kind: streamable-http
+              url: !!js process.env.TLDRAW_MCP_URL || 'http://127.0.0.1:39513/mcp'
+          - id: excalidraw
+            protocol: legacy
+            transport:
+              kind: streamable-http
+              url: https://mcp.excalidraw.com
+          - id: sequential_thinking
+            protocol: legacy
+            transport:
+              kind: stdio
+              command: npx
+              args:
+                - -y
+                - '@modelcontextprotocol/server-sequential-thinking'

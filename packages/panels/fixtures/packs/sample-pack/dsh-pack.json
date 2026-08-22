@@ -1,0 +1,19 @@
+{
+  "name": "@openloop/sample-pack",
+  "version": "0.1.0",
+  "runtime": "react18",
+  "entry": "dist/index.js",
+  "styles": "dist/index.css",
+  "components": {
+    "FancyCard": {
+      "description": "A demo card consuming --openloop-* tokens, served from the pack route.",
+      "propsSchema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "value": { "type": "number" }
+        }
+      }
+    }
+  }
+}

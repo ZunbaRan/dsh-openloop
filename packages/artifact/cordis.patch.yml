@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-html-artifact
+      name: '@openloop/dsh-html-artifact'

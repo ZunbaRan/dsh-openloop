@@ -1,0 +1,17 @@
+# 构建产物与依赖
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# 打包/构建临时残留（esbuild/vitest 产物，可能是文件或目录）
+_tmp_*
+_zz_*
+
+# 系统与编辑器
+.DS_Store
+*.log
+
+# 本地环境（不入库，防泄漏）
+.env
+.env.*

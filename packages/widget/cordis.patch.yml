@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-show-widget
+      name: '@openloop/dsh-show-widget'

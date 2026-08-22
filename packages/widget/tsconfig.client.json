@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "lib": ["es2022", "dom", "dom.iterable"] },
+  "include": ["src/client", "src/contract.ts", "src/shell.ts", "tests/client.spec.tsx"],
+  "exclude": []
+}

@@ -1,0 +1,18 @@
+{
+  "name": "openloop-dsh-visual-plugins",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "node scripts/check-all.mjs",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "pack:all": "node scripts/pack-all.mjs",
+    "test:mcp:dsh": "node scripts/test-mcp-dsh.mjs",
+    "test:mcp:e2e": "node scripts/test-mcp-e2e.mjs",
+    "test:mcp:interop": "node scripts/test-mcp-interop.mjs",
+    "test:mcp:security": "node scripts/test-mcp-security.mjs"
+  },
+  "packageManager": "pnpm@10.28.2"
+}

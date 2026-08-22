@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-visual-declarative
+      name: '@openloop/dsh-visual-declarative'

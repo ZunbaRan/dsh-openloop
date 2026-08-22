@@ -1,0 +1,25 @@
+{
+  "name": "@openloop/dsh-mcp-app-fixture",
+  "version": "0.1.1",
+  "description": "Minimal stdio MCP Apps fixture for the OpenLoop DSH foundation MVP.",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": { "openloop-dsh-mcp-app-fixture": "dist/server.js" },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.1"
+  }
+}

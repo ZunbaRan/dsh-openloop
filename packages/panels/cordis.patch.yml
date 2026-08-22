@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-dsh-panels
+      name: '@openloop/dsh-panels'

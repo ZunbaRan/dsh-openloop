@@ -1,0 +1,26 @@
+/**
+ * stack 校验（fail-closed）：direction/gap/align 枚举与范围；children 深校验。
+ */
+import { asRecord, error, isFiniteNumber, validationFail, validationOk, type PresetValidation } from '../common.ts'
+import { validateChildren } from '../children.ts'
+
+const DIRECTIONS = ['vertical', 'horizontal'] as const
+const ALIGNS = ['start', 'center', 'end', 'stretch'] as const
+
+export function validateStack(props: unknown): PresetValidation {
+  const root = asRecord(props)
+  if (!root) return validationFail([error('$', 'stack props 必须是 JSON 对象')])
+
+  const errors = []
+  if (root.direction !== undefined && !(DIRECTIONS as readonly string[]).includes(String(root.direction))) {
+    errors.push(error('direction', 'direction 必须是 vertical / horizontal 之一'))
+  }
+  if (root.gap !== undefined && (!isFiniteNumber(root.gap) || !Number.isInteger(root.gap) || root.gap < 0 || root.gap > 48)) {
+    errors.push(error('gap', 'gap 必须是 0–48 的整数（px）'))
+  }
+  if (root.align !== undefined && !(ALIGNS as readonly string[]).includes(String(root.align))) {
+    errors.push(error('align', 'align 必须是 start / center / end / stretch 之一'))
+  }
+  errors.push(...validateChildren(root.children, 'children', 'stack'))
+  return errors.length > 0 ? validationFail(errors) : validationOk()
+}
