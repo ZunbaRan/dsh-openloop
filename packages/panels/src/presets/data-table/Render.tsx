@@ -96,6 +96,32 @@ function cellText(value: unknown, format: unknown): string {
   }
 }
 
+/** 契约自有键（孤儿字段判定用：数据浅合并塞进来的 API 字段不算契约键） */
+const OWN_KEYS = new Set(['title', 'columns', 'rows', 'density'])
+
+/**
+ * 数据驱动模式（reshape，2026-08-23）：columns 缺省时，把数据绑定浅合并进 props 的
+ * 孤儿扁平字段（如 GitHub repo API 的 stargazers_count/forks_count…）自适应为
+ * Field/Value 两列表。嵌套值取 JSON 摘要（≤60 字符）；字段上限 24 + 溢出行数提示。
+ */
+export function autoFieldRows(root: Record<string, unknown>): { columns: Column[]; rows: Array<Record<string, unknown>> } | undefined {
+  const entries = Object.entries(root).filter(([key]) => !OWN_KEYS.has(key))
+  if (entries.length === 0) return undefined
+  const rows = entries.slice(0, 24).map(([key, value]) => {
+    const display = typeof value === 'object' && value !== null
+      ? JSON.stringify(value).slice(0, 60)
+      : String(value)
+    return { field: key, value: display }
+  })
+  return {
+    columns: [
+      { key: 'field', label: '字段', align: 'left', format: undefined, numeric: false },
+      { key: 'value', label: '值', align: 'left', format: undefined, numeric: false },
+    ],
+    ...(entries.length > 24 ? { rows: [...rows, { field: '…', value: `(+${entries.length - 24} more fields)` }] } : { rows }),
+  }
+}
+
 export function DataTableRender({ props }: PresetRenderProps) {
   const root = asRecord(props) ?? {}
   const panelTitle = typeof root.title === 'string' ? root.title : undefined
@@ -118,9 +144,13 @@ export function DataTableRender({ props }: PresetRenderProps) {
       }
     })
 
-  const rows: Record<string, unknown>[] = (Array.isArray(root.rows) ? root.rows : [])
-    .slice(0, 200)
-    .map((raw) => asRecord(raw) ?? {})
+  const auto = columns.length === 0 ? autoFieldRows(root) : undefined
+  const effectiveColumns = auto ? auto.columns : columns
+  const rows: Record<string, unknown>[] = auto
+    ? auto.rows
+    : (Array.isArray(root.rows) ? root.rows : [])
+      .slice(0, 200)
+      .map((raw) => asRecord(raw) ?? {})
 
   const headerPadding = { paddingTop: padY, paddingBottom: padY }
   const bodyPadding = { paddingTop: padY, paddingBottom: padY }
@@ -136,7 +166,7 @@ export function DataTableRender({ props }: PresetRenderProps) {
         <table style={tableStyle}>
           <thead>
             <tr>
-              {columns.map((column) => (
+              {effectiveColumns.map((column) => (
                 <th
                   key={column.key}
                   scope="col"
@@ -163,7 +193,7 @@ export function DataTableRender({ props }: PresetRenderProps) {
                   }}
                   data-openloop-row-tone={tone ?? 'none'}
                 >
-                  {columns.map((column) => (
+                  {effectiveColumns.map((column) => (
                     <td
                       key={column.key}
                       style={{

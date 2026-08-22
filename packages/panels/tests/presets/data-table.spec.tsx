@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { validateDataTable } from '../../src/presets/data-table/validate.ts'
-import { DataTableRender } from '../../src/presets/data-table/Render.tsx'
+import { DataTableRender, autoFieldRows } from '../../src/presets/data-table/Render.tsx'
 
 const validProps = {
   title: '订单明细',
@@ -28,7 +28,7 @@ describe('data-table schema 边界', () => {
   })
 
   it('columns 必填且 1–12 列', () => {
-    expect(validateDataTable({ rows: [] }).ok).toBe(false)
+    // columns 可选（数据驱动）；但显式给空数组仍拒绝（声明了列却没列 = 配置错误）
     expect(validateDataTable({ columns: [] }).ok).toBe(false)
     const thirteen = Array.from({ length: 13 }, (_, i) => ({ key: `c${i}` }))
     expect(validateDataTable({ columns: thirteen }).ok).toBe(false)
@@ -88,5 +88,35 @@ describe('data-table 渲染断言', () => {
   it('空 rows 渲染空态', () => {
     const markup = renderToStaticMarkup(<DataTableRender props={{ columns: [{ key: 'i', label: '序号' }], rows: [] }} />)
     expect(markup).toContain('暂无数据')
+  })
+})
+
+describe('数据驱动模式（reshape，2026-08-23 真机降级缺口修复）', () => {
+  it('columns 缺省 + 孤儿字段：validate 放行', () => {
+    const result = validateDataTable({ title: 'GitHub', stargazers_count: 184175, forks_count: 33 })
+    expect(result.ok).toBe(true)
+  })
+
+  it('autoFieldRows：孤儿扁平字段 → Field/Value 两列', () => {
+    const auto = autoFieldRows({ title: 'GitHub', stargazers_count: 184175, forks_count: 33160 })
+    expect(auto).toBeDefined()
+    expect(auto!.columns.map(c => c.key)).toEqual(['field', 'value'])
+    expect(auto!.rows).toHaveLength(2)
+    expect(auto!.rows[0]).toEqual({ field: 'stargazers_count', value: '184175' })
+  })
+
+  it('autoFieldRows：嵌套值取 JSON 摘要；超 24 字段溢出提示', () => {
+    const props: Record<string, unknown> = { owner: { login: 'deepseek-ai' } }
+    for (let i = 0; i < 30; i++) props[`f${i}`] = i
+    const auto = autoFieldRows(props)!
+    expect(auto.rows).toHaveLength(25)
+    expect(auto.rows[auto.rows.length - 1]!.value).toContain('+7 more fields')
+    expect(auto.rows.find(r => r.field === 'owner')!.value).toContain('deepseek-ai')
+  })
+
+  it('渲染：数据驱动 props 不崩且出现字段行', () => {
+    const markup = renderToStaticMarkup(<DataTableRender props={{ title: 'GitHub', stargazers_count: 184175 } as never} />)
+    expect(markup).toContain('stargazers_count')
+    expect(markup).toContain('184175')
   })
 })

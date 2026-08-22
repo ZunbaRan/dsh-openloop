@@ -81,7 +81,7 @@ description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选�
 | kind | props | 要点 |
 |---|---|---|
 | `metric-grid` | `title`(≤80)；`items` 必填(1–6，`{id,label,value,format,delta,deltaTone,emphasis}`) | **emphasis hero 至多 1 个**；deltaTone 用 up/down/flat；**format 仅 currency-cny（或别名 currency）/number/percent/text** |
-| `data-table` | `title`；`columns` 必填(1–12，`{key,label,align,format}`)；`rows`(0–200)；`density` | 数字列 `align:right` 或 format 数值类 |
+| `data-table` | `columns`(1–12，`{key,label,align,format}`)；`rows`(≤200)；`density` | **数据驱动模式**：绑定扁平 API（如 GitHub repo）时**可不写 columns/rows**——resolved 字段自动成 Field/Value 表（≤24 字段） |
 | `progress` | `label`(≤80)；`value` 必填(≥0)；`max` 默认 100；`tone` | value 超 max 按满格 |
 | `sparkline` | `label`(≤80)；`value` 可选；`series` 必填(2–120 数值)；`extremes` | 手绘 SVG 迷你折线 |
 
@@ -159,6 +159,8 @@ function NotNamed({ data }) { … }    // ✗ 组件名必须叫 Widget
 - `pick` 支持 `a.b[0].c` 形态，缺路径返回 undefined；缺省取整个响应。**pick 是 data 的字段（与 source 平级），不是 source 的字段**——放错位置会被静默忽略（取到整个响应）
 - **预设组件的数据注入**：解析结果为 plain object 时**浅合并覆盖 props**（数据优先）——所以让 API 返回/用 pick 取出与组件 props 同形的对象（如 data-table 取 `{ columns, rows }`）；合并后仍要过组件 schema，越界会降级占位
 - `refresh.intervalMs` 最小 10_000（不可见时自动暂停）；`manual` 默认 true（格角刷新按钮）；`onLoad: false` 可关打开即拉
+- 扁平 JSON 绑定 data-table 可走数据驱动模式（免写 columns/rows，见速查）
+- 扁平 JSON 绑定 data-table 可走数据驱动模式（免写 columns/rows，见速查）
 - **实时语义：每次打开面板重新拉取**（D4 已放弃回放稳定承诺）；刷新失败保留旧快照 + stale 角标；无旧数据时渲染错误占位（带重试按钮）
 
 ## 4A. 持久化与复用（§11）

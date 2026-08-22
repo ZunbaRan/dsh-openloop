@@ -2055,7 +2055,7 @@ const comparisonPreset = {
 const dataTableSchema = {
 	$schema: "http://json-schema.org/draft-07/schema#",
 	type: "object",
-	additionalProperties: false,
+	additionalProperties: true,
 	properties: {
 		title: {
 			type: "string",
@@ -2109,8 +2109,7 @@ const dataTableSchema = {
 			enum: ["comfortable", "compact"],
 			description: "行密度，默认 comfortable"
 		}
-	},
-	required: ["columns"]
+	}
 };
 //#endregion
 //#region src/presets/data-table/validate.ts
@@ -2135,24 +2134,26 @@ function validateDataTable(props) {
 	const errors = [];
 	if (root.title !== void 0 && (typeof root.title !== "string" || root.title.length > 80)) errors.push(error("title", "title 必须是 ≤80 字符的字符串"));
 	if (root.density !== void 0 && !DENSITIES.includes(String(root.density))) errors.push(error("density", "density 必须是 comfortable / compact 之一"));
-	if (!Array.isArray(root.columns)) {
-		errors.push(error("columns", "columns 必填，必须是 1–12 项的数组"));
-		return validationFail(errors);
-	}
-	if (root.columns.length < 1 || root.columns.length > MAX_COLUMNS) errors.push(error("columns", `columns 数量必须为 1–${MAX_COLUMNS}，当前 ${root.columns.length}`));
-	root.columns.forEach((raw, index) => {
-		const path = `columns[${index}]`;
-		const column = asRecord(raw);
-		if (!column) {
-			errors.push(error(path, "每一项必须是 JSON 对象"));
-			return;
+	if (root.columns !== void 0) {
+		if (!Array.isArray(root.columns)) {
+			errors.push(error("columns", "columns 必须是 1–12 项的数组"));
+			return validationFail(errors);
 		}
-		if (!isNonEmptyString(column.key)) errors.push(error(`${path}.key`, "key 必填，必须是非空字符串（1–40 字符）"));
-		else if (column.key.length > 40) errors.push(error(`${path}.key`, `key 长度不得超过 40 字符，当前 ${column.key.length}`));
-		if (column.label !== void 0 && typeof column.label !== "string") errors.push(error(`${path}.label`, "label 必须是字符串"));
-		if (column.align !== void 0 && !ALIGNS$3.includes(String(column.align))) errors.push(error(`${path}.align`, "align 必须是 left / right 之一"));
-		if (column.format !== void 0 && !isMetricFormat(column.format)) errors.push(error(`${path}.format`, "format 必须是 currency-cny / number / percent / text 之一"));
-	});
+		if (root.columns.length < 1 || root.columns.length > MAX_COLUMNS) errors.push(error("columns", `columns 数量必须为 1–${MAX_COLUMNS}，当前 ${root.columns.length}`));
+		root.columns.forEach((raw, index) => {
+			const path = `columns[${index}]`;
+			const column = asRecord(raw);
+			if (!column) {
+				errors.push(error(path, "每一项必须是 JSON 对象"));
+				return;
+			}
+			if (!isNonEmptyString(column.key)) errors.push(error(`${path}.key`, "key 必填，必须是非空字符串（1–40 字符）"));
+			else if (column.key.length > 40) errors.push(error(`${path}.key`, `key 长度不得超过 40 字符，当前 ${column.key.length}`));
+			if (column.label !== void 0 && typeof column.label !== "string") errors.push(error(`${path}.label`, "label 必须是字符串"));
+			if (column.align !== void 0 && !ALIGNS$3.includes(String(column.align))) errors.push(error(`${path}.align`, "align 必须是 left / right 之一"));
+			if (column.format !== void 0 && !isMetricFormat(column.format)) errors.push(error(`${path}.format`, "format 必须是 currency-cny / number / percent / text 之一"));
+		});
+	}
 	if (root.rows !== void 0 && !Array.isArray(root.rows)) errors.push(error("rows", "rows 必须是数组"));
 	else if (Array.isArray(root.rows) && root.rows.length > MAX_ROWS) errors.push(error("rows", `rows 数量上限 ${MAX_ROWS}，当前 ${root.rows.length}`));
 	if (Array.isArray(root.rows)) root.rows.forEach((raw, index) => {
@@ -2228,6 +2229,47 @@ function cellText(value, format) {
 		return String(value);
 	}
 }
+/** 契约自有键（孤儿字段判定用：数据浅合并塞进来的 API 字段不算契约键） */
+const OWN_KEYS = /* @__PURE__ */ new Set([
+	"title",
+	"columns",
+	"rows",
+	"density"
+]);
+/**
+* 数据驱动模式（reshape，2026-08-23）：columns 缺省时，把数据绑定浅合并进 props 的
+* 孤儿扁平字段（如 GitHub repo API 的 stargazers_count/forks_count…）自适应为
+* Field/Value 两列表。嵌套值取 JSON 摘要（≤60 字符）；字段上限 24 + 溢出行数提示。
+*/
+function autoFieldRows(root) {
+	const entries = Object.entries(root).filter(([key]) => !OWN_KEYS.has(key));
+	if (entries.length === 0) return void 0;
+	const rows = entries.slice(0, 24).map(([key, value]) => {
+		return {
+			field: key,
+			value: typeof value === "object" && value !== null ? JSON.stringify(value).slice(0, 60) : String(value)
+		};
+	});
+	return {
+		columns: [{
+			key: "field",
+			label: "字段",
+			align: "left",
+			format: void 0,
+			numeric: false
+		}, {
+			key: "value",
+			label: "值",
+			align: "left",
+			format: void 0,
+			numeric: false
+		}],
+		...entries.length > 24 ? { rows: [...rows, {
+			field: "…",
+			value: `(+${entries.length - 24} more fields)`
+		}] } : { rows }
+	};
+}
 function DataTableRender({ props }) {
 	const root = asRecord(props) ?? {};
 	const panelTitle = typeof root.title === "string" ? root.title : void 0;
@@ -2246,7 +2288,9 @@ function DataTableRender({ props }) {
 			numeric: align === "right" || isNumericFormat(format)
 		};
 	});
-	const rows = (Array.isArray(root.rows) ? root.rows : []).slice(0, 200).map((raw) => asRecord(raw) ?? {});
+	const auto = columns.length === 0 ? autoFieldRows(root) : void 0;
+	const effectiveColumns = auto ? auto.columns : columns;
+	const rows = auto ? auto.rows : (Array.isArray(root.rows) ? root.rows : []).slice(0, 200).map((raw) => asRecord(raw) ?? {});
 	const headerPadding = {
 		paddingTop: padY,
 		paddingBottom: padY
@@ -2272,7 +2316,7 @@ function DataTableRender({ props }) {
 			style: scrollStyle$1,
 			children: /* @__PURE__ */ jsxs("table", {
 				style: tableStyle$1,
-				children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsx("tr", { children: columns.map((column) => /* @__PURE__ */ jsx("th", {
+				children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsx("tr", { children: effectiveColumns.map((column) => /* @__PURE__ */ jsx("th", {
 					scope: "col",
 					"data-openloop-column": column.key,
 					style: {
@@ -2288,7 +2332,7 @@ function DataTableRender({ props }) {
 							...tone ? { background: ROW_TONE_BG[tone] } : {}
 						},
 						"data-openloop-row-tone": tone ?? "none",
-						children: columns.map((column) => /* @__PURE__ */ jsx("td", {
+						children: effectiveColumns.map((column) => /* @__PURE__ */ jsx("td", {
 							style: {
 								...column.numeric ? cellNumericStyle : cellStyle$1,
 								...bodyPadding

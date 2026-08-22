@@ -6,7 +6,10 @@
 export const dataTableSchema = {
   $schema: 'http://json-schema.org/draft-07/schema#',
   type: 'object',
-  additionalProperties: false,
+  // 数据驱动模式（reshape，2026-08-23）：绑定扁平 API（如 GitHub repo 对象）时，
+  // resolved 数据浅合并会把 API 字段塞进 props 顶层——此处必须放行，
+  // 渲染端将孤儿字段自适应为 Field/Value 两列表。
+  additionalProperties: true,
   properties: {
     title: {
       type: 'string',
@@ -56,5 +59,5 @@ export const dataTableSchema = {
       description: '行密度，默认 comfortable',
     },
   },
-  required: ['columns'],
+  // columns 可选：缺省时渲染端以数据字段自适应成表（数据驱动模式）
 } as const

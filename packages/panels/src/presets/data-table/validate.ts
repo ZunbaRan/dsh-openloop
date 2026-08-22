@@ -35,37 +35,41 @@ export function validateDataTable(props: unknown): PresetValidation {
     errors.push(error('density', 'density 必须是 comfortable / compact 之一'))
   }
 
-  if (!Array.isArray(root.columns)) {
-    errors.push(error('columns', 'columns 必填，必须是 1–12 项的数组'))
-    return validationFail(errors)
+  if (root.columns !== undefined) {
+    if (!Array.isArray(root.columns)) {
+      errors.push(error('columns', 'columns 必须是 1–12 项的数组'))
+      return validationFail(errors)
+    }
+    if (root.columns.length < 1 || root.columns.length > MAX_COLUMNS) {
+      errors.push(error('columns', `columns 数量必须为 1–${MAX_COLUMNS}，当前 ${root.columns.length}`))
+    }
+    const columns: unknown[] = root.columns
+    columns.forEach((raw, index) => {
+      const path = `columns[${index}]`
+      const column = asRecord(raw)
+      if (!column) {
+        errors.push(error(path, '每一项必须是 JSON 对象'))
+        return
+      }
+      if (!isNonEmptyString(column.key)) {
+        errors.push(error(`${path}.key`, 'key 必填，必须是非空字符串（1–40 字符）'))
+      } else if (column.key.length > 40) {
+        errors.push(error(`${path}.key`, `key 长度不得超过 40 字符，当前 ${column.key.length}`))
+      }
+      if (column.label !== undefined && typeof column.label !== 'string') {
+        errors.push(error(`${path}.label`, 'label 必须是字符串'))
+      }
+      if (column.align !== undefined && !(ALIGNS as readonly string[]).includes(String(column.align))) {
+        errors.push(error(`${path}.align`, 'align 必须是 left / right 之一'))
+      }
+      if (column.format !== undefined && !isMetricFormat(column.format)) {
+        errors.push(error(`${path}.format`, 'format 必须是 currency-cny / number / percent / text 之一'))
+      }
+    })
   }
-  if (root.columns.length < 1 || root.columns.length > MAX_COLUMNS) {
-    errors.push(error('columns', `columns 数量必须为 1–${MAX_COLUMNS}，当前 ${root.columns.length}`))
-  }
-
-  const columns: unknown[] = root.columns
-  columns.forEach((raw, index) => {
-    const path = `columns[${index}]`
-    const column = asRecord(raw)
-    if (!column) {
-      errors.push(error(path, '每一项必须是 JSON 对象'))
-      return
-    }
-    if (!isNonEmptyString(column.key)) {
-      errors.push(error(`${path}.key`, 'key 必填，必须是非空字符串（1–40 字符）'))
-    } else if (column.key.length > 40) {
-      errors.push(error(`${path}.key`, `key 长度不得超过 40 字符，当前 ${column.key.length}`))
-    }
-    if (column.label !== undefined && typeof column.label !== 'string') {
-      errors.push(error(`${path}.label`, 'label 必须是字符串'))
-    }
-    if (column.align !== undefined && !(ALIGNS as readonly string[]).includes(String(column.align))) {
-      errors.push(error(`${path}.align`, 'align 必须是 left / right 之一'))
-    }
-    if (column.format !== undefined && !isMetricFormat(column.format)) {
-      errors.push(error(`${path}.format`, 'format 必须是 currency-cny / number / percent / text 之一'))
-    }
-  })
+  // columns 缺省 = 数据驱动模式（reshape，2026-08-23）：
+  // 绑定扁平 API 时 resolved 字段经浅合并进入 props 顶层，
+  // 渲染端将孤儿字段自适应为 Field/Value 两列表——此处不设卡。
 
   if (root.rows !== undefined && !Array.isArray(root.rows)) {
     errors.push(error('rows', 'rows 必须是数组'))
