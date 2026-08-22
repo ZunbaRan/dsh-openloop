@@ -27,3 +27,14 @@ describe('v2 openloop.fetch 桥（A2/A6）', () => {
     expect(buildArtifactDocument('<i/>', 'T', 'network', 'tk', { scheme: 'dark' })).toContain('content="network"')
   })
 })
+
+describe('v2 桥注入顺序（真机事故回归：openloop is not defined）', () => {
+  it('桥脚本必须位于模型 html 之前（模型内联脚本执行时 window.openloop 已定义）', () => {
+    const modelHtml = '<div id="app"></div><script>window.openloop.fetch("https://x.example.com/a")</script>'
+    const doc = buildArtifactDocument(modelHtml, 'T', 'network', 'tok', { scheme: 'dark' })
+    const bridgePos = doc.indexOf('window.openloop =')
+    const modelScriptPos = doc.indexOf('window.openloop.fetch(')
+    expect(bridgePos).toBeGreaterThan(0)
+    expect(modelScriptPos).toBeGreaterThan(bridgePos)
+  })
+})

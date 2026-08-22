@@ -69,7 +69,7 @@ export function buildArtifactDocument(html: string, title: string, runtime: Arti
   ].filter((entry): entry is [string, string] => typeof entry[1] === 'string' && sanitize(entry[1]).length > 0)
     .map(([name, value]) => `--openloop-${name}:${sanitize(value)};`).join('')
   const marker = `<meta name="openloop-artifact-runtime" content="${runtime}">`
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${marker}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${fetchBridge(token)}</script><script>${heightReporter(token)}</script></body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${marker}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body><script>${fetchBridge(token)}</script>${html}<script>${heightReporter(token)}</script></body></html>`
 }
 
 /**
