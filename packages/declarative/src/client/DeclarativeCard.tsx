@@ -1,7 +1,7 @@
 import { useState, type CSSProperties } from 'react'
 import { Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-visual-theme/client'
+import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
 import { declarativeMetaFrom, type ComparisonDocument, type DeclarativeDocument, type FlowDocument, type TimelineDocument, type Tone } from '../document.ts'
 
 const palette: Record<Tone, { soft: string; strong: string }> = {

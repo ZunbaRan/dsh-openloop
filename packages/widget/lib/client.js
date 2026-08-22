@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		let _openloop_dsh_visual_theme_client = require("@openloop/dsh-visual-theme/client");
+		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
 		let react = require("react");
 		let react_jsx_runtime = require("react/jsx-runtime");
 		const HEIGHT_MESSAGE = "openloop-widget:height";
@@ -167,7 +167,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		}
 		function WidgetCard({ callId, block, scope }) {
 			const [height, setHeight] = (0, react.useState)(72);
-			const theme = (0, _openloop_dsh_visual_theme_client.useOpenLoopVisualTheme)(scope);
+			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
 			const meta = "kind" in block && !block.isError ? widgetMetaFrom(block.meta) : void 0;
 			(0, react.useEffect)(() => {
 				const listener = (event) => {
@@ -234,7 +234,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 			const frame = (0, react.useRef)(null);
 			const [loaded, setLoaded] = (0, react.useState)(false);
 			const [height, setHeight] = (0, react.useState)(0);
-			const theme = (0, _openloop_dsh_visual_theme_client.useOpenLoopVisualTheme)(scope);
+			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
 			const doc = (0, react.useMemo)(() => buildStreamingDocument("openloop-widget-preview", resolveTheme(theme.palette, theme.appearance)), [theme.palette, theme.appearance]);
 			(0, react.useEffect)(() => {
 				const timer = setTimeout(() => {
@@ -298,7 +298,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		const name = "openloop-show-widget";
 		const inject = ["slots"];
 		function apply(ctx) {
-			const scope = (0, _openloop_dsh_visual_theme_client.createOpenLoopSettingsScope)();
+			const scope = (0, _openloop_dsh_base_client.createOpenLoopSettingsScope)();
 			const ThemedWidgetCard = (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(WidgetCard, {
 				...props,
 				scope

@@ -1,96 +1,29 @@
-import z from "@deepseek-ai/schemastery";
-import { ToolDefinition } from "@deepseek-ai/dsh-tools";
-import { ComponentType } from "react";
-import { SkillProvider } from "@deepseek-ai/dsh-skill";
-import { Context, Service } from "@deepseek-ai/cordis";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Duplex } from "node:stream";
-//#region src/contract.d.ts
+//#region src/server/net.d.ts
 /**
- * 数据契约（设计文档 §5，client/server 共享）。
- * 权威定义：字段名 / 默认值 / 注释与 DSH_PANELS_DESIGN.md §5 保持一致。
+ * OpenLoop base · 服务端公共网络能力（SSRF 防护 + 安全 fetch）。
+ *
+ * 抽取自 panels 的 validation.ts / datasource.ts（2026-08-22 base 重构），
+ * 面向全部 OpenLoop 插件复用：panels 的 api data binding、artifact v2 的
+ * openloop.fetch 桥等。语义与 panels v0.2.x 完全一致：
+ *   - 仅 https://（显式白名单可放行本机源，见 options.allowedOrigins）
+ *   - SSRF 静态判定：环回/私网/link-local/IPv4-mapped 一律拒绝
+ *   - timeout 缺省 10s、上限 30s；响应体 ≤ 1MB；仅接受 JSON
  */
-type JsonObject = Record<string, unknown>;
-/** 预设组件 kind，§6 全清单 */
-type PresetKind = 'text' | 'markdown' | 'heading' | 'badge' | 'tag' | 'divider' | 'avatar' | 'card' | 'section' | 'stack' | 'grid' | 'row' | 'split' | 'scroll-area' | 'metric' | 'metric-grid' | 'data-table' | 'list' | 'key-value' | 'stat' | 'rating' | 'empty-state' | 'timeline' | 'chart' | 'sparkline' | 'gauge' | 'funnel' | 'heatmap' | 'flow' | 'comparison' | 'steps' | 'tree' | 'callout' | 'status' | 'progress' | 'skeleton' | 'tabs' | 'accordion' | 'pagination' | 'tooltip';
-type WidgetSource = {
-  type: 'preset';
-  kind: PresetKind;
-  props: JsonObject;
-} | {
-  type: 'pack';
-  pack: string;
-  component: string;
-  props: JsonObject;
-} | {
-  type: 'custom';
-  code: string;
-};
-type Lane = 'host' | 'sandbox';
-interface WidgetUnit {
-  /** 面板内唯一 id，kebab-case */
-  id: string;
-  /** 缺省推导：preset→host；pack→按 manifest.runtime；custom→sandbox */
-  lane?: Lane;
-  source: WidgetSource;
-  data?: WidgetDataBinding;
-  refresh?: RefreshPolicy;
-}
-interface RefreshPolicy {
-  /** 面板打开时重新拉取，默认 true（D4 实时语义） */
-  onLoad?: boolean;
-  /** 定时刷新间隔；缺省不定时。最小 10_000 */
-  intervalMs?: number;
-  /** 渲染手动刷新按钮，默认 true（有 api 数据时） */
-  manual?: boolean;
-}
-type WidgetDataSource = {
-  type: 'static';
-  value: unknown;
-} | {
-  type: 'api';
-  url: string;
-  method?: 'GET' | 'POST';
-  query?: Record<string, string>;
-  body?: unknown;
-  headers?: Record<string, string>;
-  credentialRef?: string;
-  timeoutMs?: number;
-};
-interface WidgetDataBinding {
-  source: WidgetDataSource;
-  /** JSONPath 子集取值路径（v1：仅 a.b[0].c 形态），缺省取整个响应 */
-  pick?: string;
-}
-interface PanelDefinition {
-  $schema: 'openloop.panel/v1';
-  /** kebab-case；同 id 再调用 = 更新该面板 */
-  id: string;
-  title: string;
-  description?: string;
-  layout?: {
-    mode: 'stack' | 'grid';
-    columns?: 1 | 2 | 3;
-  };
-  widgets: WidgetUnit[];
-  persist?: boolean;
-}
-/** 工具返回的 meta（渲染入口） */
-interface PanelMeta {
-  kind: 'openloop.panel';
-  version: 1;
-  panel: PanelDefinition;
-  /** server 解析完成的数据快照：widgetId → data */
-  resolved: Record<string, unknown>;
-  resolvedAt: string;
-}
-//#endregion
-//#region ../base/lib/server/index.d.ts
+/** 默认超时（10s） */
+declare const DEFAULT_TIMEOUT_MS = 10000;
+/** 超时上限（30s） */
+declare const MAX_TIMEOUT_MS = 30000;
+/** 响应体大小上限（1MB） */
+declare const MAX_RESPONSE_BYTES: number;
 /**
  * SSRF 静态判定：url 指向环回/内网/不可解析地址时返回 true。
  * 普通域名无法在编译期解析，默认放行（fetch 层超时/大小限制兜底）。
  */
 declare function isForbiddenApiUrl(url: string): boolean;
+/** 校验 api url（fail-closed，错误面向 Agent 可自修正）：https-only + SSRF */
+declare function validateHttpsApiUrl(url: string, widgetLabel?: string): void;
 /** 归一化 timeoutMs：缺省 10s；超上限 clamp 30s；非法值回退默认 */
 declare function normalizeTimeoutMs(timeoutMs?: number): number;
 /** content-type 是否声明为 JSON */
@@ -102,6 +35,19 @@ declare function readBodyBytes(stream: ReadableStream<Uint8Array>, maxBytes?: nu
   bytes: Uint8Array;
   truncated: boolean;
 }>;
+interface SafeFetchOptions {
+  timeoutMs?: number;
+  /** 允许的额外源（如部署级本机 API 白名单 'http://127.0.0.1:9090'）；命中即跳过 https/SSRF 拒绝 */
+  allowedOrigins?: readonly string[];
+  /** 注入 seam：测试 mock；缺省全局 fetch */
+  fetchFn?: typeof fetch;
+  signal?: AbortSignal;
+}
+/**
+ * 安全 fetch + JSON 解析（panels api data binding 与 artifact fetch 桥的共同底座）：
+ * https-only + SSRF（除非命中 allowedOrigins 白名单）→ timeout abort → ≤1MB 流式限读 → 仅 JSON。
+ */
+declare function safeFetchJson(url: string, options?: SafeFetchOptions): Promise<unknown>;
 //#endregion
 //#region ../../node_modules/.pnpm/@deepseek-ai+cosmokit@1.8.2/node_modules/@deepseek-ai/cosmokit/lib/types/types.d.ts
 declare function isArrayBufferLike(value: any): value is ArrayBufferLike;
@@ -223,17 +169,17 @@ declare const symbols: {
   metadata: symbol;
   initHooks: symbol;
   checkProto: symbol;
-  effect: typeof Context$1.effect;
-  filter: typeof Context$1.filter;
-  isolate: typeof Context$1.isolate;
-  intercept: typeof Context$1.intercept;
-  init: typeof Service$1.init;
-  check: typeof Service$1.check;
-  config: typeof Service$1.config;
-  invoke: typeof Service$1.invoke;
-  extend: typeof Service$1.extend;
-  tracker: typeof Service$1.tracker;
-  resolveConfig: typeof Service$1.resolveConfig;
+  effect: typeof Context.effect;
+  filter: typeof Context.filter;
+  isolate: typeof Context.isolate;
+  intercept: typeof Context.intercept;
+  init: typeof Service.init;
+  check: typeof Service.check;
+  config: typeof Service.config;
+  invoke: typeof Service.invoke;
+  extend: typeof Service.extend;
+  tracker: typeof Service.tracker;
+  resolveConfig: typeof Service.resolveConfig;
 };
 //#endregion
 //#region ../../node_modules/.pnpm/@deepseek-ai+cordis@4.0.1_@deepseek-ai+cordis-plugin-include@1.0.6_@deepseek-ai+cordis-plugin-loader@1.0.2/node_modules/@deepseek-ai/cordis/lib/types/registry.d.ts
@@ -246,7 +192,7 @@ declare const symbols: {
  */
 type Inject<M = Dict> = (keyof M)[] | { [K in keyof M]?: M[K]; };
 /** Context keys that correspond to services with typed intercept config. */
-type InjectKey = keyof { [K in keyof Context$1 & string as Context$1[K] extends {
+type InjectKey = keyof { [K in keyof Context & string as Context[K] extends {
   [symbols.config]: any;
 } ? K : never]: any; };
 /**
@@ -260,7 +206,7 @@ type InjectKey = keyof { [K in keyof Context$1 & string as Context$1[K] extends 
  * @param config — optional intercept config applied for that service.
  * @returns the class or method decorator.
  */
-declare function Inject<K extends InjectKey>(name: K, config?: Context$1[K] extends {
+declare function Inject<K extends InjectKey>(name: K, config?: Context[K] extends {
   [symbols.config]: infer T;
 } ? T : never): (value: any, decorator: ClassDecoratorContext<any> | ClassMethodDecoratorContext<any>) => void;
 /** Utilities for normalizing plugin dependency declarations. */
@@ -299,15 +245,15 @@ declare namespace Plugin {
   }
   /** Function plugin called with `(ctx, config)`. */
   interface Function<T = any> extends Base<T> {
-    (ctx: Context$1, config: T): any;
+    (ctx: Context, config: T): any;
   }
   /** Class plugin constructed with `(ctx, config)`. */
   interface Constructor<T = any> extends Base<T> {
-    new (ctx: Context$1, config: T): any;
+    new (ctx: Context, config: T): any;
   }
   /** Object plugin with an `apply(ctx, config)` method. */
   interface Object<T = any> extends Base<T> {
-    apply(ctx: Context$1, config: T): any;
+    apply(ctx: Context, config: T): any;
   }
   /** Mutable registry record shared by all fibers of one plugin callback. */
   interface Runtime {
@@ -322,8 +268,8 @@ declare namespace Plugin {
   }
 }
 type Spread<T> = undefined extends T ? [config?: T] : [config: T];
-type GetPluginParameters<P> = P extends ((ctx: Context$1, ...args: infer R) => any) ? R : P extends (new (ctx: Context$1, ...args: infer R) => any) ? R : P extends {
-  apply(ctx: Context$1, ...args: infer R): any;
+type GetPluginParameters<P> = P extends ((ctx: Context, ...args: infer R) => any) ? R : P extends (new (ctx: Context, ...args: infer R) => any) ? R : P extends {
+  apply(ctx: Context, ...args: infer R): any;
 } ? R : never;
 type GetPluginConfig<P> = P extends Plugin.Transform<infer S, any> ? S : GetPluginParameters<P>[0];
 declare module './context.ts' {
@@ -357,10 +303,10 @@ declare module './context.ts' {
  * exposes map-like inspection over active plugin callbacks.
  */
 declare class RegistryService {
-  ctx: Context$1;
+  ctx: Context;
   private _counter;
   private _internal;
-  constructor(ctx: Context$1);
+  constructor(ctx: Context);
   /** Allocate the next fiber uid (increments on every read). */
   get counter(): number;
   /** Number of registered plugin runtimes. */
@@ -508,9 +454,9 @@ declare namespace Property {
     /** Discriminator. */
     type: 'accessor';
     /** Compute the property value; `error` carries the caller stack for diagnostics. */
-    get: (this: Context$1, receiver: any, error: Error) => any;
+    get: (this: Context, receiver: any, error: Error) => any;
     /** Optional setter; return `false` to reject the write. */
-    set?: (this: Context$1, value: any, receiver: any, error: Error) => boolean;
+    set?: (this: Context, value: any, receiver: any, error: Error) => boolean;
   }
 }
 /** Concrete service implementation record stored in the root reflect service. */
@@ -531,14 +477,14 @@ interface Impl {
  * the mixins that expose core service methods directly on `ctx`.
  */
 declare class ReflectService {
-  ctx: Context$1;
+  ctx: Context;
   /** Proxy traps implementing service resolution for every context object. */
-  static handler: ProxyHandler<Context$1>;
+  static handler: ProxyHandler<Context>;
   /** Service implementations, keyed by isolation label. */
   store: Dict<Impl, symbol>;
   /** Declared context properties (services and accessors), by name. */
   props: Dict<Property>;
-  constructor(ctx: Context$1);
+  constructor(ctx: Context);
   /**
    * Read a service from the store without the inject requirement.
    *
@@ -577,7 +523,7 @@ declare class ReflectService {
    * @param filter — restricts notification to matching isolation scopes.
    * @returns the fibers whose dependency state was refreshed.
    */
-  notify(names: string[], filter?: (ctx: Context$1, name: string) => boolean): Fiber[];
+  notify(names: string[], filter?: (ctx: Context, name: string) => boolean): Fiber[];
   /**
    * Define a computed context property backed by get/set hooks.
    *
@@ -669,13 +615,13 @@ declare const enum FiberState {
  * cleanup for the plugin context returned by `ctx.plugin()`.
  */
 declare class Fiber {
-  parent: Context$1;
+  parent: Context;
   inject: Dict<any>;
   runtime: Plugin.Runtime | null;
   /** Unique id within the registry; 0 for the root fiber, `null` once disposed. */
   uid: number | null;
   /** The context this fiber's plugin runs in (extends the parent context). */
-  readonly ctx: Context$1;
+  readonly ctx: Context;
   /** The validated plugin config (updated by `update()`). */
   config: any;
   /** The raw plugin config, re-resolved before each activation. */
@@ -690,7 +636,7 @@ declare class Fiber {
   inertia: Promise<void> | undefined;
   readonly _hooks: Dict<DisposableList<Function>>;
   readonly _disposables: DisposableList<Disposable<any>>;
-  protected context: Context$1;
+  protected context: Context;
   private _error;
   private _runner;
   private _store;
@@ -704,7 +650,7 @@ declare class Fiber {
    * @param runtime — the shared plugin runtime, or `null` for the root fiber.
    * @param getOuterStack — captures the caller stack for effect diagnostics.
    */
-  constructor(parent: Context$1, config: any, inject: Dict<any>, runtime: Plugin.Runtime | null, getOuterStack: () => string[]);
+  constructor(parent: Context, config: any, inject: Dict<any>, runtime: Plugin.Runtime | null, getOuterStack: () => string[]);
   /** The plugin's display name, inherited from the nearest named ancestor, else `'root'`. */
   get name(): string;
   /**
@@ -872,7 +818,7 @@ interface EventOptions {
 }
 /** Registered listener record stored by the event service. */
 interface Hook extends EventOptions {
-  ctx: Context$1;
+  ctx: Context;
   callback: (...args: any[]) => any;
 }
 /**
@@ -884,7 +830,7 @@ interface Hook extends EventOptions {
 declare class EventsService {
   private ctx;
   _hooks: Record<keyof any, Hook[]>;
-  constructor(ctx: Context$1);
+  constructor(ctx: Context);
   /**
    * Resolve listeners for one dispatch and apply context filtering.
    *
@@ -991,15 +937,15 @@ interface Events {
    */
   'internal/config'(this: Fiber, config: any, next: () => any): any;
   /** Interception hook for a service binding (no core producer). */
-  'internal/service'(this: Context$1, name: string, value: any): void;
+  'internal/service'(this: Context, name: string, value: any): void;
   /** Waterfall: a fiber config update is being applied; skip `next()` to veto. */
   'internal/update'(this: Fiber, config: any, noSave: boolean, next: () => void | Promise<void>): void | Promise<void>;
   /** Waterfall: a service is being read through the context proxy. */
-  'internal/get'(ctx: Context$1, name: string, error: Error, next: () => any): any;
+  'internal/get'(ctx: Context, name: string, error: Error, next: () => any): any;
   /** Waterfall: a service is being written through the context proxy. */
-  'internal/set'(ctx: Context$1, name: string, value: any, error: Error, next: () => boolean): boolean;
+  'internal/set'(ctx: Context, name: string, value: any, error: Error, next: () => boolean): boolean;
   /** Bail: a listener is being registered; a non-null result replaces registration. */
-  'internal/listener'(this: Context$1, name: string, listener: any, prepend: boolean): void;
+  'internal/listener'(this: Context, name: string, listener: any, prepend: boolean): void;
   /** An event is being dispatched to listeners (fired for non-internal events only). */
   'internal/dispatch'(mode: DispatchMode, name: string, args: any[], thisArg: any): void;
 }
@@ -1076,11 +1022,11 @@ interface LoggerService extends Record<LoggerType, LoggerMethod> {
 declare class LoggerService {
   bufferSize: number;
   buffer: Message[];
-  ctx: Context$1;
+  ctx: Context;
   _snMessage: number;
   _snExporter: number;
   exporters: Map<number, Exporter>;
-  constructor(ctx: Context$1);
+  constructor(ctx: Context);
   /**
    * Register an exporter and dispose it with the current fiber.
    *
@@ -1100,7 +1046,7 @@ declare class LoggerService {
  * augmented by core services and plugins to describe the properties that may
  * be read from `ctx`.
  */
-interface Context$1 {
+interface Context {
   /** Isolation map: service name → scope label. Lookups for a name resolve within its label. */
   [symbols.isolate]: Dict<symbol>;
   /** Intercept map: service name → config merged into that service's per-plugin config. */
@@ -1125,7 +1071,7 @@ interface Context$1 {
  * while `extend()`, `isolate()`, and `intercept()` create scoped child
  * contexts without mutating their parent.
  */
-declare class Context$1 {
+declare class Context {
   /** Symbol key under which a disposer exposes its {@link EffectMeta} diagnostics tree. */
   static readonly effect: unique symbol;
   /** Symbol key for a context's listener filter, consulted on every event dispatch. */
@@ -1143,7 +1089,7 @@ declare class Context$1 {
    * @param value — the value to test.
    * @returns `true` if `value` is a Cordis context, narrowing its type.
    */
-  static is(value: any): value is Context$1;
+  static is(value: any): value is Context;
   /** Create the root context and install the built-in services. */
   constructor();
   /**
@@ -1181,7 +1127,7 @@ declare class Context$1 {
    * @param config — the intercept config to merge for that service.
    * @returns a child context carrying the additional intercept entry.
    */
-  intercept<K extends InjectKey>(name: K, config: Context$1[K] extends {
+  intercept<K extends InjectKey>(name: K, config: Context[K] extends {
     [symbols.config]: infer T;
   } ? T : never): this;
   intercept(name: string, config: any): this;
@@ -1194,8 +1140,8 @@ declare class Context$1 {
  * Subclasses call `super(ctx, name)` from their constructor. The service is
  * registered immediately and is automatically removed with the owning fiber.
  */
-declare abstract class Service$1<out T = never> {
-  protected ctx: Context$1;
+declare abstract class Service<out T = never> {
+  protected ctx: Context;
   /** Symbol key of an instance method run after construction (class plugins). */
   static readonly init: unique symbol;
   /** Symbol key of the availability predicate passed to `ctx.provide()`. */
@@ -1223,8 +1169,8 @@ declare abstract class Service$1<out T = never> {
    * @param ctx — the context to register in (stored as `this.ctx`).
    * @param name — the service name; defaults to the static `provide` field.
    */
-  constructor(ctx: Context$1, name: string);
-  protected [symbols.filter](ctx: Context$1): boolean;
+  constructor(ctx: Context, name: string);
+  protected [symbols.filter](ctx: Context): boolean;
   protected [symbols.extend](props?: any): any;
   /**
    * Merge intercept config from ancestors with optional base and head values.
@@ -1438,553 +1384,6 @@ declare const Schema: Schemastery.Static;
 //#region ../../node_modules/.pnpm/@deepseek-ai+dsh-host-webserver@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-i_4e83f049ed8dee9b8d2facc78c419c22/node_modules/@deepseek-ai/dsh-host-webserver/lib/types/index.d.ts
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    webServer: WebServer$1;
-  }
-}
-/** Route match kind: 'exact' matches the pathname verbatim; 'prefix' p matches p and p/<anything>. */
-type WebRouteKind$1 = 'exact' | 'prefix';
-/** One named route registration. */
-interface WebRoute$1 {
-  kind: WebRouteKind$1;
-  /** Absolute pathname, no trailing slash. */
-  path: string;
-  /** Owns the full response lifecycle (may hold the response open, e.g. SSE). */
-  handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
-}
-/** One exact-path HTTP upgrade registration. */
-interface WebUpgradeRoute$1 {
-  /** Absolute pathname, no trailing slash. */
-  path: string;
-  /** Owns protocol negotiation and the upgraded socket after dispatch. */
-  handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>;
-}
-/** Gateway config: the listen address. */
-interface Config$2 {
-  /** Listen host; the two supported values are loopback and all-interfaces. */
-  host: '127.0.0.1' | '0.0.0.0';
-  /** Listen port; zero requests an OS-assigned port. */
-  port: number;
-}
-/**
- * The browser HTTP carrier service. Activation listens immediately. Route
- * registration order does not affect requests because configured named routes
- * must be distinct, and the fallback handler answers anything not yet claimed
- * during startup with 404 until its owner registers. A listen failure rejects
- * initialization, and the boot process reports the failed fiber.
- */
-declare class WebServer$1 extends Service$1 {
-  private config;
-  static Config: Schema<Config$2>;
-  private readonly exact;
-  private readonly prefixes;
-  private readonly upgrades;
-  private readonly upgradedSockets;
-  private readonly indexTaps;
-  private fallback;
-  private server;
-  private listenedPort;
-  constructor(ctx: Context$1, config: Config$2);
-  /** The listening port (the OS-assigned value when config.port is 0). */
-  get port(): number;
-  /** The configured bind host (the loopback or all-interfaces literal). */
-  get host(): Config$2['host'];
-  /**
-   * Register a named route. Duplicate (kind, path) throws — route patterns are
-   * a composition-level contract, so a collision is a misconfiguration.
-   * @param route - kind, path, and the owning handler.
-   * @returns the disposer removing the route.
-   */
-  register(route: WebRoute$1): () => void;
-  /**
-   * Register an exact-path HTTP upgrade route. Duplicate paths throw because
-   * one socket can have only one protocol owner.
-   * @param route - pathname and handler owning negotiation plus socket use.
-   * @returns the disposer removing the route.
-   */
-  registerUpgrade(route: WebUpgradeRoute$1): () => void;
-  /**
-   * Claim the fallback seat: the handler answering every request no named
-   * route matches (the SPA dist server in the shipped Web composition). One
-   * owner only — a second registration throws, because two fallbacks cannot
-   * compose.
-   * @param handler - owns the full response lifecycle of unmatched requests.
-   * @returns the disposer releasing the seat.
-   */
-  registerFallback(handler: WebRoute$1['handler']): () => void;
-  /**
-   * Register an index.html transform, applied by the fallback owner to every
-   * index response ({@link applyIndexTaps}) in registration order.
-   * @param transform - pure html-to-html function.
-   * @returns the disposer removing the transform.
-   */
-  tapIndex(transform: (html: string) => string): () => void;
-  /** Listen; resolves once the socket is bound (rejection = FAILED fiber). */
-  [Service$1.init](): Promise<void>;
-  /** Longest-prefix-wins over the prefix table after an exact-table miss. */
-  private match;
-  /**
-   * Run an index.html body through the registered taps in registration order
-   * — called by the fallback owner on every index response it renders.
-   * @param html - the raw index.html body.
-   * @returns the transformed body.
-   */
-  applyIndexTaps(html: string): string;
-}
-//#endregion
-//#region src/validation.d.ts
-/** §6.1 预设组件 kind 全清单（运行时白名单，与 contract.ts 的 PresetKind 类型逐字对齐） */
-declare const PRESET_KINDS: readonly PresetKind[];
-/** 查询 pack 是否已注册且含指定 component（未注册返回 false，fail-closed） */
-declare function isPackComponent(pack: string, component: string): boolean;
-/** custom code 大小上限（§5.4） */
-declare const CUSTOM_CODE_MAX_BYTES: number;
-/** 扫描 custom code 是否命中禁词；命中返回命中的词，否则返回 undefined */
-declare function forbiddenCustomCodeTerm(code: string): string | undefined;
-/**
- * §5.4 面板全量校验（fail-closed）。
- * 校验通过后输入收敛为 PanelDefinition；任何非法形状/规则都以 Error 拒绝。
- */
-declare function validatePanel(input: unknown): asserts input is PanelDefinition;
-//#endregion
-//#region src/datasource.d.ts
-/** 响应体大小上限（§15 S9：1MB） */
-declare const MAX_RESPONSE_BYTES: number;
-/** 超时默认值 / 上限（§5.2：默认 10_000，上限 30_000） */
-declare const DEFAULT_TIMEOUT_MS = 10000;
-declare const MAX_TIMEOUT_MS = 30000;
-/** 注入 seam：测试注入 mock fetch；真机缺省用全局 fetch */
-interface ResolveWidgetDataContext {
-  fetchFn?: typeof fetch;
-  /** 调用方中止信号（如 tool execute 的 exec.signal）；触发即中止本次请求 */
-  signal?: AbortSignal;
-}
-/**
- * 解析 pick 路径（v1：仅 a.b[0].c 形态）：`a.b[0].c` → ['a', 'b', 0, 'c']。
- * 裸数字段转 number（数组索引），其余为字符串键。
- */
-declare function parsePickPath(pick: string): Array<string | number>;
-/**
- * 按 pick 路径取值；缺路径/路径不存在返回 undefined（不抛错）。
- * 段访问用 hasOwnProperty 防护，避免命中原型链（JSON.parse 产物亦安全）。
- */
-declare function pickValue(data: unknown, pick?: string): unknown;
-/** 拼接 query 参数到 api url（原 url 已有 query 时合并） */
-declare function buildApiUrl(url: string, query?: Record<string, string>): string;
-/**
- * api source URL 校验（§5.4 / §15 S3，fail-closed）：
- * 必须 https://，且不指向环回/内网。复用 validation.ts 的 isForbiddenApiUrl。
- */
-declare function validateApiUrl(url: string): void;
-/**
- * 解析单个 widget 的数据绑定（§5.2 / §10）。
- * static → 直接返回 value；api → 校验 URL → Node fetch（超时/1MB/仅 JSON）→ pick 取值。
- * 校验失败抛错（消息面向 Agent 可自修正）；网络/解析失败同样抛错，由 resolvePanelData 统一隔离。
- */
-declare function resolveWidgetData(binding: WidgetDataBinding, ctx?: ResolveWidgetDataContext): Promise<unknown>;
-/**
- * 解析面板全部 api widget 数据（§10）：并行 fetch（Promise.allSettled），
- * 单格失败不拖垮整体——成功写入 resolved[widgetId]，失败写入 { __error: message }
- * （约定见文件头注释；渲染端据此渲染错误占位）。
- * 面板无 api widget 时返回空对象（与 §5.3 resolved 缺省语义一致）。
- * ctx 透传给 resolveWidgetData（测试注入 fetchFn / 调用方取消 signal）。
- */
-declare function resolvePanelData(panel: PanelDefinition, ctx?: ResolveWidgetDataContext): Promise<Record<string, unknown>>;
-//#endregion
-//#region src/tool.d.ts
-/** 工具名常量；与 client 注入 key（src/client/index.tsx）逐字一致 */
-declare const PANEL_TOOL = "panel";
-/** 工具参数 schema（PanelDefinition 形状；persist 为 §11 持久化开关；load 为按 id 唤起已存档面板） */
-declare const PANEL_PARAMETERS: {
-  readonly panel: {
-    readonly oneOf: readonly [{
-      readonly type: "object";
-      readonly additionalProperties: false;
-      readonly properties: {
-        readonly $schema: {
-          readonly type: "string";
-          readonly const: "openloop.panel/v1";
-        };
-        readonly id: {
-          readonly type: "string";
-          readonly required: true;
-          readonly description: "kebab-case，面板内唯一；同 id 再调用 = 更新";
-        };
-        readonly title: {
-          readonly type: "string";
-          readonly required: true;
-        };
-        readonly description: {
-          readonly type: "string";
-        };
-        readonly layout: {
-          readonly type: "object";
-          readonly additionalProperties: true;
-        };
-        readonly widgets: {
-          readonly type: "array";
-          readonly required: true;
-          readonly description: "1–24 个 WidgetUnit";
-        };
-        readonly persist: {
-          readonly type: "boolean";
-        };
-      };
-    }, {
-      readonly type: "string";
-    }];
-    readonly description: "A PanelDefinition (openloop.panel/v1). Strongly prefer passing the JSON object itself; a stringified JSON text is also accepted and will be parsed. Omit when using load or panelFile.";
-  };
-  readonly panelFile: {
-    readonly type: "string";
-    readonly description: "Read the PanelDefinition from a JSON file in the workspace (recommended for large panels: write the JSON to e.g. \"panels/<id>.json\" with the write tool first — single-layer encoding avoids string-escape corruption — then pass its path here). Priority: panel > panelFile > load. To modify, read the file, edit, write back, and call again.";
-  };
-  readonly load: {
-    readonly type: "string";
-    readonly description: "Recall a previously persisted panel by its id (saved earlier with persist: true). When given without panel, the stored PanelDefinition is loaded, re-validated and re-rendered with fresh data.";
-  };
-  readonly persist: {
-    readonly type: "boolean";
-    readonly description: "Write the panel to disk when true (persisted panels can be recalled later via the load parameter).";
-  };
-};
-/**
- * panel 参数的字符串容错（真机教训：模型可能把对象序列化成 JSON 文本）。
- * 可解析 → 返回对象；不可解析/非对象 → 抛出面向 Agent 的可自修正错误。
- */
-declare function coercePanelArg(value: unknown): unknown;
-/** 输出 schema：与 §5.3 PanelMeta 逐字段对齐（resolved 为 server 解析的数据快照，无 api widget 时为空对象） */
-declare const PANEL_OUTPUT_SCHEMA: {
-  readonly type: "object";
-  readonly additionalProperties: false;
-  readonly properties: {
-    readonly version: {
-      readonly type: "integer";
-      readonly const: 1;
-      readonly required: true;
-    };
-    readonly panel: {
-      readonly type: "json";
-      readonly required: true;
-    };
-    readonly resolved: {
-      readonly type: "json";
-      readonly required: true;
-    };
-    readonly resolvedAt: {
-      readonly type: "string";
-      readonly required: true;
-    };
-  };
-};
-/** 构建 panel 工具定义；由 src/index.ts 注册进 ctx.tools */
-declare function definePanelTool(): ToolDefinition;
-//#endregion
-//#region src/skills/index.d.ts
-declare const panelsSkillProviders: readonly SkillProvider[];
-//#endregion
-//#region src/store.d.ts
-declare const PANELS_SUBDIR = "openloop-panels";
-/** 插件版本，写盘记录用（与 package.json 保持同步） */
-declare const PLUGIN_VERSION = "0.1.0";
-/** 落盘记录：PanelDefinition 全量 + 元数据（§11） */
-interface StoredPanel {
-  panel: PanelDefinition;
-  savedAt: string;
-  pluginVersion: string;
-}
-/**
- * 最小文件系统 seam（路径相对 DSH fs 执行世界根 / cwd）。
- * 真机由 createCtxPanelFs 包装 ctx.fs 实现；测试注入内存实现。
- */
-interface PanelFs {
-  /** 原子写文本（父目录由 backend 保证可写） */
-  writeText(relPath: string, content: string): Promise<void>;
-  /** 读文本；不存在或读失败返回 undefined */
-  readText(relPath: string): Promise<string | undefined>;
-  /** 列目录直接子项名（不递归、不读内容） */
-  listDir(relDir: string): Promise<string[]>;
-}
-interface PanelStoreOptions {
-  /** 面板存储根目录（真机 = DSH home data 目录，设计文档 §11；测试注入临时目录） */
-  dir: string;
-  fs: PanelFs;
-}
-interface PanelStore {
-  /** 校验并写盘（同 id 覆盖 = 更新面板）；返回相对路径 */
-  save(panel: PanelDefinition): Promise<{
-    path: string;
-  }>;
-  /** 读盘；损坏/不存在返回 undefined */
-  load(id: string): Promise<StoredPanel | undefined>;
-  /** 列出全部可读面板，按 savedAt 新→旧 */
-  list(): Promise<StoredPanel[]>;
-}
-declare function createPanelStore(options: PanelStoreOptions): PanelStore;
-declare function savePanel(panel: PanelDefinition, store: PanelStore): Promise<{
-  path: string;
-}>;
-declare function loadPanel(id: string, store: PanelStore): Promise<StoredPanel | undefined>;
-declare function listPanels(store: PanelStore): Promise<StoredPanel[]>;
-/**
- * ctx.fs 最小结构化类型（不引入 @deepseek-ai/dsh-fs 依赖；
- * 运行期对象即 ctx.fs，方法签名与 dsh-fs FileSystem 对齐，见 IMPL_NOTES §3.1）。
- */
-interface FsTargetLike {
-  displayPath: string;
-  targetKey: unknown;
-}
-interface DshFsLike {
-  resolve(path: string, opts?: {
-    cwd?: string;
-    signal?: AbortSignal;
-  }): Promise<FsTargetLike>;
-  stat(target: FsTargetLike, signal?: AbortSignal): Promise<unknown>;
-  readText(target: FsTargetLike, signal?: AbortSignal): Promise<string>;
-  writeText(target: FsTargetLike, content: string, expected?: unknown, signal?: AbortSignal, sandboxPolicy?: unknown): Promise<unknown>;
-  listDir(target: FsTargetLike, signal?: AbortSignal): Promise<Array<{
-    name: string;
-  }>>;
-}
-interface CtxPanelFsOptions {
-  fs: DshFsLike;
-  /** 相对路径解析基（sandboxPolicy.workspaceRoot 优先，session cwd 兜底，IMPL_NOTES §3.2） */
-  cwd?: string | undefined;
-  signal?: AbortSignal;
-  /** 第 5 参必须传 sandboxPolicy，漏传沙箱后端可能静默拒写（§3.3） */
-  sandboxPolicy?: unknown;
-}
-/** 用 ctx.fs + sandboxPolicy 实现 PanelFs（resolve 相对路径 + cwd，S10 seams） */
-declare function createCtxPanelFs(opts: CtxPanelFsOptions): PanelFs;
-declare function createMemoryPanelFs(): PanelFs & {
-  snapshot(): Map<string, string>;
-};
-//#endregion
-//#region src/packs/manifest.d.ts
-/**
- * pack manifest（§12.1 `dsh-pack.json`）解析与校验。
- *
- * - 校验是 fail-closed 的：任何非法/未知输入一律抛 Error，消息面向开发者可自修正。
- * - 本模块**零依赖**（不含 node:fs / node:net / react），client（loader/PanelCard）与服务端（registry/serve）均可安全引用。
- * - 硬约束（§12.2）：`runtime: "react18"` 走宿主车道；`react19` 标记为待沙箱车道（批 4），v1 在注册层拒绝（见 registry.ts）。
- */
-/** pack 运行时车道（§12.2 硬约束 1） */
-type PackRuntime = 'react18' | 'react19';
-/** 单个 component 元数据（§12.1） */
-interface PackComponentMeta {
-  description?: string;
-  /** props 的 JSON Schema（v1 仅存证，不做深度校验；§6.3 同源约定） */
-  propsSchema?: object;
-}
-/** §12.1 pack manifest（包根 `dsh-pack.json` 的权威形状） */
-interface PackManifest {
-  /** 包名：裸名 `dsh-pack-fancy` 或 scoped `@acme/dsh-pack-fancy`（与设计文档示例一致） */
-  name: string;
-  version: string;
-  runtime: PackRuntime;
-  /** ESM 入口，相对包根（§12.2 硬约束 2）；v1 由 pack 路由 serve */
-  entry: string;
-  /** 随包 CSS，相对包根（可选；禁止全局 reset/Preflight，§12.2 硬约束 3） */
-  styles?: string;
-  /** component 名 → 元数据；至少 1 个（§12.1） */
-  components: Record<string, PackComponentMeta>;
-}
-declare const PACK_RUNTIMES: readonly PackRuntime[];
-/** v1 宿主车道允许的 runtime（§12.2 硬约束 1）；react19 留待批 4 沙箱车道 */
-declare const HOST_LANE_RUNTIME: PackRuntime;
-/** pack 资产路由前缀（§9）：绝对路径、无尾部斜杠；panels 独占，撞前缀即 register 抛错（IMPL_NOTES §1.4） */
-declare const PACKS_ROUTE = "/openloop/packs";
-/**
- * pack 路由虚拟入口名（§12 加载契约）：
- * client 加载器固定请求 `<packBaseUrl>/entry.js`，pack 路由（serve.ts）从注册表解析 manifest.entry 实际文件。
- * 这样 client 无需知道 manifest.entry 值，服务端可随时改入口文件路径。
- */
-declare const PACK_ENTRY_VIRTUAL = "entry.js";
-/** pack 路由虚拟样式名：`<packBaseUrl>/styles.css` → manifest.styles（可选，缺失时 404） */
-declare const PACK_STYLES_VIRTUAL = "styles.css";
-/**
- * pack 名校验（§12.1 + 路径安全）：裸名或 scoped 名，仅小写字母/数字/`. _ -`；
- * 含 `/` 的 scoped 名至多一个 `/`（`@scope/name`）。
- * 禁止 `..`、反斜杠、空白——保证 pack 名可安全拼进 URL 与文件系统路径（防穿越）。
- */
-declare const PACK_NAME_RE: RegExp;
-/** 包内文件路径校验：相对、无绝对前缀、无 `..` 段、无反斜杠（防路径穿越） */
-declare function isSafePackRelPath(path: string): boolean;
-/** 车道判定（§5.1：pack → 按 manifest.runtime）：react18→host；react19→sandbox（批 4） */
-declare function packLaneFor(runtime: PackRuntime): 'host' | 'sandbox';
-/**
- * 解析并校验一个未知输入为 PackManifest（fail-closed）。
- * 任何缺字段/类型错误/非法值都抛 Error；react19 是合法值（解析不拒，注册层按车道策略拒绝）。
- */
-declare function parsePackManifest(input: unknown): PackManifest;
-//#endregion
-//#region src/packs/registry.d.ts
-/** 文件系统 seam（§12 scanPacksDir 可注入；真实实现 = node:fs/promises 适配） */
-interface PackFs {
-  /** 列目录直接子项名（不递归） */
-  readdir(dir: string): Promise<string[]>;
-  /** 读 UTF-8 文本；文件不存在/不可读时抛错（由调用方容错） */
-  readFile(path: string): Promise<string>;
-}
-/** node:fs/promises 适配（scanPacksDir 默认实现） */
-declare const nodePackFs: PackFs;
-/** 已注册 pack（§12）：manifest + 资产 URL 前缀 + 文件系统根 */
-interface RegisteredPack {
-  manifest: PackManifest;
-  /** pack 资产 URL 前缀（以 `/` 结尾）：`${PACKS_ROUTE}/${manifest.name}/`（§9 pack 路由解析用） */
-  baseUrl: string;
-  /** 包文件系统根（pack 路由 serve 时读文件的根目录）；未提供则 pack 资产不可用（404） */
-  fsRoot: string;
-}
-/** scanPacksDir 结果：注册成功名单 + 每包跳过原因（目录不存在整体返回空，不抛错） */
-interface ScanResult {
-  registered: string[];
-  errors: string[];
-}
-declare class PackRegistry {
-  private readonly packs;
-  /**
-   * 校验并注册一个 pack（重复 name = 覆盖更新，幂等，scan 重跑安全）。
-   * react19 runtime 抛错（v1 宿主车道仅 react18）；baseUrl 必须为绝对 URL 前缀（`/` 开头、`/` 结尾）。
-   */
-  registerPack(manifest: PackManifest, baseUrl: string, fsRoot?: string): void;
-  getPack(name: string): RegisteredPack | undefined;
-  hasPack(name: string): boolean;
-  listPacks(): RegisteredPack[];
-  /** 清空注册表（测试用；不影响 validation.ts 的白名单） */
-  clear(): void;
-}
-/** 全局单例（服务端 index.ts 接线用） */
-declare const packRegistry: PackRegistry;
-declare function registerPack(manifest: PackManifest, baseUrl: string, fsRoot?: string, registry?: PackRegistry): void;
-declare function getPack(name: string, registry?: PackRegistry): RegisteredPack | undefined;
-declare function hasPack(name: string, registry?: PackRegistry): boolean;
-declare function listPacks(registry?: PackRegistry): RegisteredPack[];
-/** 清空全局注册表（测试隔离用） */
-declare function resetPackRegistry(registry?: PackRegistry): void;
-/**
- * 扫描 `dir` 下每个子目录的 `dsh-pack.json` 批量注册（§12 启用方式 v1）。
- * - 每个子目录若无 `dsh-pack.json` / 解析失败 / 注册被拒（如 react19）→ 记录 errors 并跳过，不中断整体。
- * - 目录本身不存在/不可读 → 返回空结果（v1 启动容错：pack 目录未建时不打扰）。
- * - fsRoot 恒为该子目录（pack 资产路由从 fsRoot 相对读文件）。
- */
-declare function scanPacksDir(dir: string, fs?: PackFs, registry?: PackRegistry): Promise<ScanResult>;
-//#endregion
-//#region src/packs/bridge.d.ts
-/**
- * 主题桥接器（§12.3，纯函数，**零依赖**：不引入 antd/MUI，只输出其主题输入的普通对象）。
- *
- * - 输入：openloop token 快照（`Record<string, string>`，键为 §14 词汇表；预设系 50 + 可选全局系）。
- * - 输出：antd `ConfigProvider theme.token` 输入对象 / MUI `createTheme()` 输入对象（结构类型，非官方包）。
- * - **映射是有损的**（§12.3）：antd/MUI 的颜色语义粒度比我们的 token 粗/细不同——
- *   - antd 有 10 级 text 灰阶，我们只有 foreground / muted-foreground / foreground-subtle / foreground-strong 4 级 → 灰阶按语义就近归并；
- *   - MUI 的 `secondary` 在 openloop 无对应 token（无第二品牌色）→ 以 `chart-1` 近似；
- *   - 圆角把 `radius-*` 的 `"12px"` 解析为数字（解析失败用 0，缺失用 0）。
- *   有损近似的依据是"视觉同族就近"，做换肤近似可用；品牌级精确还原应直接消费 `var(--openloop-*)`。
- */
-/** antd `ConfigProvider theme.token` 的输入形状（v1 仅映射我们有的字段；缺失字段不输出） */
-interface AntdThemeTokens {
-  colorPrimary?: string;
-  colorPrimaryHover?: string;
-  colorPrimaryActive?: string;
-  colorInfo?: string;
-  colorSuccess?: string;
-  colorWarning?: string;
-  colorError?: string;
-  colorLink?: string;
-  colorBgContainer?: string;
-  colorBgLayout?: string;
-  colorBgElevated?: string;
-  colorText?: string;
-  colorTextHeading?: string;
-  colorTextSecondary?: string;
-  colorTextTertiary?: string;
-  colorTextQuaternary?: string;
-  colorBorder?: string;
-  colorBorderSecondary?: string;
-  borderRadius?: number;
-  borderRadiusSM?: number;
-  borderRadiusLG?: number;
-}
-/** MUI `createTheme()` 的输入形状（v1 仅映射我们有的字段） */
-interface MuiThemeInput {
-  palette?: {
-    primary?: {
-      main?: string;
-      light?: string;
-      dark?: string;
-      contrastText?: string;
-    };
-    /** openloop 无第二品牌色，以 chart-1 近似（有损，§12.3 说明） */
-    secondary?: {
-      main?: string;
-    };
-    error?: {
-      main?: string;
-    };
-    warning?: {
-      main?: string;
-    };
-    info?: {
-      main?: string;
-    };
-    success?: {
-      main?: string;
-    };
-    text?: {
-      primary?: string;
-      secondary?: string;
-      disabled?: string;
-    };
-    background?: {
-      default?: string;
-      paper?: string;
-    };
-    divider?: string;
-  };
-  shape?: {
-    borderRadius?: number;
-  };
-  typography?: {
-    fontFamily?: string;
-  };
-}
-type TokenMap = Readonly<Record<string, string>>;
-/**
- * openloop 预设系 token → antd `ConfigProvider theme.token` 输入对象（§12.3）。
- * 有损点：colorText* 灰阶 4 级归并 antd 10 级；无 focus 系列 token（antd 的 controlOutline 等）→ 不输出。
- */
-declare function toAntdThemeTokens(openloopTokens: TokenMap): AntdThemeTokens;
-/**
- * openloop 预设系 token → MUI `createTheme()` 输入对象（§12.3）。
- * 有损点：`secondary` 无对应 token → chart-1 近似；MUI 默认 8px 圆角 → radius-md；阴影/motion 不映射。
- */
-declare function toMuiThemeTokens(openloopTokens: TokenMap): MuiThemeInput;
-//#endregion
-//#region src/packs/loader.d.ts
-/** pack 组件入参：`props` = widget.source.props（§5.1）；`data` = §5.2 解析结果（resolved[widgetId]） */
-interface PackComponentProps {
-  props: JsonObject;
-  data?: unknown;
-}
-/** 对外契约：pack 组件 = 默认导出的 React 组件函数 */
-type PackComponent = ComponentType<PackComponentProps>;
-interface LoadPackComponentOptions {
-  /** 测试注入：entry 模块 URL；缺省 `packEntryUrl(name)` */
-  entryUrl?: string;
-  /** 测试注入：模块加载函数；缺省运行时动态 `import(url)` */
-  importModule?: (url: string) => Promise<unknown>;
-}
-/** pack 入口 URL（虚拟名 entry.js，pack 路由从注册表解析 manifest.entry） */
-declare function packEntryUrl(name: string): string;
-/**
- * 加载 pack 组件（宿主车道）。成功返回组件函数；任何失败抛可读 Error。
- * props 必须为 JSON 对象（非数组）；component 名仅用于错误消息（注册校验已在服务端完成）。
- */
-declare function loadPackComponent(name: string, component: string, props: unknown, opts?: LoadPackComponentOptions): Promise<PackComponent>;
-//#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-host-webserver@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-i_4e83f049ed8dee9b8d2facc78c419c22/node_modules/@deepseek-ai/dsh-host-webserver/lib/types/index.d.ts
-declare module '@deepseek-ai/cordis' {
-  interface Context {
     webServer: WebServer;
   }
 }
@@ -2006,7 +1405,7 @@ interface WebUpgradeRoute {
   handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>;
 }
 /** Gateway config: the listen address. */
-interface Config$1 {
+interface Config {
   /** Listen host; the two supported values are loopback and all-interfaces. */
   host: '127.0.0.1' | '0.0.0.0';
   /** Listen port; zero requests an OS-assigned port. */
@@ -2021,7 +1420,7 @@ interface Config$1 {
  */
 declare class WebServer extends Service {
   private config;
-  static Config: z<Config$1>;
+  static Config: Schema<Config>;
   private readonly exact;
   private readonly prefixes;
   private readonly upgrades;
@@ -2030,11 +1429,11 @@ declare class WebServer extends Service {
   private fallback;
   private server;
   private listenedPort;
-  constructor(ctx: Context, config: Config$1);
+  constructor(ctx: Context, config: Config);
   /** The listening port (the OS-assigned value when config.port is 0). */
   get port(): number;
   /** The configured bind host (the loopback or all-interfaces literal). */
-  get host(): Config$1['host'];
+  get host(): Config['host'];
   /**
    * Register a named route. Duplicate (kind, path) throws — route patterns are
    * a composition-level contract, so a collision is a misconfiguration.
@@ -2078,34 +1477,22 @@ declare class WebServer extends Service {
   applyIndexTaps(html: string): string;
 }
 //#endregion
-//#region src/packs/serve.d.ts
-declare class PanelsPackAssets {
+//#region src/server/runtime-assets.d.ts
+/** §9 路由前缀：绝对路径、无尾部斜杠 */
+declare const RUNTIME_ASSETS_ROUTE = "/openloop/runtime";
+interface RuntimeAssetEntry {
+  /** 目录（绝对路径；资产文件所在处） */
+  dir: string;
+  /** URL name → 磁盘文件名别名（如 'runtime.react18' → 'runtime'） */
+  aliases?: Readonly<Record<string, string>>;
+}
+/** 路由处理器：按注册 service 解析资产文件并回源 */
+declare class RuntimeAssetsRoute {
   private readonly webServer;
-  private readonly registry;
-  constructor(webServer: WebServer, registry?: PackRegistry);
+  private readonly resolveAsset;
+  constructor(webServer: WebServer, resolveAsset: (name: string) => RuntimeAssetEntry | undefined);
   register(ctx: Context): void;
   private handle;
 }
 //#endregion
-//#region src/index.d.ts
-declare const name = "openloop-dsh-panels";
-declare const inject: string[];
-/**
- * 插件配置（cordis 约定：同名 type + Schemastery schema，参照 artifact）。
- * §12 外部 pack 启用配置（v1：packsDir 目录扫描；缺省不扫描）。
- */
-interface Config {
-  /** pack 扫描目录：`dir` 下每个子目录的 `dsh-pack.json`（§12 启用方式 v1） */
-  packsDir?: string;
-}
-declare const Config: z<Config>;
-declare function apply(ctx: Context, config: Config): void;
-/**
- * panel 工具的执行包装层（导出以便单测）：字符串容错 → load 唤起 → 编译注入 → 持久化。
- *
- * ⚠️ 冻结契约（真机事故 2026-08-22）：dsh-tools 会把 args 深冻结（Object.freeze），
- * 包装层绝不能在原对象上赋值——先浅拷贝 `{ ...args }` 再改，且下游调用必须传拷贝。
- */
-declare function createPanelExecute(tool: ToolDefinition, ctx: Context): ToolDefinition['execute'];
-//#endregion
-export { type AntdThemeTokens, CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, JsonObject, Lane, type LoadPackComponentOptions, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, type MuiThemeInput, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, type PackComponent, type PackComponentMeta, type PackComponentProps, type PackFs, type PackManifest, PackRegistry, type PackRuntime, PanelDefinition, type PanelFs, PanelMeta, type PanelStore, type PanelStoreOptions, PanelsPackAssets, PresetKind, RefreshPolicy, type RegisteredPack, ResolveWidgetDataContext, type ScanResult, type StoredPanel, WidgetDataBinding, WidgetDataSource, WidgetSource, WidgetUnit, apply, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel };
+export { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, RUNTIME_ASSETS_ROUTE, type RuntimeAssetEntry, RuntimeAssetsRoute, type SafeFetchOptions, isForbiddenApiUrl, looksLikeJsonContentType, normalizeTimeoutMs, parseJsonResponse, readBodyBytes, safeFetchJson, validateHttpsApiUrl };

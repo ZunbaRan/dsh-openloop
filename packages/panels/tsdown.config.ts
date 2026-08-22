@@ -5,7 +5,7 @@ const clientExternals = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-tool/client',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@openloop/dsh-visual-theme/client',
+  '@openloop/dsh-base/client',
 ]
 
 export default [

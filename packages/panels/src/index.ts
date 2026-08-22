@@ -76,9 +76,11 @@ export function apply(ctx: Context, config: Config): void {
   // webServer 为可选能力（headless profile 没有 HTTP 服务）：
   // 从静态 inject 移除，改为嵌套 ctx.inject——web 环境服务就绪即注册路由；
   // headless 环境内嵌 fiber 保持 pending 无害，插件本体正常激活。
+  // §9 runtime 资产：base 重构后路由由 @openloop/dsh-base 统一供应，
+  // panels 在 apply 顶层注册自己的资产目录（react18 沙箱运行时）
+  new PanelsAssets().register(ctx)
   ctx.inject(['webServer'], (routeCtx) => {
-    // §9 资产路由：runtime 资产 + pack 资产，均经 ctx.effect 注册（IMPL_NOTES §1.4）
-    new PanelsAssets(routeCtx.webServer).register(routeCtx)
+    // §9 pack 资产路由（panels 私有前缀 /openloop/packs）
     new PanelsPackAssets(routeCtx.webServer).register(routeCtx)
     // §10 刷新通道：client 手动/定时刷新经 POST /openloop/panels/refresh 复用 datasource 解析
     new PanelsRefreshRoute(routeCtx.webServer).register(routeCtx)

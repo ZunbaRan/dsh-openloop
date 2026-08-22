@@ -8,7 +8,7 @@ const allowed = new Set([
   '@deepseek-ai/dsh-client-runtime/client',
   '@deepseek-ai/dsh-client-ui-tool/client',
   '@deepseek-ai/dsh-client-ui-primitives',
-  '@openloop/dsh-visual-theme/client',
+  '@openloop/dsh-base/client',
   'react',
   'react/jsx-runtime',
   'react-dom',

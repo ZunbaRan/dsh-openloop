@@ -1,3 +1,90 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+//#region src/server/runtime-assets.ts
+/**
+* OpenLoop base · runtime 资产共享路由（/openloop/runtime 前缀，注册制）。
+*
+* 架构（base 重构 2026-08-22）：
+* - **路由唯一供应商 = base**（前缀 /openloop/runtime；与其它插件撞前缀时 register 抛错）。
+* - **资产文件归属各业务包**：包在自己的 server 模块 import 时调用
+*   `registerRuntimeAssets(dir, { 'runtime.react18': 'runtime' })` 完成注册
+*   （import 副作用发生在模块加载期，早于任何 cordis apply，无启动顺序问题）。
+* - 请求 `<name>.<contentHash>.js|css` → 在注册目录中查 `<fileAlias|name>.<ext>`。
+* - `Cache-Control: public, max-age=31536000, immutable`（URL 含 hash，缓存失效靠 URL 变化）。
+*
+* 迁移自 panels/src/assets.ts（v0.2.x 行为保持：URL 不变、别名映射不变、宽松 hash 匹配不变）。
+*/
+/** §9 路由前缀：绝对路径、无尾部斜杠 */
+const RUNTIME_ASSETS_ROUTE = "/openloop/runtime";
+/** 静态资产名：`<name>.<hash>.js|css`；hash 至少 16 位 hex */
+const ASSET_PATH_RE = /^([a-zA-Z0-9._-]+)\.([0-9a-f]{16,64})\.(js|css)$/u;
+const CONTENT_TYPES = {
+	js: "text/javascript; charset=utf-8",
+	css: "text/css; charset=utf-8"
+};
+function createRuntimeAssetsService() {
+	const registry = /* @__PURE__ */ new Map();
+	return {
+		registerRuntimeAssets(names, entry) {
+			for (const name of names) registry.set(name, entry);
+		},
+		resolve(name) {
+			return registry.get(name);
+		}
+	};
+}
+/** 路由处理器：按注册 service 解析资产文件并回源 */
+var RuntimeAssetsRoute = class {
+	webServer;
+	resolveAsset;
+	constructor(webServer, resolveAsset) {
+		this.webServer = webServer;
+		this.resolveAsset = resolveAsset;
+	}
+	register(ctx) {
+		ctx.effect(() => this.webServer.register({
+			kind: "prefix",
+			path: RUNTIME_ASSETS_ROUTE,
+			handler: (req, res) => this.handle(req, res)
+		}), "openloop-base: runtime assets");
+	}
+	async handle(req, res) {
+		res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+		res.setHeader("X-Content-Type-Options", "nosniff");
+		res.setHeader("Referrer-Policy", "no-referrer");
+		if (req.method !== "GET" && req.method !== "HEAD") {
+			res.statusCode = 405;
+			res.end();
+			return;
+		}
+		const pathname = new URL(req.url ?? "/", "http://loopback.invalid").pathname;
+		const match = (pathname.startsWith(`/openloop/runtime/`) ? pathname.slice(18) : "").match(ASSET_PATH_RE);
+		if (!match) {
+			res.statusCode = 404;
+			res.end();
+			return;
+		}
+		const name = match[1];
+		const ext = match[3];
+		const entry = this.resolveAsset(name);
+		if (!entry) {
+			res.statusCode = 404;
+			res.end();
+			return;
+		}
+		const file = join(entry.dir, `${entry.aliases?.[name] ?? name}.${ext}`);
+		try {
+			const body = await readFile(file);
+			res.statusCode = 200;
+			res.setHeader("Content-Type", CONTENT_TYPES[ext]);
+			res.end(req.method === "HEAD" ? void 0 : body);
+		} catch {
+			res.statusCode = 404;
+			res.end();
+		}
+	}
+};
+//#endregion
 //#region src/presets.generated.ts
 const OPENLOOP_PRESET_IDS = [
 	"linear",
@@ -940,7 +1027,13 @@ function paletteVariables(settings, systemDark) {
 	const { values } = resolvePalette(settings, systemDark);
 	return Object.fromEntries(Object.entries(values).map(([key, value]) => [`--openloop-${key}`, value]));
 }
-const name = "openloop-dsh-visual-theme";
-function apply() {}
+const name = "openloop-dsh-base";
+function apply(ctx) {
+	const runtimeAssets = createRuntimeAssetsService();
+	ctx.provide("openloop-base/runtime", runtimeAssets);
+	ctx.inject(["webServer"], (webCtx) => {
+		new RuntimeAssetsRoute(webCtx.webServer, runtimeAssets.resolve.bind(runtimeAssets)).register(webCtx);
+	});
+}
 //#endregion
 export { DEFAULT_OPENLOOP_SETTINGS, OPENLOOP_GLOBAL_TOKENS, OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS, OPENLOOP_SETTINGS_NAMESPACE, PRESET_META, apply, decodeOpenLoopSettings, name, paletteVariables, resolvePalette };

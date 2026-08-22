@@ -19,6 +19,16 @@
 import type { PanelDefinition, WidgetDataBinding } from './contract.ts'
 import { isForbiddenApiUrl } from './validation.ts'
 
+/*
+ * 传输层原子能力已抽离至 @openloop/dsh-base/server（base 重构 2026-08-22），
+ * re-export 保持 panels 既有 API（测试引用）不变。
+ */
+import {
+  normalizeTimeoutMs, looksLikeJsonContentType, parseJsonResponse, readBodyBytes,
+} from '@openloop/dsh-base/server'
+
+export { normalizeTimeoutMs, looksLikeJsonContentType, parseJsonResponse, readBodyBytes }
+
 /** 响应体大小上限（§15 S9：1MB） */
 export const MAX_RESPONSE_BYTES = 1024 * 1024
 
@@ -36,15 +46,6 @@ export interface ResolveWidgetDataContext {
 // ---------------------------------------------------------------------------
 // 纯函数
 // ---------------------------------------------------------------------------
-
-/**
- * 归一化 timeoutMs：缺省 10_000；超上限 clamp 到 30_000；非法值（非有限数）回退默认。
- * validation.ts 已对 >30_000 的模型输入 fail-closed，这里 clamp 属纵深防御。
- */
-export function normalizeTimeoutMs(timeoutMs?: number): number {
-  if (typeof timeoutMs !== 'number' || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return DEFAULT_TIMEOUT_MS
-  return Math.min(timeoutMs, MAX_TIMEOUT_MS)
-}
 
 /**
  * 解析 pick 路径（v1：仅 a.b[0].c 形态）：`a.b[0].c` → ['a', 'b', 0, 'c']。
@@ -82,65 +83,8 @@ export function pickValue(data: unknown, pick?: string): unknown {
   return cursor
 }
 
-/** content-type 是否声明为 JSON（含 json 子串即可，如 application/json; charset=utf-8） */
-export function looksLikeJsonContentType(contentType: string | null | undefined): boolean {
-  return typeof contentType === 'string' && contentType.toLowerCase().includes('json')
-}
 
-/**
- * 判定并解析 JSON 响应（§10 仅接受 JSON：content-type 含 json 或体可 JSON.parse）。
- * content-type 声明 json 但体解析失败 → 抛错；两者都非 JSON → 抛错。
- * 错误消息面向 Agent 可自修正（fail-closed）。
- */
-export function parseJsonResponse(contentType: string | null | undefined, bodyText: string): unknown {
-  const claimed = looksLikeJsonContentType(contentType)
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(bodyText)
-  } catch {
-    parsed = undefined
-  }
-  if (parsed === undefined) {
-    if (claimed) {
-      throw new Error(`api source response content-type is ${JSON.stringify(contentType ?? '')} but the body is not valid JSON`)
-    }
-    throw new Error(`api source response is not JSON (content-type ${JSON.stringify(contentType ?? '')}); only JSON responses are accepted`)
-  }
-  return parsed
-}
 
-/**
- * 流式读取响应体，超过 maxBytes 立即停止并标记截断（不缓冲超限数据）。
- * 返回 { bytes, truncated }，由调用方按 truncated 抛「超 1MB」错误。
- */
-export async function readBodyBytes(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes = MAX_RESPONSE_BYTES,
-): Promise<{ bytes: Uint8Array; truncated: boolean }> {
-  const reader = stream.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  let truncated = false
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    total += value.byteLength
-    if (total > maxBytes) {
-      truncated = true
-      break
-    }
-    chunks.push(value)
-  }
-  reader.releaseLock()
-  const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0))
-  let offset = 0
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return { bytes, truncated }
-}
 
 /** 拼接 query 参数到 api url（原 url 已有 query 时合并） */
 export function buildApiUrl(url: string, query?: Record<string, string>): string {

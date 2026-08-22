@@ -9,7 +9,7 @@ import {
   OPENLOOP_PRESETS,
   OPENLOOP_PRESET_IDS,
   type OpenLoopPreset,
-} from '@openloop/dsh-visual-theme/client' // external 共享模块（0.3.0 起经 ./client 出口再导出静态数据）
+} from '@openloop/dsh-base/client' // external 共享模块（0.3.0 起经 ./client 出口再导出静态数据）
 
 const STORAGE_KEY = 'openloop.visuals.v1'
 const CHANGE_EVENT = 'openloop-visual-settings-change'

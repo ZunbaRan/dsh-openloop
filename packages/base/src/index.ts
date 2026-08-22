@@ -1,3 +1,5 @@
+import type { Context } from '@deepseek-ai/cordis'
+import { createRuntimeAssetsService, RuntimeAssetsRoute } from './server/runtime-assets.ts'
 import { OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS } from './presets.generated.ts'
 
 export { OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS }
@@ -56,8 +58,17 @@ export function paletteVariables(settings: OpenLoopVisualSettings, systemDark: b
 
 // ---- DSH 插件形态（0.3.0 起：theme 升级为正式 bundle，作为视觉插件族的设置页宿主与共享 client 模块）----
 // 服务端不注册任何能力：工具/路由在 panels 等消费者包里；本包的价值在 client 半（设置页 + 共享 token 模块）。
-export const name = 'openloop-dsh-visual-theme'
+export const name = 'openloop-dsh-base'
 
-export function apply(): void {
-  // 空实现：cordis 插件行合法性的最小形态（设置页注册在 client 半）。
+export function apply(ctx: Context): void {
+  // 服务端公共能力接线（base 重构 2026-08-22）：
+  // 1) runtime 资产注册 service（单例注册表；消费者经 ctx.inject 使用——
+  //    不能走模块导入，消费者会把 base/server 打成无状态副本导致注册表分裂）
+  const runtimeAssets = createRuntimeAssetsService()
+  ctx.provide('openloop-base/runtime', runtimeAssets)
+  // 2) /openloop/runtime 资产路由的唯一供应商。webServer 为可选依赖——
+  //    headless 等无 webServer 环境下静默跳过（注册 service 仍然可用）。
+  ctx.inject(['webServer'], (webCtx: Context) => {
+    new RuntimeAssetsRoute(webCtx.webServer, runtimeAssets.resolve.bind(runtimeAssets)).register(webCtx)
+  })
 }

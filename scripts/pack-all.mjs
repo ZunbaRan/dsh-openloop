@@ -7,7 +7,7 @@ const dist = resolve(root, 'dist')
 await mkdir(dist, { recursive: true })
 
 const packages = [
-  ['packages', 'theme'],
+  ['packages', 'base'],
   ['packages', 'declarative'],
   ['packages', 'widget'],
   ['packages', 'artifact'],

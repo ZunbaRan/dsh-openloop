@@ -3,7 +3,7 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { HEIGHT_MESSAGE, widgetMetaFrom } from '../contract.ts'
 import { buildWidgetDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-visual-theme/client'
+import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
 
 const subtle: CSSProperties = { color: 'var(--dsw-alias-label-caption)', fontSize: 12, lineHeight: 1.4 }
 

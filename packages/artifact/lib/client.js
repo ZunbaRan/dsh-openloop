@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		let _openloop_dsh_visual_theme_client = require("@openloop/dsh-visual-theme/client");
+		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 		let react_jsx_runtime = require("react/jsx-runtime");
@@ -121,7 +121,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		}
 		function ArtifactFrame({ meta, token, fullscreen, scope }) {
 			const [height, setHeight] = (0, react.useState)(fullscreen ? 700 : 520);
-			const theme = (0, _openloop_dsh_visual_theme_client.useOpenLoopVisualTheme)(scope);
+			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
 			(0, react.useEffect)(() => {
 				const listener = (event) => {
 					const data = event.data;
@@ -154,7 +154,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		}
 		function ArtifactSurface({ meta, callId, scope }) {
 			const [fullscreen, setFullscreen] = (0, react.useState)(false);
-			const theme = (0, _openloop_dsh_visual_theme_client.useOpenLoopVisualTheme)(scope);
+			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
 			(0, react.useEffect)(() => {
 				if (!fullscreen) return;
 				const listener = (event) => {
@@ -285,7 +285,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		const name = "openloop-html-artifact";
 		const inject = ["slots"];
 		function apply(ctx) {
-			const scope = (0, _openloop_dsh_visual_theme_client.createOpenLoopSettingsScope)();
+			const scope = (0, _openloop_dsh_base_client.createOpenLoopSettingsScope)();
 			const ThemedArtifactCard = (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactCard, {
 				...props,
 				scope

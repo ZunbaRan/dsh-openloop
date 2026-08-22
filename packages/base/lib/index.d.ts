@@ -1,3 +1,4 @@
+import { Context } from "@deepseek-ai/cordis";
 //#region src/presets.generated.d.ts
 declare const OPENLOOP_PRESET_IDS: readonly ["linear", "vercel", "notion", "claude", "apple", "figma", "binance", "slack"];
 declare const OPENLOOP_PRESETS: {
@@ -1689,7 +1690,7 @@ declare function resolvePalette(settings: OpenLoopVisualSettings, systemDark: bo
   };
 };
 declare function paletteVariables(settings: OpenLoopVisualSettings, systemDark: boolean): Record<string, string>;
-declare const name = "openloop-dsh-visual-theme";
-declare function apply(): void;
+declare const name = "openloop-dsh-base";
+declare function apply(ctx: Context): void;
 //#endregion
 export { DEFAULT_OPENLOOP_SETTINGS, OPENLOOP_GLOBAL_TOKENS, OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS, OPENLOOP_SETTINGS_NAMESPACE, OpenLoopAppearance, OpenLoopPreset, OpenLoopResolvedAppearance, OpenLoopVisualSettings, PRESET_META, apply, decodeOpenLoopSettings, name, paletteVariables, resolvePalette };

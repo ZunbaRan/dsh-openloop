@@ -4,7 +4,7 @@ const externals = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-tool/client',
   '@deepseek-ai/dsh-client-ui-conversation/client', '@deepseek-ai/dsh-client-ui-slots',
-  '@openloop/dsh-visual-theme/client',
+  '@openloop/dsh-base/client',
 ]
 export default [
   { entry: { index: 'src/index.ts' }, outDir: 'lib', format: ['esm'], platform: 'node', target: 'es2024', fixedExtension: false, dts: true, clean: true, deps: { neverBundle: ['@deepseek-ai/schemastery', '@deepseek-ai/cordis'] } },

@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-html-artifact",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Replayable static or scripted fullscreen HTML artifacts for DeepSeek Harness.",
   "private": true,
   "type": "module",
@@ -41,7 +41,7 @@
       ],
       "platform": "web",
       "external": [
-        "@openloop/dsh-visual-theme/client"
+        "@openloop/dsh-base/client"
       ]
     }
   },
@@ -65,7 +65,7 @@
     "@deepseek-ai/dsh-skill": "0.1.0-rc.6",
     "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "3.18.1",
-    "@openloop/dsh-visual-theme": "workspace:*",
+    "@openloop/dsh-base": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",

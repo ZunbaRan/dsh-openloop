@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		let _openloop_dsh_visual_theme_client = require("@openloop/dsh-visual-theme/client");
+		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 		let react_jsx_runtime = require("react/jsx-runtime");
@@ -148,7 +148,7 @@ window.__ModuleLoader__.load({
 			lineHeight: 1.55
 		};
 		function Frame({ document, scope }) {
-			const theme = (0, _openloop_dsh_visual_theme_client.useOpenLoopVisualTheme)(scope);
+			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
 				style: {
 					...shell,
@@ -415,7 +415,7 @@ window.__ModuleLoader__.load({
 		const name = "openloop-visual-declarative";
 		const inject = ["slots"];
 		function apply(ctx) {
-			const scope = (0, _openloop_dsh_visual_theme_client.createOpenLoopSettingsScope)();
+			const scope = (0, _openloop_dsh_base_client.createOpenLoopSettingsScope)();
 			const ThemedDeclarativeCard = (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DeclarativeCard, {
 				...props,
 				scope

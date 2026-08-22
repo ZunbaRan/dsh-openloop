@@ -4,7 +4,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { extractStreamingFragment, HEIGHT_MESSAGE, previewFragment, SHOW_WIDGET_TOOL, STREAM_MESSAGE } from '../contract.ts'
 import { buildStreamingDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-visual-theme/client'
+import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
 
 type Props = PropsRuntime<'conversation.input.dock'>
 

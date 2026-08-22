@@ -1,6 +1,6 @@
 {
-  "name": "@openloop/dsh-visual-theme",
-  "version": "0.3.1",
+  "name": "@openloop/dsh-base",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -13,7 +13,11 @@
       "default": "./lib/client.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./server": {
+      "types": "./lib/server/index.d.ts",
+      "default": "./lib/server/index.js"
+    }
   },
   "scripts": {
     "build": "tsdown && node scripts/verify-client-bundle.mjs",
@@ -31,9 +35,11 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.1",
     "tsdown": "^0.22.2",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6"
   },
-  "description": "OpenLoop visual theme: 61 design tokens (8 OCIX presets x light/dark) + settings page host + shared client module for the OpenLoop visual plugin family.",
+  "description": "OpenLoop base: shared foundation for the OpenLoop DSH plugin family — 61 design tokens (8 OCIX presets x light/dark), settings page host, shared client module, and server-side common services (SSRF-guarded fetch + runtime asset routes).",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [

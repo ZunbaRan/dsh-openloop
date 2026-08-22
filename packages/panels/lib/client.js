@@ -6,7 +6,7 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
 		let react_jsx_runtime = require("react/jsx-runtime");
-		let _openloop_dsh_visual_theme_client = require("@openloop/dsh-visual-theme/client");
+		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
 		//#region src/presets/accordion/schema.ts
 		/**
 		* accordion props JSON Schema。
@@ -5568,12 +5568,12 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			const stored = readStored();
 			const dark = systemIsDark();
 			const appearance = stored.appearance === "light" || stored.appearance === "dark" ? stored.appearance : dark ? "dark" : "light";
-			const preset = _openloop_dsh_visual_theme_client.OPENLOOP_PRESET_IDS.includes(stored.preset) ? stored.preset : FALLBACK_PRESET;
+			const preset = _openloop_dsh_base_client.OPENLOOP_PRESET_IDS.includes(stored.preset) ? stored.preset : FALLBACK_PRESET;
 			return {
 				preset,
 				appearance,
-				global: _openloop_dsh_visual_theme_client.OPENLOOP_GLOBAL_TOKENS,
-				tokens: _openloop_dsh_visual_theme_client.OPENLOOP_PRESETS[preset][appearance]
+				global: _openloop_dsh_base_client.OPENLOOP_GLOBAL_TOKENS,
+				tokens: _openloop_dsh_base_client.OPENLOOP_PRESETS[preset][appearance]
 			};
 		}
 		/** 读取当前预设/明暗，并订阅 theme 包的变更事件保持同步 */

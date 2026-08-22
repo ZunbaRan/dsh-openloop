@@ -66,19 +66,20 @@ export async function runtimeUrlFor(baseOrigin = ''): Promise<string> {
 
 export class PanelsAssets {
   constructor(
-    private readonly webServer: WebServer,
     private readonly assetsDir: string = defaultAssetsDir(),
   ) {}
 
   register(ctx: Context): void {
-    ctx.effect(
-      () => this.webServer.register({
-        kind: 'prefix',
-        path: RUNTIME_ASSETS_ROUTE,
-        handler: (req, res) => this.handle(req, res),
-      }),
-      'openloop-panels: runtime assets',
-    )
+    // base 重构（2026-08-22）：/openloop/runtime 路由由 @openloop/dsh-base 统一供应；
+    // panels 经 cordis service（openloop-base/runtime）注册自己的资产目录
+    // （URL 与磁盘别名不变）。service 由 base 提供方先行注入。
+    ctx.inject(['openloop-base/runtime'], (runtimeCtx: Context) => {
+      const service = (runtimeCtx as Context & { 'openloop-base/runtime'?: { registerRuntimeAssets(names: readonly string[], entry: { dir: string; aliases?: Record<string, string> }): void } })['openloop-base/runtime']
+      service?.registerRuntimeAssets(['runtime.react18'], {
+        dir: this.assetsDir,
+        aliases: { 'runtime.react18': 'runtime' },
+      })
+    })
   }
 
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {

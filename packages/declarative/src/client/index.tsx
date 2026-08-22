@@ -1,7 +1,7 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { createOpenLoopSettingsScope } from '@openloop/dsh-visual-theme/client'
+import { createOpenLoopSettingsScope } from '@openloop/dsh-base/client'
 import { DeclarativeCard } from './DeclarativeCard.tsx'
 
 export const name = 'openloop-visual-declarative'

@@ -4,7 +4,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { createOpenLoopSettingsScope } from '@openloop/dsh-visual-theme/client'
+import { createOpenLoopSettingsScope } from '@openloop/dsh-base/client'
 import { WidgetCard } from './WidgetCard.tsx'
 import { StreamingPreview } from './StreamingPreview.tsx'
 

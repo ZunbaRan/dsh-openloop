@@ -3,7 +3,6 @@
  * 全部校验失败都会抛出带明确信息的 Error，消息面向 Agent 可自修正。
  * 任何未知/异常输入一律拒绝（fail-closed），不静默放行。
  */
-import { isIP } from 'node:net'
 import type { JsonObject, PanelDefinition, PresetKind, WidgetUnit } from './contract.ts'
 import { getPreset } from './presets/index.ts'
 
@@ -53,61 +52,13 @@ export function forbiddenCustomCodeTerm(code: string): string | undefined {
   return undefined
 }
 
-/** 判断 IP 字面量（去掉方括号后的 hostname）是否落在禁连段 */
-function isForbiddenIpLiteral(hostname: string): boolean {
-  const ipv = isIP(hostname)
-  if (ipv === 4) return isForbiddenIPv4(hostname)
-  if (ipv === 6) return isForbiddenIPv6(hostname)
-  return false
-}
-
-/** IPv4 段判断：0.0.0.0/8、127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16、169.254.0.0/16 */
-function isForbiddenIPv4(hostname: string): boolean {
-  const parts = hostname.split('.').map(part => Number(part))
-  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) {
-    return true // 非法 IPv4 字形，fail-closed
-  }
-  const [a, b] = parts as [number, number, number, number]
-  if (a === 0) return true // 0.0.0.0/8 本网络
-  if (a === 127) return true // 127.0.0.0/8 环回
-  if (a === 10) return true // 10.0.0.0/8 私网
-  if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12 私网
-  if (a === 192 && b === 168) return true // 192.168.0.0/16 私网
-  if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local
-  return false
-}
-
-/** IPv6 段判断：::/::1 环回、fc00::/7 ULA、fe80::/10 link-local、::ffff:a.b.c.d IPv4-mapped */
-function isForbiddenIPv6(hostname: string): boolean {
-  const lower = hostname.toLowerCase()
-  if (lower === '::' || lower === '::1') return true
-  if (lower.startsWith('fc') || lower.startsWith('fd')) return true // fc00::/7
-  if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true // fe80::/10
-  const v4Mapped = lower.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)
-  if (v4Mapped?.[1]) return isForbiddenIPv4(v4Mapped[1])
-  return false
-}
-
-/**
- * SSRF 检测（§15 S3）：url 指向环回/内网/不可解析地址时返回 true。
- * 仅做静态判定：hostname 为 IP 字面量或 localhost 时按网段检查；
- * 普通域名无法在编译期解析，默认放行（服务端 fetch 层另有二次防护）。
+/*
+ * SSRF 防护已抽离至 @openloop/dsh-base/server（base 重构 2026-08-22），
+ * 此处 re-export 保持 panels 既有 API（测试/refresh 路由引用）不变。
  */
-export function isForbiddenApiUrl(url: string): boolean {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return true // 无法解析的 URL，fail-closed
-  }
-  const hostname = parsed.hostname
-  if (hostname === '') return true
-  if (hostname === 'localhost' || hostname.endsWith('.localhost')) return true
-  if (hostname.startsWith('[') && hostname.endsWith(']')) {
-    return isForbiddenIpLiteral(hostname.slice(1, -1))
-  }
-  return isForbiddenIpLiteral(hostname)
-}
+import { isForbiddenApiUrl } from '@openloop/dsh-base/server'
+
+export { isForbiddenApiUrl }
 
 /** 校验 api source（§5.2 / §5.4）：必须 https://，且不指向环回/内网（§15 S3） */
 function validateApiSource(url: string, widgetId: string): void {

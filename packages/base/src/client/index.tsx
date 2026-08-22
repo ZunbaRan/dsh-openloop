@@ -4,7 +4,7 @@
  * 0.3.0 迁回 theme 本体——theme 是视觉插件族的公共依赖，设置页应随它独立存活。
  *
  * 本模块同时是 external 共享模块：消费者经 dsh.client.external 声明后
- * require('@openloop/dsh-visual-theme/client') 拿到的就是本模块的 exports，
+ * require('@openloop/dsh-base/client') 拿到的就是本模块的 exports，
  * 因此全部公共 API（scope/hook/页面/静态 token 数据）必须从此入口再导出。
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
@@ -14,7 +14,7 @@ import { OpenLoopVisualSettingsPage, createOpenLoopSettingsScope } from '../clie
 // 共享模块公共面（external 消费者经模块图拿到本入口的 exports）
 export * from '../client.tsx'
 
-export const name = 'openloop-dsh-visual-theme'
+export const name = 'openloop-dsh-base'
 export const inject = ['slots']
 
 export function apply(ctx: ClientContext): void {

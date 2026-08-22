@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-	id: "@openloop/dsh-visual-theme",
+	id: "@openloop/dsh-base",
 	factory: (require) => {
 		var module = { exports: {} };
 		var exports = module.exports;
@@ -1297,7 +1297,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/client/index.tsx
-		const name = "openloop-dsh-visual-theme";
+		const name = "openloop-dsh-base";
 		const inject = ["slots"];
 		function apply(ctx) {
 			const scope = createOpenLoopSettingsScope();

@@ -4,7 +4,7 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { ARTIFACT_HEIGHT_MESSAGE, artifactMetaFrom, type ArtifactMeta } from '../contract.ts'
 import { buildArtifactDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-visual-theme/client'
+import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
 
 const caption: CSSProperties = { color: 'var(--dsw-alias-label-caption)', fontSize: 12 }
 
