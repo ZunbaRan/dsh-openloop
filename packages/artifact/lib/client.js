@@ -10,12 +10,14 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		//#region src/contract.ts
 		const ARTIFACT_HEIGHT_MESSAGE = "openloop-artifact:height";
+		const ARTIFACT_FETCH_MESSAGE = "openloop-artifact:fetch";
+		const ARTIFACT_FETCH_RESULT_MESSAGE = "openloop-artifact:fetch-result";
 		function artifactMetaFrom(value) {
 			if (typeof value !== "object" || value === null) return void 0;
 			const record = value;
 			if (record.kind !== "openloop.html-artifact" || record.version !== 1) return void 0;
 			if (typeof record.title !== "string" || typeof record.html !== "string" || typeof record.path !== "string") return void 0;
-			if (record.runtime !== "static" && record.runtime !== "scripts") return void 0;
+			if (record.runtime !== "static" && record.runtime !== "scripts" && record.runtime !== "network") return void 0;
 			return {
 				kind: "openloop.html-artifact",
 				version: 1,
@@ -85,7 +87,40 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 				["accent", theme.accent],
 				...Object.entries(theme.tokens ?? {})
 			].filter((entry) => typeof entry[1] === "string" && sanitize(entry[1]).length > 0).map(([name, value]) => `--openloop-${name}:${sanitize(value)};`).join("");
-			return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${runtime === "static" ? "<meta name=\"openloop-artifact-runtime\" content=\"static\">" : "<meta name=\"openloop-artifact-runtime\" content=\"scripts\">"}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${heightReporter(token)}<\/script></body></html>`;
+			return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${`<meta name="openloop-artifact-runtime" content="${runtime}">`}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${fetchBridge(token)}<\/script><script>${heightReporter(token)}<\/script></body></html>`;
+		}
+		/**
+		* network 档桥脚本：注入 window.openloop.fetch(url, init?) → Promise。
+		* 实际联网由宿主经 /openloop/base/fetch 服务端代理（SSRF 校验 + 白名单），
+		* iframe 本身保持断网（CSP connect-src 'none' 不变）。
+		*/
+		function fetchBridge(token) {
+			return `(function(){
+  var seq = 0; var pending = new Map();
+  window.openloop = {
+    fetch: function(url, init) {
+      init = init || {};
+      return new Promise(function(resolve, reject) {
+        var id = 'f' + (++seq);
+        pending.set(id, { resolve: resolve, reject: reject });
+        parent.postMessage({ type: ${JSON.stringify(ARTIFACT_FETCH_MESSAGE)}, token: ${JSON.stringify(token)}, callId: id,
+          url: String(url), init: { timeoutMs: init.timeoutMs } }, '*');
+        setTimeout(function() {
+          if (pending.has(id)) { pending.delete(id); reject(new Error('openloop.fetch timeout (15s)')); }
+        }, init.timeoutMs && init.timeoutMs < 15000 ? init.timeoutMs + 2000 : 15000);
+      });
+    },
+  };
+  addEventListener('message', function(event) {
+    var data = event.data;
+    if (!data || data.type !== ${JSON.stringify(ARTIFACT_FETCH_RESULT_MESSAGE)} || data.token !== ${JSON.stringify(token)}) return;
+    var entry = pending.get(data.callId);
+    if (!entry) return;
+    pending.delete(data.callId);
+    if (data.ok) { entry.resolve({ ok: true, status: data.status, json: function() { return Promise.resolve(data.data); } }); }
+    else { entry.reject(new Error(data.error || 'openloop.fetch failed')); }
+  });
+})();`;
 		}
 		function heightReporter(token) {
 			return `(function(){var post=function(){parent.postMessage({type:${JSON.stringify(ARTIFACT_HEIGHT_MESSAGE)},token:${JSON.stringify(token)},height:document.documentElement.scrollHeight},'*')};new ResizeObserver(post).observe(document.documentElement);addEventListener('load',post);post()})();`;
@@ -121,6 +156,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		}
 		function ArtifactFrame({ meta, token, fullscreen, scope }) {
 			const [height, setHeight] = (0, react.useState)(fullscreen ? 700 : 520);
+			const frameRef = (0, react.useRef)(null);
 			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
 			(0, react.useEffect)(() => {
 				const listener = (event) => {
@@ -130,6 +166,49 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 				addEventListener("message", listener);
 				return () => removeEventListener("message", listener);
 			}, [token, fullscreen]);
+			(0, react.useEffect)(() => {
+				const listener = async (event) => {
+					const data = event.data;
+					if (data?.type !== "openloop-artifact:fetch" || data.token !== token) return;
+					if (typeof data.callId !== "string" || typeof data.url !== "string") return;
+					const frame = frameRef.current;
+					if (!frame || event.source !== frame.contentWindow) return;
+					try {
+						const result = await (await fetch("/openloop/base/fetch", {
+							method: "POST",
+							headers: { "Content-Type": "application/json" },
+							body: JSON.stringify({
+								url: data.url,
+								...typeof data.init?.timeoutMs === "number" ? { timeoutMs: data.init.timeoutMs } : {}
+							})
+						})).json();
+						frame.contentWindow?.postMessage(result.ok ? {
+							type: ARTIFACT_FETCH_RESULT_MESSAGE,
+							token,
+							callId: data.callId,
+							ok: true,
+							status: result.status,
+							data: result.data
+						} : {
+							type: ARTIFACT_FETCH_RESULT_MESSAGE,
+							token,
+							callId: data.callId,
+							ok: false,
+							error: result.error
+						}, "*");
+					} catch (error) {
+						frame.contentWindow?.postMessage({
+							type: ARTIFACT_FETCH_RESULT_MESSAGE,
+							token,
+							callId: data.callId,
+							ok: false,
+							error: error instanceof Error ? error.message : String(error)
+						}, "*");
+					}
+				};
+				addEventListener("message", listener);
+				return () => removeEventListener("message", listener);
+			}, [token]);
 			const doc = (0, react.useMemo)(() => buildArtifactDocument(meta.html, meta.title, meta.runtime, token, resolveTheme(theme.palette, theme.appearance)), [
 				meta,
 				token,
@@ -137,6 +216,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 				theme.appearance
 			]);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+				ref: frameRef,
 				title: meta.title,
 				sandbox: "allow-scripts",
 				referrerPolicy: "no-referrer",

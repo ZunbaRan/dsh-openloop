@@ -1,5 +1,19 @@
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { createRuntimeAssetsService, RuntimeAssetsRoute } from './server/runtime-assets.ts'
+import { registerBaseFetchRoute } from './server/fetch-route.ts'
+import z from '@deepseek-ai/schemastery'
+
+export interface Config {
+  /** 部署级本机源白名单（openloop.fetch 桥经此放行本机 API；默认空=全部拒绝环回/内网） */
+  allowLoopbackOrigins: string[]
+}
+
+export const Config: z<Config> = z.object({
+  allowLoopbackOrigins: z.array(z.string()).default([]),
+})
 import { OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS } from './presets.generated.ts'
 
 export { OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS }
@@ -60,15 +74,27 @@ export function paletteVariables(settings: OpenLoopVisualSettings, systemDark: b
 // 服务端不注册任何能力：工具/路由在 panels 等消费者包里；本包的价值在 client 半（设置页 + 共享 token 模块）。
 export const name = 'openloop-dsh-base'
 
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context, config: Config): Promise<void> {
   // 服务端公共能力接线（base 重构 2026-08-22）：
   // 1) runtime 资产注册 service（单例注册表；消费者经 ctx.inject 使用——
   //    不能走模块导入，消费者会把 base/server 打成无状态副本导致注册表分裂）
   const runtimeAssets = createRuntimeAssetsService()
   ctx.provide('openloop-base/runtime', runtimeAssets)
+  // 预置公共库（v2 首批：pico.css / chart.js UMD；react19 完整 runtime 后续批次）
+  // URL 带 content hash（manifest.json 构建期生成），磁盘文件在 assets/preset/。
+  const presetDir = fileURLToPath(new URL('../assets/preset/', import.meta.url))
+  const presetManifest = JSON.parse(await readFile(join(presetDir, 'manifest.json'), 'utf8')) as Record<string, { hash: string }>
+  for (const name of Object.keys(presetManifest)) {
+    runtimeAssets.registerRuntimeAssets([name], { dir: presetDir })
+  }
   // 2) /openloop/runtime 资产路由的唯一供应商。webServer 为可选依赖——
   //    headless 等无 webServer 环境下静默跳过（注册 service 仍然可用）。
   ctx.inject(['webServer'], (webCtx: Context) => {
     new RuntimeAssetsRoute(webCtx.webServer, runtimeAssets.resolve.bind(runtimeAssets)).register(webCtx)
+    // 3) 公共 fetch 代理（artifact v2 openloop.fetch 桥的服务端；本机源白名单经部署配置）
+    webCtx.effect(
+      () => registerBaseFetchRoute(webCtx, webCtx.webServer, { allowedOrigins: config.allowLoopbackOrigins }),
+      'openloop-base: fetch proxy route',
+    )
   })
 }

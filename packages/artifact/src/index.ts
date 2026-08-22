@@ -21,10 +21,10 @@ export const Config: z<Config> = z.object({
 export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: HTML_ARTIFACT_TOOL,
-    description: 'Render a large replayable HTML artifact with multi-panel layout or complex local interaction. Use visualize_ui for bounded structure and show_widget for a small single-focus card. Choose static unless JavaScript is necessary. Load the openloop-html-artifact skill first.',
+    description: 'Render a completely free HTML page (multi-panel explorer, simulation, custom topology, fullscreen app). Choose static by default, scripts for local computation, network when live API data is needed (openloop.fetch). Use panel for structured dashboards and show_widget for small cards. Load the openloop-html-artifact skill first.',
     parameters: {
       title: { type: 'string', required: true, description: 'Short artifact title.' },
-      runtime: { type: 'string', enum: ['static', 'scripts'], required: true, description: 'static rejects scripts and inline handlers; scripts must be chosen explicitly.' },
+      runtime: { type: 'string', enum: ['static', 'scripts', 'network'], required: true, description: 'static rejects scripts; scripts = local JS (canvas/eval/wasm, offline); network = scripts + openloop.fetch bridge for API data (https-only JSON, SSRF-guarded).' },
       html: { type: 'string', required: true, description: 'Self-contained body HTML with optional style; no document skeleton or remote assets.' },
     },
     output: {
@@ -32,7 +32,7 @@ export function apply(ctx: Context, config: Config): void {
         type: 'object', additionalProperties: false,
         properties: {
           version: { type: 'integer', const: 1, required: true }, title: { type: 'string', required: true },
-          runtime: { type: 'string', enum: ['static', 'scripts'], required: true }, html: { type: 'string', required: true },
+          runtime: { type: 'string', enum: ['static', 'scripts', 'network'], required: true }, html: { type: 'string', required: true },
           path: { type: 'string', required: true }, sizeBytes: { type: 'integer', required: true },
         },
       },

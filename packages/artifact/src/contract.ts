@@ -1,6 +1,15 @@
 export const HTML_ARTIFACT_TOOL = 'html_artifact'
 export const ARTIFACT_HEIGHT_MESSAGE = 'openloop-artifact:height'
-export type ArtifactRuntime = 'static' | 'scripts'
+export const ARTIFACT_FETCH_MESSAGE = 'openloop-artifact:fetch'
+export const ARTIFACT_FETCH_RESULT_MESSAGE = 'openloop-artifact:fetch-result'
+/**
+ * runtime 三档（v2 全栈化，ARTIFACT_V2_DESIGN）：
+ * - static  无脚本纯静态（可重放承诺最强）
+ * - scripts 本地计算自由（unsafe-eval/wasm），iframe 断网（可重放）
+ * - network 在 scripts 基础上经宿主代理桥（openloop.fetch）取数——
+ *   iframe 本身仍断网，联网全部走 /openloop/base/fetch（SSRF 校验 + 白名单）
+ */
+export type ArtifactRuntime = 'static' | 'scripts' | 'network'
 
 export interface ArtifactMeta {
   kind: 'openloop.html-artifact'
@@ -35,7 +44,7 @@ export function artifactMetaFrom(value: unknown): ArtifactMeta | undefined {
   const record = value as Record<string, unknown>
   if (record.kind !== 'openloop.html-artifact' || record.version !== 1) return undefined
   if (typeof record.title !== 'string' || typeof record.html !== 'string' || typeof record.path !== 'string') return undefined
-  if (record.runtime !== 'static' && record.runtime !== 'scripts') return undefined
+  if (record.runtime !== 'static' && record.runtime !== 'scripts' && record.runtime !== 'network') return undefined
   return { kind: 'openloop.html-artifact', version: 1, title: record.title, html: record.html, path: record.path, runtime: record.runtime }
 }
 

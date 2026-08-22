@@ -1,4 +1,4 @@
-import { ARTIFACT_HEIGHT_MESSAGE, type ArtifactRuntime } from './contract.ts'
+import { ARTIFACT_FETCH_MESSAGE, ARTIFACT_FETCH_RESULT_MESSAGE, ARTIFACT_HEIGHT_MESSAGE, type ArtifactRuntime } from './contract.ts'
 
 export const ARTIFACT_CSP = [
   "default-src 'none'",
@@ -68,8 +68,42 @@ export function buildArtifactDocument(html: string, title: string, runtime: Arti
     ...Object.entries(theme.tokens ?? {}),
   ].filter((entry): entry is [string, string] => typeof entry[1] === 'string' && sanitize(entry[1]).length > 0)
     .map(([name, value]) => `--openloop-${name}:${sanitize(value)};`).join('')
-  const marker = runtime === 'static' ? '<meta name="openloop-artifact-runtime" content="static">' : '<meta name="openloop-artifact-runtime" content="scripts">'
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${marker}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${heightReporter(token)}</script></body></html>`
+  const marker = `<meta name="openloop-artifact-runtime" content="${runtime}">`
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${marker}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${fetchBridge(token)}</script><script>${heightReporter(token)}</script></body></html>`
+}
+
+/**
+ * network 档桥脚本：注入 window.openloop.fetch(url, init?) → Promise。
+ * 实际联网由宿主经 /openloop/base/fetch 服务端代理（SSRF 校验 + 白名单），
+ * iframe 本身保持断网（CSP connect-src 'none' 不变）。
+ */
+function fetchBridge(token: string): string {
+  return `(function(){
+  var seq = 0; var pending = new Map();
+  window.openloop = {
+    fetch: function(url, init) {
+      init = init || {};
+      return new Promise(function(resolve, reject) {
+        var id = 'f' + (++seq);
+        pending.set(id, { resolve: resolve, reject: reject });
+        parent.postMessage({ type: ${JSON.stringify(ARTIFACT_FETCH_MESSAGE)}, token: ${JSON.stringify(token)}, callId: id,
+          url: String(url), init: { timeoutMs: init.timeoutMs } }, '*');
+        setTimeout(function() {
+          if (pending.has(id)) { pending.delete(id); reject(new Error('openloop.fetch timeout (15s)')); }
+        }, init.timeoutMs && init.timeoutMs < 15000 ? init.timeoutMs + 2000 : 15000);
+      });
+    },
+  };
+  addEventListener('message', function(event) {
+    var data = event.data;
+    if (!data || data.type !== ${JSON.stringify(ARTIFACT_FETCH_RESULT_MESSAGE)} || data.token !== ${JSON.stringify(token)}) return;
+    var entry = pending.get(data.callId);
+    if (!entry) return;
+    pending.delete(data.callId);
+    if (data.ok) { entry.resolve({ ok: true, status: data.status, json: function() { return Promise.resolve(data.data); } }); }
+    else { entry.reject(new Error(data.error || 'openloop.fetch failed')); }
+  });
+})();`
 }
 
 function heightReporter(token: string): string {

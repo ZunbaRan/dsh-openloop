@@ -1,0 +1,16 @@
+{
+ "pico": {
+  "file": "pico.css",
+  "hash": "dd5fd5591afd81ee",
+  "ext": "css",
+  "url": "/openloop/runtime/pico.dd5fd5591afd81ee.css",
+  "bytes": 82194
+ },
+ "chartjs": {
+  "file": "chartjs.js",
+  "hash": "bce154080959c574",
+  "ext": "js",
+  "url": "/openloop/runtime/chartjs.bce154080959c574.js",
+  "bytes": 206944
+ }
+}

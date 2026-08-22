@@ -1,21 +1,49 @@
 # OpenLoop HTML Artifact
 
-Use `html_artifact` for a large, coordinated visual document: multi-panel explorer, parameterized simulation, custom topology, or fullscreen teaching surface.
+Use `html_artifact` for a **completely free HTML page** — like a real web page: any layout, any CSS, canvas/SVG, local computation, interactive demos. Use `panel` for structured dashboards (preset widgets + data binding + refresh). Use `show_widget` for one small temporary card.
 
-Use `visualize_ui` for bounded flows, timelines, and comparisons. Use `show_widget` for one small temporary interaction.
+## Runtime choice (three tiers)
 
-## Runtime choice
+- `static`: default. HTML, CSS, SVG, tables; scripts rejected. Fully replayable.
+- `scripts`: local computation freedom — canvas, simulation, animation (eval/wasm allowed). The iframe stays offline; fully replayable.
+- `network`: **needs API data**. Same freedoms as `scripts`, plus the `openloop.fetch` bridge. Data is re-fetched on every replay.
 
-- `static`: default. HTML, CSS, SVG, tables, and layouts; scripts and inline event handlers are rejected.
-- `scripts`: choose only when controls, simulation, animation, or coordinated local state requires JavaScript.
+## API access (network tier only)
+
+```js
+// window.openloop.fetch(url) → Promise<{ ok, status, json() }>
+const res = await openloop.fetch('https://api.github.com/repos/deepseek-ai/deepseek-harness')
+const data = await res.json()
+```
+
+- All network goes through the host proxy (server-side, SSRF-guarded, https-only, JSON-only, 10s/1MB). Native `fetch` inside the page is blocked by CSP — always use `openloop.fetch`.
+- Loopback/local APIs require a deployment-level whitelist; otherwise rejected. Do not retry local URLs when they fail.
+- Choose `network` only when the page needs live data; otherwise prefer `static`/`scripts` for replayability.
+
+## Preset libraries (network/scripts pages)
+
+Reference them by the host runtime routes (offline, version-pinned, immutable cache):
+
+```html
+<link rel="stylesheet" href="/openloop/runtime/pico.dd5fd5591afd81ee.css">
+<script src="/openloop/runtime/chartjs.bce154080959c574.js"></script>
+```
+
+- `pico.*.css` — classless semantic styling base (tables/forms/cards look good for free).
+- `chartjs.*.js` — Chart.js UMD; `new Chart(...)` after the script tag.
+- External CDNs are blocked. If a library you need is not preset, inline it or ask the user to preset it.
+- React is not yet preset — write vanilla JS or inline the runtime for now.
+
+## Theming (two modes)
+
+- **Follow the OpenLoop theme (recommended when no brand colors)**: use the injected CSS variables (`--background`, `--foreground`, `--muted`, `--surface`, `--elevated`, `--border`, `--accent`, `--radius`) plus helper classes (`.artifact-grid`, `.artifact-panel`, `.artifact-toolbar`, `.artifact-muted`, `.artifact-value`). The page follows the user's preset and light/dark switch.
+- **Fully custom**: ignore the variables and write your own colors/styles — the page stays unchanged when the theme switches. Preferred when the user specifies brand colors.
 
 ## Contract
 
-- Pass body content only; no doctype, html, head, or body tags.
-- Keep everything self-contained. Remote src/href resources and network calls are blocked.
-- Available classes: `.artifact-grid`, `.artifact-panel`, `.artifact-toolbar`, `.artifact-muted`, `.artifact-value`.
-- Available variables: `--background`, `--foreground`, `--muted`, `--surface`, `--elevated`, `--border`, `--accent`, `--radius`.
-- Use responsive grid/flex layouts. Avoid fixed viewport sizes; fullscreen is provided by the host.
-- Use the user's language for visible labels and make the initial state useful.
-- In scripts mode, query a unique root ID, honor reduced motion, and ensure every control visibly changes the output.
+- Pass body content only; no doctype/html/head/body tags.
+- Self-contained: remote src/href resources are blocked; inline or use the preset routes above.
+- Responsive grid/flex layouts; fullscreen is provided by the host.
+- Use the user's language for visible labels; make the initial state useful.
+- In scripts/network mode, honor reduced motion and ensure every control visibly changes the output.
 - Never represent sample or inferred values as live enterprise data.

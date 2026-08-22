@@ -1495,4 +1495,19 @@ declare class RuntimeAssetsRoute {
   private handle;
 }
 //#endregion
-export { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, RUNTIME_ASSETS_ROUTE, type RuntimeAssetEntry, RuntimeAssetsRoute, type SafeFetchOptions, isForbiddenApiUrl, looksLikeJsonContentType, normalizeTimeoutMs, parseJsonResponse, readBodyBytes, safeFetchJson, validateHttpsApiUrl };
+//#region src/server/fetch-route.d.ts
+declare const BASE_FETCH_ROUTE = "/openloop/base/fetch";
+interface BaseFetchRouteOptions {
+  /** 部署级本机源白名单（如 'http://127.0.0.1:9090'）；命中即跳过 https/SSRF 拒绝 */
+  allowedOrigins?: readonly string[];
+}
+/** 请求体解析（限 8KB；仅 {url, timeoutMs?} 形态） */
+declare function parseFetchRequestBody(raw: string): {
+  url: string;
+  timeoutMs?: number;
+};
+/** 路由注册（ctx.effect 生命周期回收由调用方包裹） */
+/** 返回路由 disposer（供 ctx.effect 生命周期回收） */
+declare function registerBaseFetchRoute(_ctx: Context, webServer: WebServer, options?: BaseFetchRouteOptions): () => void;
+//#endregion
+export { BASE_FETCH_ROUTE, type BaseFetchRouteOptions, DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, RUNTIME_ASSETS_ROUTE, type RuntimeAssetEntry, RuntimeAssetsRoute, type SafeFetchOptions, isForbiddenApiUrl, looksLikeJsonContentType, normalizeTimeoutMs, parseFetchRequestBody, parseJsonResponse, readBodyBytes, registerBaseFetchRoute, safeFetchJson, validateHttpsApiUrl };

@@ -10,6 +10,8 @@ export {
 } from './net.ts'
 export type { SafeFetchOptions } from './net.ts'
 export { RUNTIME_ASSETS_ROUTE, RuntimeAssetsRoute } from './runtime-assets.ts'
+export { BASE_FETCH_ROUTE, registerBaseFetchRoute, parseFetchRequestBody } from './fetch-route.ts'
+export type { BaseFetchRouteOptions } from './fetch-route.ts'
 export type { RuntimeAssetEntry } from './runtime-assets.ts'
 // 注册表操作走 cordis service（openloop-base/runtime），此处不导出——
 // 模块级单例在消费者打包副本下会分裂（panels 副本注册、base 路由不可见）。

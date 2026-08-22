@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-base",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -37,7 +37,8 @@
     "tsdown": "^0.22.2",
     "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.6",
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
+    "@deepseek-ai/schemastery": "3.18.1"
   },
   "description": "OpenLoop base: shared foundation for the OpenLoop DSH plugin family — 61 design tokens (8 OCIX presets x light/dark), settings page host, shared client module, and server-side common services (SSRF-guarded fetch + runtime asset routes).",
   "main": "lib/index.js",
@@ -45,6 +46,7 @@
   "files": [
     "lib",
     "src",
+    "assets",
     "cordis.patch.yml",
     "README.md"
   ],

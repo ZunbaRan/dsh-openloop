@@ -21,3 +21,20 @@ describe('artifact contract', () => {
     expect(artifactMetaFrom({ kind: 'openloop.html-artifact', version: 2 })).toBeUndefined()
   })
 })
+
+describe('v2 network 档（ARTIFACT_V2_DESIGN A1/A6）', () => {
+  it('network 档接受脚本与事件处理器', () => {
+    expect(() => validateArtifact('<div onclick="go()">x</div><script>1</script>', 'network', 600_000)).not.toThrow()
+  })
+  it('network 档仍拒绝远程资源与 javascript: URL', () => {
+    expect(() => validateArtifact('<script src="https://cdn.example.com/x.js"></script>', 'network', 600_000)).toThrow(/remote/)
+    expect(() => validateArtifact('<a href="javascript:x()">a</a>', 'network', 600_000)).toThrow(/javascript:/)
+  })
+  it('static 档拒绝脚本不变', () => {
+    expect(() => validateArtifact('<script>1</script>', 'static', 1_000_000)).toThrow(/static/)
+  })
+  it('artifactMetaFrom 接受 network 档并回读', () => {
+    const meta = artifactMetaFrom({ kind: 'openloop.html-artifact', version: 1, title: 't', runtime: 'network', html: '<b>x</b>', path: '/a/b.html' })
+    expect(meta?.runtime).toBe('network')
+  })
+})

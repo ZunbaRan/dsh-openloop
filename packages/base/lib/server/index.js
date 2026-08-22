@@ -247,4 +247,81 @@ var RuntimeAssetsRoute = class {
 	}
 };
 //#endregion
-export { DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, RUNTIME_ASSETS_ROUTE, RuntimeAssetsRoute, isForbiddenApiUrl, looksLikeJsonContentType, normalizeTimeoutMs, parseJsonResponse, readBodyBytes, safeFetchJson, validateHttpsApiUrl };
+//#region src/server/fetch-route.ts
+const BASE_FETCH_ROUTE = "/openloop/base/fetch";
+const MAX_BODY_BYTES = 8192;
+/** 请求体解析（限 8KB；仅 {url, timeoutMs?} 形态） */
+function parseFetchRequestBody(raw) {
+	let parsed;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new Error("request body must be JSON");
+	}
+	if (typeof parsed !== "object" || parsed === null) throw new Error("request body must be a JSON object");
+	const record = parsed;
+	if (typeof record.url !== "string" || record.url.length === 0) throw new Error("request body requires a non-empty \"url\" string");
+	const timeoutMs = record.timeoutMs === void 0 ? void 0 : normalizeTimeoutMs(Number(record.timeoutMs));
+	return {
+		url: record.url,
+		...timeoutMs !== void 0 ? { timeoutMs } : {}
+	};
+}
+/** 路由注册（ctx.effect 生命周期回收由调用方包裹） */
+/** 返回路由 disposer（供 ctx.effect 生命周期回收） */
+function registerBaseFetchRoute(_ctx, webServer, options = {}) {
+	return webServer.register({
+		kind: "exact",
+		path: BASE_FETCH_ROUTE,
+		handler: (req, res) => {
+			handle(req, res, options);
+		}
+	});
+}
+async function handle(req, res, options) {
+	res.setHeader("Content-Type", "application/json");
+	res.setHeader("Cache-Control", "no-store");
+	if (req.method !== "POST") {
+		res.statusCode = 405;
+		res.end(JSON.stringify({
+			ok: false,
+			error: "POST only"
+		}));
+		return;
+	}
+	const chunks = [];
+	let total = 0;
+	for await (const chunk of req) {
+		total += chunk.byteLength;
+		if (total > MAX_BODY_BYTES) {
+			res.statusCode = 413;
+			res.end(JSON.stringify({
+				ok: false,
+				error: "request body too large"
+			}));
+			return;
+		}
+		chunks.push(chunk);
+	}
+	try {
+		const { url, timeoutMs } = parseFetchRequestBody(Buffer.concat(chunks).toString("utf8"));
+		const data = await safeFetchJson(url, {
+			...timeoutMs !== void 0 ? { timeoutMs } : {},
+			...options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}
+		});
+		res.statusCode = 200;
+		res.end(JSON.stringify({
+			ok: true,
+			status: 200,
+			data
+		}));
+	} catch (error) {
+		res.statusCode = 200;
+		res.end(JSON.stringify({
+			ok: false,
+			error: error instanceof Error ? error.message : String(error)
+		}));
+	}
+}
+//#endregion
+export { BASE_FETCH_ROUTE, DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, RUNTIME_ASSETS_ROUTE, RuntimeAssetsRoute, isForbiddenApiUrl, looksLikeJsonContentType, normalizeTimeoutMs, parseFetchRequestBody, parseJsonResponse, readBodyBytes, registerBaseFetchRoute, safeFetchJson, validateHttpsApiUrl };

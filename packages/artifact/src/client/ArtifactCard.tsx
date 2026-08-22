@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Button, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { ARTIFACT_HEIGHT_MESSAGE, artifactMetaFrom, type ArtifactMeta } from '../contract.ts'
+import { ARTIFACT_FETCH_MESSAGE, ARTIFACT_FETCH_RESULT_MESSAGE, ARTIFACT_HEIGHT_MESSAGE, artifactMetaFrom, type ArtifactMeta } from '../contract.ts'
 import { buildArtifactDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
 import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
@@ -17,6 +17,7 @@ function firstText(content: readonly unknown[]): string | undefined {
 
 function ArtifactFrame({ meta, token, fullscreen, scope }: { meta: ArtifactMeta; token: string; fullscreen: boolean; scope: OpenLoopSettingsScope }) {
   const [height, setHeight] = useState(fullscreen ? 700 : 520)
+  const frameRef = useRef<HTMLIFrameElement>(null)
   const theme = useOpenLoopVisualTheme(scope)
   useEffect(() => {
     const listener = (event: MessageEvent) => {
@@ -26,8 +27,40 @@ function ArtifactFrame({ meta, token, fullscreen, scope }: { meta: ArtifactMeta;
     addEventListener('message', listener)
     return () => removeEventListener('message', listener)
   }, [token, fullscreen])
+  // v2 network 档：openloop.fetch 代理（iframe 断网 → 宿主经 /openloop/base/fetch 服务端取数）
+  // token 校验与 height 桥同款；来源 iframe 校验经 event.source 比对 contentWindow。
+  useEffect(() => {
+    const listener = async (event: MessageEvent) => {
+      const data = event.data as { type?: unknown; token?: unknown; callId?: unknown; url?: unknown; init?: { timeoutMs?: unknown } } | null
+      if (data?.type !== ARTIFACT_FETCH_MESSAGE || data.token !== token) return
+      if (typeof data.callId !== 'string' || typeof data.url !== 'string') return
+      const frame = frameRef.current
+      if (!frame || event.source !== frame.contentWindow) return
+      try {
+        const response = await fetch('/openloop/base/fetch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: data.url, ...(typeof data.init?.timeoutMs === 'number' ? { timeoutMs: data.init.timeoutMs } : {}) }),
+        })
+        const result = await response.json() as { ok: boolean; status?: number; data?: unknown; error?: string }
+        frame.contentWindow?.postMessage(
+          result.ok
+            ? { type: ARTIFACT_FETCH_RESULT_MESSAGE, token, callId: data.callId, ok: true, status: result.status, data: result.data }
+            : { type: ARTIFACT_FETCH_RESULT_MESSAGE, token, callId: data.callId, ok: false, error: result.error },
+          '*',
+        )
+      } catch (error) {
+        frame.contentWindow?.postMessage(
+          { type: ARTIFACT_FETCH_RESULT_MESSAGE, token, callId: data.callId, ok: false, error: error instanceof Error ? error.message : String(error) },
+          '*',
+        )
+      }
+    }
+    addEventListener('message', listener)
+    return () => removeEventListener('message', listener)
+  }, [token])
   const doc = useMemo(() => buildArtifactDocument(meta.html, meta.title, meta.runtime, token, resolveTheme(theme.palette, theme.appearance)), [meta, token, theme.palette, theme.appearance])
-  return <iframe title={meta.title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={doc} style={{ display: 'block', width: '100%', height: fullscreen ? '100%' : height, minHeight: fullscreen ? 0 : 360, border: 0, background: 'var(--dsw-alias-bg-layer-1)', borderRadius: fullscreen ? 0 : 14 }} />
+  return <iframe ref={frameRef} title={meta.title} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={doc} style={{ display: 'block', width: '100%', height: fullscreen ? '100%' : height, minHeight: fullscreen ? 0 : 360, border: 0, background: 'var(--dsw-alias-bg-layer-1)', borderRadius: fullscreen ? 0 : 14 }} />
 }
 
 function ArtifactSurface({ meta, callId, scope }: { meta: ArtifactMeta; callId: string; scope: OpenLoopSettingsScope }) {

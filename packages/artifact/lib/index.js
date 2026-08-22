@@ -35,6 +35,8 @@ const artifactSkillProvider = {
 //#region src/contract.ts
 const HTML_ARTIFACT_TOOL = "html_artifact";
 const ARTIFACT_HEIGHT_MESSAGE = "openloop-artifact:height";
+const ARTIFACT_FETCH_MESSAGE = "openloop-artifact:fetch";
+const ARTIFACT_FETCH_RESULT_MESSAGE = "openloop-artifact:fetch-result";
 const SKELETON = /<!doctype\b|<\s*(?:html|head|body)\b/iu;
 const REMOTE_URL = /(?:src|href)\s*=\s*["']\s*(?:https?:)?\/\//iu;
 const SCRIPT = /<\s*script\b/iu;
@@ -55,7 +57,7 @@ function artifactMetaFrom(value) {
 	const record = value;
 	if (record.kind !== "openloop.html-artifact" || record.version !== 1) return void 0;
 	if (typeof record.title !== "string" || typeof record.html !== "string" || typeof record.path !== "string") return void 0;
-	if (record.runtime !== "static" && record.runtime !== "scripts") return void 0;
+	if (record.runtime !== "static" && record.runtime !== "scripts" && record.runtime !== "network") return void 0;
 	return {
 		kind: "openloop.html-artifact",
 		version: 1,
@@ -136,7 +138,40 @@ function buildArtifactDocument(html, title, runtime, token, theme) {
 		["accent", theme.accent],
 		...Object.entries(theme.tokens ?? {})
 	].filter((entry) => typeof entry[1] === "string" && sanitize(entry[1]).length > 0).map(([name, value]) => `--openloop-${name}:${sanitize(value)};`).join("");
-	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${runtime === "static" ? "<meta name=\"openloop-artifact-runtime\" content=\"static\">" : "<meta name=\"openloop-artifact-runtime\" content=\"scripts\">"}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${heightReporter(token)}<\/script></body></html>`;
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer">${`<meta name="openloop-artifact-runtime" content="${runtime}">`}<meta http-equiv="Content-Security-Policy" content="${ARTIFACT_CSP}"><title>${escapeHtml(title)}</title><style>${CSS}:root{${variables}color-scheme:${theme.scheme};}</style></head><body>${html}<script>${fetchBridge(token)}<\/script><script>${heightReporter(token)}<\/script></body></html>`;
+}
+/**
+* network 档桥脚本：注入 window.openloop.fetch(url, init?) → Promise。
+* 实际联网由宿主经 /openloop/base/fetch 服务端代理（SSRF 校验 + 白名单），
+* iframe 本身保持断网（CSP connect-src 'none' 不变）。
+*/
+function fetchBridge(token) {
+	return `(function(){
+  var seq = 0; var pending = new Map();
+  window.openloop = {
+    fetch: function(url, init) {
+      init = init || {};
+      return new Promise(function(resolve, reject) {
+        var id = 'f' + (++seq);
+        pending.set(id, { resolve: resolve, reject: reject });
+        parent.postMessage({ type: ${JSON.stringify(ARTIFACT_FETCH_MESSAGE)}, token: ${JSON.stringify(token)}, callId: id,
+          url: String(url), init: { timeoutMs: init.timeoutMs } }, '*');
+        setTimeout(function() {
+          if (pending.has(id)) { pending.delete(id); reject(new Error('openloop.fetch timeout (15s)')); }
+        }, init.timeoutMs && init.timeoutMs < 15000 ? init.timeoutMs + 2000 : 15000);
+      });
+    },
+  };
+  addEventListener('message', function(event) {
+    var data = event.data;
+    if (!data || data.type !== ${JSON.stringify(ARTIFACT_FETCH_RESULT_MESSAGE)} || data.token !== ${JSON.stringify(token)}) return;
+    var entry = pending.get(data.callId);
+    if (!entry) return;
+    pending.delete(data.callId);
+    if (data.ok) { entry.resolve({ ok: true, status: data.status, json: function() { return Promise.resolve(data.data); } }); }
+    else { entry.reject(new Error(data.error || 'openloop.fetch failed')); }
+  });
+})();`;
 }
 function heightReporter(token) {
 	return `(function(){var post=function(){parent.postMessage({type:${JSON.stringify(ARTIFACT_HEIGHT_MESSAGE)},token:${JSON.stringify(token)},height:document.documentElement.scrollHeight},'*')};new ResizeObserver(post).observe(document.documentElement);addEventListener('load',post);post()})();`;
@@ -163,7 +198,7 @@ const Config = z.object({
 function apply(ctx, config) {
 	ctx.tools.register(defineTool({
 		name: HTML_ARTIFACT_TOOL,
-		description: "Render a large replayable HTML artifact with multi-panel layout or complex local interaction. Use visualize_ui for bounded structure and show_widget for a small single-focus card. Choose static unless JavaScript is necessary. Load the openloop-html-artifact skill first.",
+		description: "Render a completely free HTML page (multi-panel explorer, simulation, custom topology, fullscreen app). Choose static by default, scripts for local computation, network when live API data is needed (openloop.fetch). Use panel for structured dashboards and show_widget for small cards. Load the openloop-html-artifact skill first.",
 		parameters: {
 			title: {
 				type: "string",
@@ -172,9 +207,13 @@ function apply(ctx, config) {
 			},
 			runtime: {
 				type: "string",
-				enum: ["static", "scripts"],
+				enum: [
+					"static",
+					"scripts",
+					"network"
+				],
 				required: true,
-				description: "static rejects scripts and inline handlers; scripts must be chosen explicitly."
+				description: "static rejects scripts; scripts = local JS (canvas/eval/wasm, offline); network = scripts + openloop.fetch bridge for API data (https-only JSON, SSRF-guarded)."
 			},
 			html: {
 				type: "string",
@@ -198,7 +237,11 @@ function apply(ctx, config) {
 					},
 					runtime: {
 						type: "string",
-						enum: ["static", "scripts"],
+						enum: [
+							"static",
+							"scripts",
+							"network"
+						],
 						required: true
 					},
 					html: {
@@ -264,4 +307,4 @@ function apply(ctx, config) {
 	ctx.skills.registerProvider(() => artifactSkillProvider);
 }
 //#endregion
-export { ARTIFACT_CSP, ARTIFACT_HEIGHT_MESSAGE, Config, HTML_ARTIFACT_TOOL, apply, artifactMetaFrom, buildArtifactDocument, hash, inject, name, slug, validateArtifact };
+export { ARTIFACT_CSP, ARTIFACT_FETCH_MESSAGE, ARTIFACT_FETCH_RESULT_MESSAGE, ARTIFACT_HEIGHT_MESSAGE, Config, HTML_ARTIFACT_TOOL, apply, artifactMetaFrom, buildArtifactDocument, hash, inject, name, slug, validateArtifact };
