@@ -12,5 +12,12 @@
   "ext": "js",
   "url": "/openloop/runtime/chartjs.bce154080959c574.js",
   "bytes": 206944
+ },
+ "react18": {
+  "file": "react18.js",
+  "hash": "731d621c188d2693",
+  "ext": "js",
+  "url": "/openloop/runtime/react18.731d621c188d2693.js",
+  "bytes": 142586
  }
 }

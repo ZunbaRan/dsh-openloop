@@ -31,8 +31,9 @@ Reference them by the host runtime routes (offline, version-pinned, immutable ca
 
 - `pico.*.css` — classless semantic styling base (tables/forms/cards look good for free).
 - `chartjs.*.js` — Chart.js UMD; `new Chart(...)` after the script tag.
+- `react18.*.js` — React 18.3.1 + ReactDOM UMD (globals `React` / `ReactDOM`). **Recommended React version.** No JSX build step: use `React.createElement` (or a tiny `h` helper). `ReactDOM.createRoot(document.getElementById('root')).render(...)`.
 - External CDNs are blocked. If a library you need is not preset, inline it or ask the user to preset it.
-- React is not yet preset — write vanilla JS or inline the runtime for now.
+- **React version rule (critical)**: one page = one React. Use the preset react18, OR inline your own react19 UMD — never both (two React instances = "Invalid hook call" and the page dies). React 18 libraries run on the preset; older libraries that need `ReactDOM.render`/`findDOMNode` will not work on 19.
 
 ## Theming (two modes)
 
