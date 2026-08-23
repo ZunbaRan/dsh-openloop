@@ -202,7 +202,15 @@ export class McpRuntime {
   }
 
   async start(): Promise<void> {
-    await Promise.all(this.serverIds().map((serverId) => this.ensureConnection(serverId).then(() => undefined)))
+    // 可用性修复（2026-08-23 真机事故）：外部 MCP server 不可达不应拖死整个插件树
+    // （tldraw 本地服务未启动曾导致 dsh web 完全无法启动）。
+    // 启动期尽力连接：失败记 warning 并保持 disconnected；listTools/callTool 的
+    // ensureConnection 惰性重连（既有机制），服务恢复后自愈。
+    const results = await Promise.allSettled(this.serverIds().map((serverId) => this.ensureConnection(serverId).then(() => undefined)))
+    const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+    if (failed.length > 0) {
+      console.warn(`[openloop-dsh-mcp-runtime] ${failed.length} MCP server(s) unreachable at boot (lazy retry on use): ${failed.map((r) => String(r.reason?.message ?? r.reason)).join('; ').slice(0, 300)}`)
+    }
   }
 
   async close(): Promise<void> {

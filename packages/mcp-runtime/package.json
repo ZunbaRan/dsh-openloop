@@ -1,16 +1,23 @@
 {
   "name": "@openloop/dsh-mcp-runtime",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "One shared MCP connection per server for the OpenLoop DSH MCP bundles.",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
-    ".": { "types": "./lib/index.d.ts", "default": "./lib/index.js" },
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["lib", "src", "README.md"],
+  "files": [
+    "lib",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json",

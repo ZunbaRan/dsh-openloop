@@ -273,7 +273,8 @@ var McpRuntime = class {
 		return () => state.listeners.delete(listener);
 	}
 	async start() {
-		await Promise.all(this.serverIds().map((serverId) => this.ensureConnection(serverId).then(() => void 0)));
+		const failed = (await Promise.allSettled(this.serverIds().map((serverId) => this.ensureConnection(serverId).then(() => void 0)))).filter((r) => r.status === "rejected");
+		if (failed.length > 0) console.warn(`[openloop-dsh-mcp-runtime] ${failed.length} MCP server(s) unreachable at boot (lazy retry on use): ${failed.map((r) => String(r.reason?.message ?? r.reason)).join("; ").slice(0, 300)}`);
 	}
 	async close() {
 		await Promise.all([...this.servers.values()].map((state) => this.closeServer(state)));

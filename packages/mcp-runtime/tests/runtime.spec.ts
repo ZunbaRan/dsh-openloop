@@ -152,8 +152,11 @@ describe('McpRuntime', () => {
     expect(connections).toBe(1)
     const closing = runtime.close()
     release?.(connection)
-    await expect(first).rejects.toMatchObject({ code: 'CONNECTION' })
-    await expect(second).rejects.toMatchObject({ code: 'CONNECTION' })
+    // 新契约（2026-08-23 容错修复）：start 不再向调用方传播连接失败/打断——
+    // 外部 MCP server 不可达不得阻断插件树（tldraw 事故）；close 竞态下 start
+    // 安静 resolve，由 close 负责生命周期收尾。
+    await first
+    await second
     await closing
     expect(closed).toBe(1)
     expect(runtime.status('fixture').state).toBe('closed')
