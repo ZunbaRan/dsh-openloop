@@ -12,6 +12,7 @@
  *   失败保留旧快照 + stale 角标；intervalMs（≥10s）→ setInterval 定时刷新，
  *   IntersectionObserver 在面板不可见时暂停；同一 widget 上一次未返回不重复发（防重入）。
  */
+import { getDockService } from './dock-pin.ts'
 import { Component, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { JsonObject, PanelMeta, WidgetUnit } from '../contract.ts'
@@ -45,11 +46,31 @@ export function panelMetaFrom(value: unknown): PanelMeta | undefined {
 
 // ---- 三态卡片入口（IMPL_NOTES §4.2） ----
 
+function PinToDock({ meta, title }: { meta: PanelMeta; title: string }): ReactNode {
+  const dock = getDockService()
+  if (!dock) return null
+  return (
+    <button
+      type="button"
+      title="固定到 OpenLoop Dock"
+      onClick={() => dock.pinPanel(meta, title)}
+      style={{ position: 'absolute', top: 6, right: 6, zIndex: 5, width: 24, height: 24, borderRadius: 7, border: '1px solid var(--openloop-border)', background: 'var(--openloop-elevated)', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}
+    >📌</button>
+  )
+}
+
 export function PanelCard({ block }: ToolCallViewProps) {
   if (!('kind' in block)) return <div style={caption}>OpenLoop Panel · rendering…</div>
   if (block.isError) return <div style={caption}>OpenLoop Panel · failed</div>
   const meta = panelMetaFrom(block.meta)
-  return meta ? <PanelSurface meta={meta} /> : <div style={caption}>OpenLoop Panel · metadata unavailable</div>
+  return meta
+    ? (
+      <div style={{ position: 'relative' }}>
+        <PinToDock meta={meta} title={meta.panel?.title as unknown as string ?? 'Panel'} />
+        <PanelSurface meta={meta} />
+      </div>
+    )
+    : <div style={caption}>OpenLoop Panel · metadata unavailable</div>
 }
 
 // ---- 面板外壳：标题 + 布局区 ----
@@ -88,7 +109,7 @@ const descStyle: CSSProperties = {
   color: 'var(--openloop-muted-foreground)',
 }
 
-function PanelSurface({ meta }: { meta: PanelMeta }) {
+export function PanelSurface({ meta }: { meta: PanelMeta }) {
   const theme = usePanelVisualTheme()
   // 主题变量注入宿主 DOM（真机事故：此前 tokens 只经桥发给沙箱格，宿主车道从未注入，
   // 所有 var(--openloop-*) 落空 → 面板无样式、换肤无效）

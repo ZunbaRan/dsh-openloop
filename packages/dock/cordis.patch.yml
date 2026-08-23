@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-dock
+      name: '@openloop/dsh-dock'

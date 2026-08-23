@@ -1,0 +1,62 @@
+{
+  "name": "@openloop/dsh-dock",
+  "version": "0.1.2",
+  "description": "OpenLoop Dock: pin panels and html artifacts to a draggable 12-column right-side grid (OCIX workbench port). Coexists with dsh-better-sidebar via padding-right push + space probing.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./src/client/index.tsx",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "assets",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown && node scripts/verify-client-bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@openloop/dsh-base": "workspace:*",
+    "@openloop/dsh-panels": "workspace:*",
+    "@openloop/dsh-html-artifact": "workspace:*",
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-tool": "0.1.0-rc.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@types/react": "~18.3.1",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.1",
+    "@dnd-kit/core": "^6.3.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web",
+      "external": [
+        "@openloop/dsh-base/client",
+        "@openloop/dsh-panels/client",
+        "@openloop/dsh-html-artifact/client"
+      ]
+    }
+  }
+}

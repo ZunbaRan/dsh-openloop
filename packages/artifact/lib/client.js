@@ -146,6 +146,15 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 			};
 		}
 		//#endregion
+		//#region src/client/dock-pin.ts
+		let dockService;
+		function setDockService(service) {
+			dockService = service;
+		}
+		function getDockService() {
+			return dockService;
+		}
+		//#endregion
 		//#region src/client/ArtifactCard.tsx
 		const caption = {
 			color: "var(--dsw-alias-label-caption)",
@@ -287,12 +296,21 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 							alignItems: "center",
 							gap: 8
 						},
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, { children: meta.runtime === "static" ? "Static" : "Interactive" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
-							size: "sm",
-							variant: "toolbar",
-							onClick: () => setFullscreen(true),
-							children: "Fullscreen"
-						})]
+						children: [
+							getDockService() ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+								size: "sm",
+								variant: "toolbar",
+								onClick: () => getDockService()?.pinArtifact(meta, meta.title),
+								children: "📌 Pin"
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Pill, { children: meta.runtime === "static" ? "Static" : meta.runtime === "network" ? "Network" : "Interactive" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+								size: "sm",
+								variant: "toolbar",
+								onClick: () => setFullscreen(true),
+								children: "Fullscreen"
+							})
+						]
 					})]
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					style: { padding: 8 },
@@ -365,6 +383,9 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		const name = "openloop-html-artifact";
 		const inject = ["slots"];
 		function apply(ctx) {
+			ctx.inject(["openloop-dock/client"], (dockCtx) => {
+				setDockService(dockCtx["openloop-dock/client"]);
+			});
 			const scope = (0, _openloop_dsh_base_client.createOpenLoopSettingsScope)();
 			const ThemedArtifactCard = (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactCard, {
 				...props,
@@ -376,7 +397,9 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 			}, ThemedArtifactCard));
 		}
 		//#endregion
+		exports.ArtifactFrame = ArtifactFrame;
 		exports.apply = apply;
+		exports.getDockService = getDockService;
 		exports.inject = inject;
 		exports.name = name;
 		return module.exports;

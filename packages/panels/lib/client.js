@@ -7,6 +7,8 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
+		function getDockService() {}
+		//#endregion
 		//#region src/presets/accordion/schema.ts
 		/**
 		* accordion props JSON Schema。
@@ -5670,6 +5672,9 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 				resolvedAt: typeof record.resolvedAt === "string" ? record.resolvedAt : ""
 			};
 		}
+		function PinToDock({ meta, title }) {
+			return null;
+		}
 		function PanelCard({ block }) {
 			if (!("kind" in block)) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: caption,
@@ -5680,7 +5685,13 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 				children: "OpenLoop Panel · failed"
 			});
 			const meta = panelMetaFrom(block.meta);
-			return meta ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			return meta ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: { position: "relative" },
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PinToDock, {
+					meta,
+					title: meta.panel?.title ?? "Panel"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta })]
+			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: caption,
 				children: "OpenLoop Panel · metadata unavailable"
 			});
@@ -6122,7 +6133,9 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		}
 		//#endregion
 		exports.PanelCard = PanelCard;
+		exports.PanelSurface = PanelSurface;
 		exports.apply = apply;
+		exports.getDockService = getDockService;
 		exports.inject = inject;
 		exports.name = name;
 		exports.panelMetaFrom = panelMetaFrom;

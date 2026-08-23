@@ -5,7 +5,11 @@ import { PanelCard } from './PanelCard.tsx'
 export const name = 'openloop-dsh-panels'
 export const inject = ['slots']
 
-export { PanelCard, panelMetaFrom } from './PanelCard.tsx'
+export { PanelCard, PanelSurface, panelMetaFrom } from './PanelCard.tsx'
+
+// ---- OpenLoop Dock pin 接线（可选依赖）----
+import { setDockService, type DockServiceLike } from './dock-pin.ts'
+export { getDockService } from './dock-pin.ts' 
 
 export function apply(ctx: ClientContext): void {
   // key = 服务端 tool 名 'panel'（tool.ts），逐字一致

@@ -4,6 +4,7 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { ARTIFACT_FETCH_MESSAGE, ARTIFACT_FETCH_RESULT_MESSAGE, ARTIFACT_HEIGHT_MESSAGE, artifactMetaFrom, type ArtifactMeta } from '../contract.ts'
 import { buildArtifactDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
+import { getDockService } from './dock-pin.ts'
 import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
 
 const caption: CSSProperties = { color: 'var(--dsw-alias-label-caption)', fontSize: 12 }
@@ -15,7 +16,7 @@ function firstText(content: readonly unknown[]): string | undefined {
   return undefined
 }
 
-function ArtifactFrame({ meta, token, fullscreen, scope }: { meta: ArtifactMeta; token: string; fullscreen: boolean; scope: OpenLoopSettingsScope }) {
+export function ArtifactFrame({ meta, token, fullscreen, scope }: { meta: ArtifactMeta; token: string; fullscreen: boolean; scope: OpenLoopSettingsScope }) {
   const [height, setHeight] = useState(fullscreen ? 700 : 520)
   const frameRef = useRef<HTMLIFrameElement>(null)
   const theme = useOpenLoopVisualTheme(scope)
@@ -76,7 +77,9 @@ function ArtifactSurface({ meta, callId, scope }: { meta: ArtifactMeta; callId: 
     <section style={{ ...theme.style, border: '1px solid var(--openloop-border)', borderRadius: 'var(--openloop-radius-lg)', overflow: 'hidden', background: 'var(--openloop-surface)', color: 'var(--openloop-foreground)', boxShadow: 'var(--openloop-shadow-2)' }} data-openloop-preset={theme.settings.preset}>
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px 10px 15px', borderBottom: '1px solid var(--openloop-border)' }}>
         <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 650, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{meta.title}</div><div style={{ ...caption, marginTop: 2 }}>{meta.path}</div></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Pill>{meta.runtime === 'static' ? 'Static' : 'Interactive'}</Pill><Button size="sm" variant="toolbar" onClick={() => setFullscreen(true)}>Fullscreen</Button></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {getDockService() ? <Button size="sm" variant="toolbar" onClick={() => getDockService()?.pinArtifact(meta, meta.title)}>📌 Pin</Button> : null}
+          <Pill>{meta.runtime === 'static' ? 'Static' : meta.runtime === 'network' ? 'Network' : 'Interactive'}</Pill><Button size="sm" variant="toolbar" onClick={() => setFullscreen(true)}>Fullscreen</Button></div>
       </header>
       <div style={{ padding: 8 }}><ArtifactFrame meta={meta} token={callId} fullscreen={false} scope={scope} /></div>
     </section>
