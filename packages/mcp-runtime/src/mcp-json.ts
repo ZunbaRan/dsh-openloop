@@ -20,8 +20,8 @@
  * - 可选 "protocol": "legacy" | "auto" | "2026-07-28"（缺省 auto 探测）
  * - 坏条目跳过并 warning（fail-open 至合法子集，与 boot 容错一致）
  */
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { McpServerConfig } from './types.ts'
 
@@ -149,4 +149,63 @@ export function mergeServerConfigs(base: readonly McpServerConfig[], scoped: rea
   for (const server of base) merged.set(server.id, server)
   for (const server of scoped) merged.set(server.id, server)
   return [...merged.values()]
+}
+
+/**
+ * 向指定 mcp.json upsert 一个 server（保留文件中其他条目与字段顺序）。
+ * 文件不存在时创建（含目录）。
+ */
+export function upsertServerToFile(path: string, id: string, raw: unknown): void {
+  let doc: { servers?: Record<string, unknown> } = {}
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+      if (typeof parsed === 'object' && parsed !== null) doc = parsed as { servers?: Record<string, unknown> }
+    } catch {
+      // 坏文件：覆盖前保留备份
+      try { writeFileSync(`${path}.bak`, readFileSync(path, 'utf8')) } catch { /* ignore */ }
+      doc = {}
+    }
+  }
+  if (doc.servers === undefined || typeof doc.servers !== 'object' || doc.servers === null) doc.servers = {}
+  doc.servers[id] = raw
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
+}
+
+/** 从指定 mcp.json 移除一个 server（文件/条目不存在时静默）。 */
+export function removeServerFromFile(path: string, id: string): boolean {
+  if (!existsSync(path)) return false
+  let doc: { servers?: Record<string, unknown> }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    if (typeof parsed !== 'object' || parsed === null) return false
+    doc = parsed as { servers?: Record<string, unknown> }
+  } catch {
+    return false
+  }
+  if (doc.servers === undefined || !(id in doc.servers)) return false
+  delete doc.servers[id]
+  writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`, 'utf8')
+  return true
+}
+
+/** 列出两作用域文件的 server（标注来源），供 admin 路由。 */
+export function listScopedServers(options: ScopedMcpJsonOptions = {}): Array<{ source: 'user' | 'project'; config: McpServerConfig }> {
+  const dshHome = options.dshHome ?? DEFAULT_DSH_HOME()
+  const projectDir = options.projectDir ?? process.cwd()
+  const user = readMcpJsonFile(join(dshHome, 'mcp.json'))
+  const project = readMcpJsonFile(join(projectDir, '.dsh', 'mcp.json'))
+  const projectIds = new Set(project.map(s => s.id))
+  return [
+    ...user.filter(s => !projectIds.has(s.id)).map(config => ({ source: 'user' as const, config })),
+    ...project.map(config => ({ source: 'project' as const, config })),
+  ]
+}
+
+/** 作用域文件路径（写操作用）。 */
+export function scopedFilePath(scope: 'user' | 'project', options: ScopedMcpJsonOptions = {}): string {
+  const dshHome = options.dshHome ?? DEFAULT_DSH_HOME()
+  const projectDir = options.projectDir ?? process.cwd()
+  return scope === 'user' ? join(dshHome, 'mcp.json') : join(projectDir, '.dsh', 'mcp.json')
 }

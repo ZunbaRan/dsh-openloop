@@ -3,6 +3,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // one DSH client module, so it must not require a second package module at
 // runtime; host-side composition still uses the Apps package normally.
 import { apply as applyAppsClient } from '../../../mcp-apps/src/client/index.tsx'
+import { McpSettingsSection } from './McpSettingsSection.tsx'
 
 const MCP_APP_TOOL_NAMES = [
   'mcp__fixture__mcp_app_tool',
@@ -19,4 +20,15 @@ export function apply(ctx: ClientContext): void {
   // The shipped DSH toolview seat is exact-keyed. This fixture binding is
   // intentionally owned by the fixture/meta composition, not mcp-apps core.
   applyAppsClient(ctx, { toolNames: MCP_APP_TOOL_NAMES })
+  // MCP server 管理 settings section（可视化配置 + 试连）。
+  // 'settings.section' 由宿主 dsh-settings 运行时声明（better-sidebar 同款模式），
+  // 官方类型清单未收录——类型断言放行，运行时 slots.inject 等待其声明。
+  const slots = ctx.slots as unknown as {
+    inject: (slot: string, register: () => () => void) => void
+    register: (options: { name: string; label: () => string }, component: React.ComponentType) => () => void
+  }
+  slots.inject('settings.section', () => slots.register(
+    { name: 'settings.section', label: () => 'MCP servers' },
+    McpSettingsSection,
+  ))
 }

@@ -1,5 +1,6 @@
 import { Context, Service } from "@deepseek-ai/cordis";
 import { CallToolResult, ReadResourceResult, Tool } from "@modelcontextprotocol/client";
+import { WebServer } from "@deepseek-ai/dsh-host-webserver";
 //#region src/types.d.ts
 type JsonObject = Record<string, unknown>;
 type McpTransportConfig = {
@@ -121,6 +122,28 @@ interface ScopedMcpJsonOptions {
 declare function loadScopedMcpServers(options?: ScopedMcpJsonOptions): McpServerConfig[];
 /** 合并：cordis config（bundle/编程，最低）← mcp.json 作用域（高） */
 declare function mergeServerConfigs(base: readonly McpServerConfig[], scoped: readonly McpServerConfig[]): McpServerConfig[];
+/**
+ * 向指定 mcp.json upsert 一个 server（保留文件中其他条目与字段顺序）。
+ * 文件不存在时创建（含目录）。
+ */
+declare function upsertServerToFile(path: string, id: string, raw: unknown): void;
+/** 从指定 mcp.json 移除一个 server（文件/条目不存在时静默）。 */
+declare function removeServerFromFile(path: string, id: string): boolean;
+/** 列出两作用域文件的 server（标注来源），供 admin 路由。 */
+declare function listScopedServers(options?: ScopedMcpJsonOptions): Array<{
+  source: 'user' | 'project';
+  config: McpServerConfig;
+}>;
+/** 作用域文件路径（写操作用）。 */
+declare function scopedFilePath(scope: 'user' | 'project', options?: ScopedMcpJsonOptions): string;
+//#endregion
+//#region src/admin-routes.d.ts
+declare const MCP_ADMIN_ROUTE = "/openloop/mcp/servers";
+interface AdminRouteOptions {
+  dshHome?: string;
+  projectDir?: string;
+}
+declare function registerMcpAdminRoutes(ctx: Context, webServer: WebServer, options?: AdminRouteOptions): () => void;
 //#endregion
 //#region src/validation.d.ts
 declare const MCP_APP_MIME = "text/html;profile=mcp-app";
@@ -212,4 +235,4 @@ declare const _default: {
   apply: typeof apply;
 };
 //#endregion
-export { JsonObject, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppResource, McpAppResourceReference, McpCallResult, McpConnection, McpConnectionFactory, McpConnectionFactoryOptions, McpResourceValidationOptions, McpRuntime, McpRuntimeConfig, McpRuntimeError, McpRuntimeErrorCode, McpRuntimeOptions, McpRuntimeService, McpRuntimeStatus, McpServerConfig, McpToolRecord, McpTransportConfig, McpUiBinding, RawMcpResourceContents, ScopedMcpJsonOptions, appContentSecurityPolicy, apply, asJsonObject, _default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };
+export { JsonObject, MCP_ADMIN_ROUTE, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppResource, McpAppResourceReference, McpCallResult, McpConnection, McpConnectionFactory, McpConnectionFactoryOptions, McpResourceValidationOptions, McpRuntime, McpRuntimeConfig, McpRuntimeError, McpRuntimeErrorCode, McpRuntimeOptions, McpRuntimeService, McpRuntimeStatus, McpServerConfig, McpToolRecord, McpTransportConfig, McpUiBinding, RawMcpResourceContents, ScopedMcpJsonOptions, appContentSecurityPolicy, apply, asJsonObject, _default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, listScopedServers, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, registerMcpAdminRoutes, removeServerFromFile, scopedFilePath, upsertServerToFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };

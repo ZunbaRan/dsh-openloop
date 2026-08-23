@@ -86,23 +86,27 @@ export function DockHost({ open, width, children }: DockHostProps): ReactNode {
 
   if (!host || !open) return null
 
+  // right 定位 = 视口右缘到 rightEdge 的距离：
+  // - 无 bsb：rightEdge = window.innerWidth → right = 0 → 贴视口右缘
+  // - 有 bsb：rightEdge = bsb.left → right = window.innerWidth - bsb.left = bsb 占据的左缘
+  //   距离 → dock 右边贴 bsb 左边，width 由 prop 决定（不超出 rightEdge）
+  // 修前 bug：旧版用 `left: rightEdge - width` 在 bsb 存在时让 dock 跑出屏幕左外
   const style: CSSProperties = {
     position: 'fixed',
     top: 0,
     bottom: 0,
-    left: undefined as never,
-    right: undefined as never,
-    // 定位由 rightEdge 决定：贴探测到的右缘（better-sidebar 左侧或视口右缘）
+    right: typeof window === 'undefined' ? 0 : Math.max(0, window.innerWidth - rightEdge),
     width,
-    zIndex: 2147483000,
+    zIndex: 2147483050, // 略高于 better-sidebar 渲染层，避免被遮（其 zIndex 段 2147483xxx）
     display: 'flex',
     flexDirection: 'column',
     background: 'var(--dsw-alias-bg-layer-1, #fff)',
     borderLeft: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))',
+    boxShadow: '-4px 0 14px rgba(0,0,0,.06)',
     boxSizing: 'border-box',
   }
   return createPortal(
-    <div style={{ ...style, left: rightEdge - width }} data-openloop-dock-panel="">{children}</div>,
+    <div style={style} data-openloop-dock-panel="">{children}</div>,
     host,
   )
 }

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Service } from "@deepseek-ai/cordis";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 //#region src/validation.ts
 const MCP_APP_MIME = "text/html;profile=mcp-app";
@@ -285,6 +285,191 @@ function mergeServerConfigs(base, scoped) {
 	for (const server of base) merged.set(server.id, server);
 	for (const server of scoped) merged.set(server.id, server);
 	return [...merged.values()];
+}
+/**
+* 向指定 mcp.json upsert 一个 server（保留文件中其他条目与字段顺序）。
+* 文件不存在时创建（含目录）。
+*/
+function upsertServerToFile(path, id, raw) {
+	let doc = {};
+	if (existsSync(path)) try {
+		const parsed = JSON.parse(readFileSync(path, "utf8"));
+		if (typeof parsed === "object" && parsed !== null) doc = parsed;
+	} catch {
+		try {
+			writeFileSync(`${path}.bak`, readFileSync(path, "utf8"));
+		} catch {}
+		doc = {};
+	}
+	if (doc.servers === void 0 || typeof doc.servers !== "object" || doc.servers === null) doc.servers = {};
+	doc.servers[id] = raw;
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+}
+/** 从指定 mcp.json 移除一个 server（文件/条目不存在时静默）。 */
+function removeServerFromFile(path, id) {
+	if (!existsSync(path)) return false;
+	let doc;
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8"));
+		if (typeof parsed !== "object" || parsed === null) return false;
+		doc = parsed;
+	} catch {
+		return false;
+	}
+	if (doc.servers === void 0 || !(id in doc.servers)) return false;
+	delete doc.servers[id];
+	writeFileSync(path, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+	return true;
+}
+/** 列出两作用域文件的 server（标注来源），供 admin 路由。 */
+function listScopedServers(options = {}) {
+	const dshHome = options.dshHome ?? DEFAULT_DSH_HOME();
+	const projectDir = options.projectDir ?? process.cwd();
+	const user = readMcpJsonFile(join(dshHome, "mcp.json"));
+	const project = readMcpJsonFile(join(projectDir, ".dsh", "mcp.json"));
+	const projectIds = new Set(project.map((s) => s.id));
+	return [...user.filter((s) => !projectIds.has(s.id)).map((config) => ({
+		source: "user",
+		config
+	})), ...project.map((config) => ({
+		source: "project",
+		config
+	}))];
+}
+/** 作用域文件路径（写操作用）。 */
+function scopedFilePath(scope, options = {}) {
+	const dshHome = options.dshHome ?? DEFAULT_DSH_HOME();
+	const projectDir = options.projectDir ?? process.cwd();
+	return scope === "user" ? join(dshHome, "mcp.json") : join(projectDir, ".dsh", "mcp.json");
+}
+//#endregion
+//#region src/admin-routes.ts
+const MCP_ADMIN_ROUTE = "/openloop/mcp/servers";
+async function readBody(req, maxBytes = 65536) {
+	const chunks = [];
+	let total = 0;
+	for await (const chunk of req) {
+		total += chunk.byteLength;
+		if (total > maxBytes) throw new Error("request body too large");
+		chunks.push(chunk);
+	}
+	return Buffer.concat(chunks).toString("utf8");
+}
+function json(res, status, body) {
+	res.setHeader("Content-Type", "application/json");
+	res.setHeader("Cache-Control", "no-store");
+	res.statusCode = status;
+	res.end(JSON.stringify(body));
+}
+function registerMcpAdminRoutes(ctx, webServer, options = {}) {
+	const handler = (req, res) => {
+		handle(req, res, options);
+	};
+	return webServer.register({
+		kind: "prefix",
+		path: MCP_ADMIN_ROUTE,
+		handler
+	});
+}
+async function handle(req, res, options) {
+	const parts = new URL(req.url ?? "/", "http://loopback.invalid").pathname.split("/").filter(Boolean).slice(2);
+	const method = req.method ?? "GET";
+	try {
+		if (method === "POST" && parts[0] === "servers" && parts[1] === "test") {
+			const body = JSON.parse(await readBody(req));
+			const config = parseServerEntry(typeof body.id === "string" && body.id.length > 0 ? body.id : "test", body.entry);
+			if (config === void 0) {
+				json(res, 200, {
+					ok: false,
+					error: "invalid server entry (check type/command/url)"
+				});
+				return;
+			}
+			const runtime = new McpRuntime({
+				servers: [config],
+				requestTimeoutMs: 8e3
+			});
+			try {
+				await runtime.start();
+				const tools = await runtime.listTools(config.id);
+				json(res, 200, {
+					ok: true,
+					toolCount: tools.length,
+					tools: tools.slice(0, 30).map((t) => t.name)
+				});
+			} finally {
+				await runtime.close();
+			}
+			return;
+		}
+		if (method === "GET" && parts.length === 1 && parts[0] === "servers") {
+			json(res, 200, {
+				ok: true,
+				servers: listScopedServers(options).map(({ source, config }) => ({
+					id: config.id,
+					source,
+					kind: config.transport.kind,
+					endpoint: config.transport.kind === "stdio" ? config.transport.command : config.transport.url,
+					protocol: config.protocol ?? "auto"
+				}))
+			});
+			return;
+		}
+		if (method === "PUT" && parts[0] === "servers" && parts.length === 3) {
+			const scope = parts[1];
+			const id = parts[2];
+			if (scope !== "user" && scope !== "project") {
+				json(res, 200, {
+					ok: false,
+					error: "scope must be user or project"
+				});
+				return;
+			}
+			const entry = JSON.parse(await readBody(req));
+			if (parseServerEntry(id, entry) === void 0) {
+				json(res, 200, {
+					ok: false,
+					error: "invalid server entry (check type/command/url)"
+				});
+				return;
+			}
+			upsertServerToFile(scopedFilePath(scope, options), id, entry);
+			json(res, 200, {
+				ok: true,
+				note: "saved; restart DSH to activate"
+			});
+			return;
+		}
+		if (method === "DELETE" && parts[0] === "servers" && parts.length === 3) {
+			const scope = parts[1];
+			const id = parts[2];
+			if (scope !== "user" && scope !== "project") {
+				json(res, 200, {
+					ok: false,
+					error: "scope must be user or project"
+				});
+				return;
+			}
+			json(res, 200, removeServerFromFile(scopedFilePath(scope, options), id) ? {
+				ok: true,
+				note: "removed; restart DSH to activate"
+			} : {
+				ok: false,
+				error: "not found"
+			});
+			return;
+		}
+		json(res, 404, {
+			ok: false,
+			error: "not found"
+		});
+	} catch (error) {
+		json(res, 200, {
+			ok: false,
+			error: error instanceof Error ? error.message : String(error)
+		});
+	}
 }
 //#endregion
 //#region src/index.ts
@@ -787,6 +972,7 @@ async function apply(ctx, config) {
 		...config,
 		servers
 	}).start();
+	ctx.effect(() => registerMcpAdminRoutes(ctx, ctx.webServer), "openloop-dsh-mcp-runtime: admin routes");
 }
 var src_default = {
 	name,
@@ -794,4 +980,4 @@ var src_default = {
 	apply
 };
 //#endregion
-export { MCP_APP_MAX_BYTES, MCP_APP_MIME, McpRuntime, McpRuntimeError, McpRuntimeService, appContentSecurityPolicy, apply, asJsonObject, src_default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };
+export { MCP_ADMIN_ROUTE, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpRuntime, McpRuntimeError, McpRuntimeService, appContentSecurityPolicy, apply, asJsonObject, src_default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, listScopedServers, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, registerMcpAdminRoutes, removeServerFromFile, scopedFilePath, upsertServerToFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };

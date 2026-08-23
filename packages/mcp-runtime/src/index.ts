@@ -37,8 +37,10 @@ import type {
 
 export * from './types.ts'
 import { loadScopedMcpServers, mergeServerConfigs } from './mcp-json.ts'
+import { registerMcpAdminRoutes } from './admin-routes.ts'
 
 export * from './mcp-json.ts'
+export * from './admin-routes.ts'
 export * from './validation.ts'
 
 const DEFAULT_CLIENT_NAME = 'OpenLoop DSH MCP Host'
@@ -655,6 +657,11 @@ export async function apply(ctx: Context, config: McpRuntimeOptions): Promise<vo
   const servers = mergeServerConfigs(config.servers ?? [], loadScopedMcpServers())
   const service = new McpRuntimeService(ctx, { ...config, servers })
   await service.start()
+  // MCP admin 路由（settings page 服务端：list/upsert/remove/test）
+  ctx.effect(
+    () => registerMcpAdminRoutes(ctx, ctx.webServer),
+    'openloop-dsh-mcp-runtime: admin routes',
+  )
 }
 
 export default { name, inject, apply }

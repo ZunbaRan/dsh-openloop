@@ -86,22 +86,22 @@ window.__ModuleLoader__.load({
 				};
 			}, [open, width]);
 			if (!host || !open) return null;
+			const style = {
+				position: "fixed",
+				top: 0,
+				bottom: 0,
+				right: typeof window === "undefined" ? 0 : Math.max(0, window.innerWidth - rightEdge),
+				width,
+				zIndex: 2147483050,
+				display: "flex",
+				flexDirection: "column",
+				background: "var(--dsw-alias-bg-layer-1, #fff)",
+				borderLeft: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
+				boxShadow: "-4px 0 14px rgba(0,0,0,.06)",
+				boxSizing: "border-box"
+			};
 			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				style: {
-					position: "fixed",
-					top: 0,
-					bottom: 0,
-					left: void 0,
-					right: void 0,
-					width,
-					zIndex: 2147483e3,
-					display: "flex",
-					flexDirection: "column",
-					background: "var(--dsw-alias-bg-layer-1, #fff)",
-					borderLeft: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
-					boxSizing: "border-box",
-					left: rightEdge - width
-				},
+				style,
 				"data-openloop-dock-panel": "",
 				children
 			}), host);
