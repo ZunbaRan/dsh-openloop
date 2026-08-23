@@ -2738,7 +2738,7 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/index.tsx
 		const name = "openloop-dock";
-		const inject = ["runtime"];
+		const inject = [];
 		function DockToggle({ open, onToggle, count }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",

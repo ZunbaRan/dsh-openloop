@@ -6,7 +6,6 @@
  * - 右上角浮动开关（不依赖 slots，零冲突）
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
 import { createElement, useEffect, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { DockHost } from './DockHost.tsx'
@@ -14,7 +13,8 @@ import { DockBoardView } from './DockBoardView.tsx'
 import { dockStore, type DockTile } from './store.ts'
 
 export const name = 'openloop-dock'
-export const inject = ['runtime']
+// dock 不依赖宿主 cordis 服务（自主渲染 + provide service）——空 inject
+export const inject: string[] = []
 
 export interface DockClientService {
   /** 固定一个面板（快照语义：meta 含 panel + resolved） */
