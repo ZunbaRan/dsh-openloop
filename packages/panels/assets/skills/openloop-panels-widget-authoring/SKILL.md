@@ -9,7 +9,7 @@ description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选�
 
 > **调用约定（重要）**：`panel` 参数**直接传 JSON 对象**（`{"$schema":"openloop.panel/v1","id":"...","title":"...","widgets":[...]}`），不要把它字符串化成一段 JSON 文本——对象形式有完整的结构引导，校验信息也更易自修正。
 
-## 1. 资源选择阶梯（默认路由，优先用左边）
+## 0. 资源选择阶梯（默认路由，优先用左边）
 
 ```
 ① 预设组件能表达 → 用预设（零成本车道：无 runtime、≈0 内存、原生换肤）
@@ -19,15 +19,48 @@ description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选�
 
 写 widget 前先自问：预设有没有？结构不够？品牌要求强不强？**能预设就别写代码。**
 
-## 1A. 大面板工作流：write 文件 + panelFile（强烈推荐）
+## 1. 面板构建通道（按复杂度选）
 
-把 PanelDefinition 作为**内嵌 JSON 字符串**传参时需要双层转义，超过约 30 行的定义容易写坏（实测长面板语法错误率极高）。**大型/多 widget 面板一律走文件通道**：
+| 场景 | 通道 | 说明 |
+|---|---|---|
+| 小面板（≤3 个简单 widget） | 直传 panel 对象 | 一次工具调用 |
+| **复杂面板（多 widget/图表/容器组合）** | **代码生成（主推）** | 见下，写代码比手写 JSON 快且不会踩契约坑 |
+| 调试已有面板 JSON | panelFile | write/edit 文件后渲染 |
 
-1. 先用 write 工具把面板 JSON 写入 `panels/<id>.json`（write 的内容是单层纯文本，无转义问题）；
-2. 再调用 `panel { "panelFile": "panels/<id>.json" }` 渲染；
-3. 修改面板：read 该文件 → 局部修改 → write 回去 → 重新 panelFile 渲染（同 id 即更新）。
+### 代码生成工作流（复杂面板首选，推荐所有面板）
 
-优先级：`panel`（直传对象）> `panelFile`（文件）> `load`（归档唤起）。小面板（<30 行）直接传对象即可。
+本 skill 自带 Python 生成器库（openloop_panels），**契约内化到函数签名**——枚举/边界/容器规则在构造期校验，手写 JSON 会踩的坑（series 必填、tone 枚举、列 id、数字 values）在这里结构性不会发生：
+
+1. write `gen_panel.py`（库路径 = 本 skill 目录下 `scripts/`）：
+
+```python
+import sys; sys.path.insert(0, "<skill_dir>/scripts")
+from openloop_panels import Panel, grid, card, metrics, donut, gauge, funnel, heatmap, callout, heading, text
+
+p = Panel("data-insights", title="数据洞察")
+p.layout_grid(columns=2)
+p.add(card(donut([("订阅", 62), ("定制", 38)], title="营收构成"), title="收入"))
+p.add(card(gauge("完成率", 72, tone="info"), title="进度"))
+p.add(metrics([("月营收", 48210, "+12.4%", "currency"), ("订单数", 1208, "-2.1%")]))
+p.save("panels/data-insights.json")
+```
+
+2. bash 执行：`python3 gen_panel.py`
+3. 渲染：`panel { "panelFile": "panels/data-insights.json" }`
+4. 修改：编辑脚本重跑（或 read 生成的 JSON 局部改）
+
+组合子速查（全部返回 widget dict，可直接嵌套）：
+- `metrics([(label, value, delta?, fmt?)...], title=?)` 指标组（delta 自动推断涨跌色）
+- `donut([(label, value)...])` / `bar(rows, [(key,label)...], x_key)` / `line(...)` 图表（series 契约自动内化）
+- `gauge(label, 0-100)` / `funnel([(label, value, detail?)...])` / `heatmap(matrix, row_labels, col_labels)`
+- `table([(key, label, align?)...], rows, title=?)` / `callout(text, tone=?, title=?)`
+- `text(s)` / `heading(s)` / `badge(label, tone=?)` / `divider()`
+- 容器：`card(children, title=?)`、`grid(children, columns=2)`、`stack(children)`（两层规则构造期强制：布局>分组>叶子）
+- `Panel(id, title).add(widget)` → `.save(path)`；非法输入抛 `PanelBuildError`（中文消息带合法值）
+
+### panelFile 通道（调试/微调 JSON 用）
+
+write `panels/<id>.json`（单层编码无转义问题）→ `panel { "panelFile": "..." }`；修改 = read → 局部改 → write → 重渲染。优先级：panel > panelFile > load。
 
 ## 2. 预设组件速查（26 个已实现；未列出的 kind 尚未实现，勿用）
 
