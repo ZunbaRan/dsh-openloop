@@ -1986,6 +1986,6 @@ declare function resolvePalette(settings: OpenLoopVisualSettings, systemDark: bo
 };
 declare function paletteVariables(settings: OpenLoopVisualSettings, systemDark: boolean): Record<string, string>;
 declare const name = "openloop-dsh-base";
-declare function apply(ctx: Context, config: Config): Promise<void>;
+declare function apply(ctx: Context, config: Config): void;
 //#endregion
 export { Config, DEFAULT_OPENLOOP_SETTINGS, OPENLOOP_GLOBAL_TOKENS, OPENLOOP_PRESETS, OPENLOOP_PRESET_IDS, OPENLOOP_SETTINGS_NAMESPACE, OpenLoopAppearance, OpenLoopPreset, OpenLoopResolvedAppearance, OpenLoopVisualSettings, PRESET_META, apply, decodeOpenLoopSettings, name, paletteVariables, resolvePalette };

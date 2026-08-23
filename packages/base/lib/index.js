@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 //#region src/server/runtime-assets.ts
 /**
 * OpenLoop base · runtime 资产共享路由（/openloop/runtime 前缀，注册制）。
@@ -2070,11 +2071,11 @@ function paletteVariables(settings, systemDark) {
 	return Object.fromEntries(Object.entries(values).map(([key, value]) => [`--openloop-${key}`, value]));
 }
 const name = "openloop-dsh-base";
-async function apply(ctx, config) {
+function apply(ctx, config) {
 	const runtimeAssets = createRuntimeAssetsService();
 	ctx.provide("openloop-base/runtime", runtimeAssets);
 	const presetDir = fileURLToPath(new URL("../assets/preset/", import.meta.url));
-	const presetManifest = JSON.parse(await readFile(join(presetDir, "manifest.json"), "utf8"));
+	const presetManifest = JSON.parse(readFileSync(join(presetDir, "manifest.json"), "utf8"));
 	for (const name of Object.keys(presetManifest)) runtimeAssets.registerRuntimeAssets([name], { dir: presetDir });
 	ctx.inject(["webServer"], (webCtx) => {
 		new RuntimeAssetsRoute(webCtx.webServer, runtimeAssets.resolve.bind(runtimeAssets)).register(webCtx);

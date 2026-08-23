@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
@@ -74,7 +74,7 @@ export function paletteVariables(settings: OpenLoopVisualSettings, systemDark: b
 // 服务端不注册任何能力：工具/路由在 panels 等消费者包里；本包的价值在 client 半（设置页 + 共享 token 模块）。
 export const name = 'openloop-dsh-base'
 
-export async function apply(ctx: Context, config: Config): Promise<void> {
+export function apply(ctx: Context, config: Config): void {
   // 服务端公共能力接线（base 重构 2026-08-22）：
   // 1) runtime 资产注册 service（单例注册表；消费者经 ctx.inject 使用——
   //    不能走模块导入，消费者会把 base/server 打成无状态副本导致注册表分裂）
@@ -82,8 +82,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   ctx.provide('openloop-base/runtime', runtimeAssets)
   // 预置公共库（v2 首批：pico.css / chart.js UMD；react19 完整 runtime 后续批次）
   // URL 带 content hash（manifest.json 构建期生成），磁盘文件在 assets/preset/。
+  // 同步读取（readFileSync）——async apply 会在 cordis fiber 上留下
+  // 「cannot create effect on inactive context」隐患（0.4.2→0.4.3 修复，
+  // disable→enable 循环后复现）。
   const presetDir = fileURLToPath(new URL('../assets/preset/', import.meta.url))
-  const presetManifest = JSON.parse(await readFile(join(presetDir, 'manifest.json'), 'utf8')) as Record<string, { hash: string }>
+  const presetManifest = JSON.parse(readFileSync(join(presetDir, 'manifest.json'), 'utf8')) as Record<string, { hash: string }>
   for (const name of Object.keys(presetManifest)) {
     runtimeAssets.registerRuntimeAssets([name], { dir: presetDir })
   }
