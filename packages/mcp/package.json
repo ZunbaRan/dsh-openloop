@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-mcp",
-  "version": "0.1.13",
+  "version": "0.2.1",
   "description": "Installable OpenLoop DSH MCP tool and MCP Apps foundation bundle.",
   "private": true,
   "type": "module",

@@ -36,6 +36,9 @@ import type {
 } from './types.ts'
 
 export * from './types.ts'
+import { loadScopedMcpServers, mergeServerConfigs } from './mcp-json.ts'
+
+export * from './mcp-json.ts'
 export * from './validation.ts'
 
 const DEFAULT_CLIENT_NAME = 'OpenLoop DSH MCP Host'
@@ -647,7 +650,10 @@ declare module '@deepseek-ai/cordis' {
 export const name = 'openloop-dsh-mcp-runtime'
 export const inject = ['webServer']
 export async function apply(ctx: Context, config: McpRuntimeOptions): Promise<void> {
-  const service = new McpRuntimeService(ctx, config)
+  // 多作用域 mcp.json（对齐 dsh-plugin-mcp 参考实现，2026-08-23）：
+  // cordis config.servers（bundle 默认，现已清空）为底 ← ~/.dsh/mcp.json ← 项目 .dsh/mcp.json
+  const servers = mergeServerConfigs(config.servers ?? [], loadScopedMcpServers())
+  const service = new McpRuntimeService(ctx, { ...config, servers })
   await service.start()
 }
 

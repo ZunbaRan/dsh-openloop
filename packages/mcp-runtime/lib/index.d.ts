@@ -101,6 +101,27 @@ interface McpResourceValidationOptions {
   readonly maxBytes?: number;
 }
 //#endregion
+//#region src/mcp-json.d.ts
+/** ${VAR} 环境变量插值（未定义变量替换为空串并 warning） */
+declare function interpolateEnv(value: string): string;
+/** 单条 mcp.json server 条目 → McpServerConfig；非法返回 undefined（warning 已打） */
+declare function parseServerEntry(id: string, raw: unknown): McpServerConfig | undefined;
+/** 读单个 mcp.json 文件 → 合法 server 列表（文件缺失/坏 JSON → 空列表 + warning） */
+declare function readMcpJsonFile(path: string): McpServerConfig[];
+interface ScopedMcpJsonOptions {
+  /** DSH home（缺省 $DSH_HOME 或 ~/.dsh） */
+  dshHome?: string;
+  /** 项目目录（缺省 process.cwd()） */
+  projectDir?: string;
+}
+/**
+ * 多作用域加载与合并（user → project，按 id 后者覆盖前者）。
+ * cordis config.servers 的合并在调用方完成（bundle 层最低优先级）。
+ */
+declare function loadScopedMcpServers(options?: ScopedMcpJsonOptions): McpServerConfig[];
+/** 合并：cordis config（bundle/编程，最低）← mcp.json 作用域（高） */
+declare function mergeServerConfigs(base: readonly McpServerConfig[], scoped: readonly McpServerConfig[]): McpServerConfig[];
+//#endregion
 //#region src/validation.d.ts
 declare const MCP_APP_MIME = "text/html;profile=mcp-app";
 declare const MCP_APP_MAX_BYTES: number;
@@ -191,4 +212,4 @@ declare const _default: {
   apply: typeof apply;
 };
 //#endregion
-export { JsonObject, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppResource, McpAppResourceReference, McpCallResult, McpConnection, McpConnectionFactory, McpConnectionFactoryOptions, McpResourceValidationOptions, McpRuntime, McpRuntimeConfig, McpRuntimeError, McpRuntimeErrorCode, McpRuntimeOptions, McpRuntimeService, McpRuntimeStatus, McpServerConfig, McpToolRecord, McpTransportConfig, McpUiBinding, RawMcpResourceContents, appContentSecurityPolicy, apply, asJsonObject, _default as default, defaultMcpConnectionFactory, inject, isRecord, isUiResourceUri, name, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };
+export { JsonObject, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppResource, McpAppResourceReference, McpCallResult, McpConnection, McpConnectionFactory, McpConnectionFactoryOptions, McpResourceValidationOptions, McpRuntime, McpRuntimeConfig, McpRuntimeError, McpRuntimeErrorCode, McpRuntimeOptions, McpRuntimeService, McpRuntimeStatus, McpServerConfig, McpToolRecord, McpTransportConfig, McpUiBinding, RawMcpResourceContents, ScopedMcpJsonOptions, appContentSecurityPolicy, apply, asJsonObject, _default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };
