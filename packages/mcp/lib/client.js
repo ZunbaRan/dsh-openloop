@@ -8555,6 +8555,425 @@ container holding the app. Specify either width or maxWidth, and either height o
 			registerMcpAppToolViews(ctx, options.toolNames ?? []);
 		}
 		//#endregion
+		//#region src/client/McpSettingsSection.tsx
+		/**
+		* "MCP servers" settings section：可视化 server 管理（列表/新增/删除/试连）。
+		* 数据经 admin 路由（/openloop/mcp/servers*）读写 mcp.json；保存后提示重启生效。
+		*/
+		const rowStyle = {
+			display: "flex",
+			alignItems: "center",
+			gap: 10,
+			padding: "10px 12px",
+			borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))",
+			flexWrap: "wrap"
+		};
+		const mono = {
+			font: "11px ui-monospace, monospace",
+			opacity: .75
+		};
+		const btn = {
+			fontSize: 11,
+			padding: "3px 10px",
+			borderRadius: 7,
+			border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14))",
+			background: "transparent",
+			cursor: "pointer"
+		};
+		const input = {
+			flex: 1,
+			minWidth: 120,
+			fontSize: 12,
+			padding: "5px 8px",
+			borderRadius: 7,
+			border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14))",
+			background: "transparent",
+			color: "inherit"
+		};
+		function McpSettingsSection() {
+			const [servers, setServers] = (0, react.useState)([]);
+			const [loading, setLoading] = (0, react.useState)(true);
+			const [note, setNote] = (0, react.useState)("");
+			const [scope, setScope] = (0, react.useState)("user");
+			const [id, setId] = (0, react.useState)("");
+			const [type, setType] = (0, react.useState)("http");
+			const [command, setCommand] = (0, react.useState)("");
+			const [args, setArgs] = (0, react.useState)("");
+			const [url, setUrl] = (0, react.useState)("");
+			const [protocol, setProtocol] = (0, react.useState)("auto");
+			const [busy, setBusy] = (0, react.useState)(false);
+			const [testResult, setTestResult] = (0, react.useState)("");
+			const refresh = (0, react.useCallback)(async () => {
+				setLoading(true);
+				try {
+					const data = await (await fetch("/openloop/mcp/servers")).json();
+					setServers(data.servers ?? []);
+				} catch {
+					setServers([]);
+				} finally {
+					setLoading(false);
+				}
+			}, []);
+			(0, react.useEffect)(() => {
+				refresh();
+			}, [refresh]);
+			const buildEntry = () => {
+				if (id.trim() === "") {
+					setNote("id 必填");
+					return null;
+				}
+				if (type === "stdio") {
+					if (command.trim() === "") {
+						setNote("stdio 类型必须填 command");
+						return null;
+					}
+					const entry = {
+						type: "stdio",
+						command: command.trim()
+					};
+					const argList = args.split("\n").map((a) => a.trim()).filter((a) => a !== "");
+					if (argList.length > 0) entry.args = argList;
+					if (protocol !== "auto") entry.protocol = protocol;
+					return entry;
+				}
+				if (url.trim() === "") {
+					setNote("http 类型必须填 url");
+					return null;
+				}
+				const entry = {
+					type: "http",
+					url: url.trim()
+				};
+				if (protocol !== "auto") entry.protocol = protocol;
+				return entry;
+			};
+			const test = async () => {
+				const entry = buildEntry();
+				if (entry === null) return;
+				setBusy(true);
+				setTestResult("测试中…");
+				try {
+					const data = await (await fetch("/openloop/mcp/servers/test", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							id: id.trim(),
+							entry
+						})
+					})).json();
+					setTestResult(data.ok ? `✓ 连接成功，${data.toolCount} 个工具` : `✗ ${data.error ?? "连接失败"}`);
+				} catch (error) {
+					setTestResult(`✗ ${error instanceof Error ? error.message : String(error)}`);
+				} finally {
+					setBusy(false);
+				}
+			};
+			const save = async () => {
+				const entry = buildEntry();
+				if (entry === null) return;
+				setBusy(true);
+				setNote("");
+				try {
+					const data = await (await fetch(`/openloop/mcp/servers/${scope}/${encodeURIComponent(id.trim())}`, {
+						method: "PUT",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify(entry)
+					})).json();
+					setNote(data.ok ? `✓ 已保存（${data.note ?? ""}）` : `✗ ${data.error}`);
+					if (data.ok) {
+						setId("");
+						setCommand("");
+						setArgs("");
+						setUrl("");
+						setTestResult("");
+						await refresh();
+					}
+				} finally {
+					setBusy(false);
+				}
+			};
+			const remove = async (row) => {
+				if (!confirm(`删除 server "${row.id}"（${row.source}）？`)) return;
+				await fetch(`/openloop/mcp/servers/${row.source}/${encodeURIComponent(row.id)}`, { method: "DELETE" });
+				await refresh();
+			};
+			const testRow = async (row) => {
+				await fetch("/openloop/mcp/servers/test", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						id: row.id,
+						entry: row.kind === "stdio" ? {
+							type: "stdio",
+							command: row.endpoint
+						} : {
+							type: "http",
+							url: row.endpoint
+						}
+					})
+				});
+				alert(`测试请求已发送——请看下方"新增 server"区的"测试连接"输出？\n（行级测试结果见 console；简化 UI：可在下方表单粘贴同样的 endpoint 测试）`);
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
+					style: {
+						fontSize: 12,
+						opacity: .75,
+						marginTop: 0
+					},
+					children: [
+						"MCP server 管理（配置文件 ",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: "mcp.json" }),
+						" 的可视化编辑）。保存后需重启 DSH 生效。"
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", {
+					style: {
+						fontSize: 13,
+						margin: "14px 0 6px"
+					},
+					children: [
+						"当前 servers（",
+						loading ? "加载中…" : servers.length,
+						"）"
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
+						borderRadius: 10,
+						overflow: "hidden"
+					},
+					children: [servers.length === 0 && !loading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							padding: 14,
+							fontSize: 12,
+							opacity: .6
+						},
+						children: "暂无 server——在下方添加"
+					}), servers.map((row) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: rowStyle,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {
+								style: { fontSize: 12 },
+								children: row.id
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									...mono,
+									border: "1px solid var(--dsw-alias-border-l2)",
+									borderRadius: 5,
+									padding: "1px 6px"
+								},
+								children: row.source
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: mono,
+								children: row.kind
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									...mono,
+									flex: 1,
+									minWidth: 100,
+									overflow: "hidden",
+									textOverflow: "ellipsis"
+								},
+								children: row.endpoint
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: mono,
+								children: row.protocol
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: btn,
+								onClick: () => {
+									setScope(row.source);
+									setId(row.id);
+									setType(row.kind === "stdio" ? "stdio" : "http");
+									setCommand(row.kind === "stdio" ? row.endpoint : "");
+									setUrl(row.kind === "stdio" ? "" : row.endpoint);
+									setProtocol(row.protocol);
+									setTestResult("");
+								},
+								children: "编辑"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: btn,
+								onClick: () => void testRow(row),
+								children: "测试"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: btn,
+								onClick: () => void remove(row),
+								children: "删除"
+							})
+						]
+					}, `${row.source}/${row.id}`))]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", {
+					style: {
+						fontSize: 13,
+						margin: "18px 0 6px"
+					},
+					children: "新增 / 编辑 server"
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
+						borderRadius: 10,
+						padding: 12,
+						display: "flex",
+						flexDirection: "column",
+						gap: 8
+					},
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								gap: 10,
+								alignItems: "center"
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: { fontSize: 12 },
+									children: "作用域"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+									style: { fontSize: 12 },
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										type: "radio",
+										checked: scope === "user",
+										onChange: () => setScope("user")
+									}), " 用户级（~/.dsh/mcp.json）"]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
+									style: { fontSize: 12 },
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+										type: "radio",
+										checked: scope === "project",
+										onChange: () => setScope("project")
+									}), " 项目级（.dsh/mcp.json）"]
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								gap: 8
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									style: input,
+									placeholder: "id（如 github）",
+									value: id,
+									onChange: (e) => setId(e.target.value)
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+									style: {
+										...input,
+										maxWidth: 100
+									},
+									value: type,
+									onChange: (e) => setType(e.target.value === "stdio" ? "stdio" : "http"),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "http",
+										children: "http"
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+										value: "stdio",
+										children: "stdio"
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
+									style: {
+										...input,
+										maxWidth: 110
+									},
+									value: protocol,
+									onChange: (e) => setProtocol(e.target.value),
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+											value: "auto",
+											children: "auto"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+											value: "legacy",
+											children: "legacy"
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
+											value: "2026-07-28",
+											children: "2026-07-28"
+										})
+									]
+								})
+							]
+						}),
+						type === "stdio" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							style: input,
+							placeholder: "command（如 npx）",
+							value: command,
+							onChange: (e) => setCommand(e.target.value)
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+							style: {
+								...input,
+								minHeight: 44,
+								resize: "vertical"
+							},
+							placeholder: "args（每行一个，如：\n-y\n@modelcontextprotocol/server-github）",
+							value: args,
+							onChange: (e) => setArgs(e.target.value)
+						})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							style: input,
+							placeholder: "url（如 https://mcp.example.com/mcp）",
+							value: url,
+							onChange: (e) => setUrl(e.target.value)
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								gap: 8,
+								alignItems: "center"
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									style: {
+										...btn,
+										padding: "5px 14px"
+									},
+									disabled: busy,
+									onClick: () => void test(),
+									children: "测试连接"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									style: {
+										...btn,
+										padding: "5px 14px",
+										fontWeight: 600
+									},
+									disabled: busy,
+									onClick: () => void save(),
+									children: "保存"
+								}),
+								testResult !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: { fontSize: 12 },
+									children: testResult
+								}),
+								note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: { fontSize: 12 },
+									children: note
+								})
+							]
+						})
+					]
+				})
+			] });
+		}
+		//#endregion
 		//#region src/client/index.tsx
 		const MCP_APP_TOOL_NAMES = [
 			"mcp__fixture__mcp_app_tool",
@@ -8568,6 +8987,14 @@ container holding the app. Specify either width or maxWidth, and either height o
 		const inject = ["slots"];
 		function apply(ctx) {
 			apply$1(ctx, { toolNames: MCP_APP_TOOL_NAMES });
+			ctx.slots;
+			const slotsTyped = ctx.slots;
+			slotsTyped.inject("settings.section", () => slotsTyped.register({
+				name: "settings.section",
+				id: "openloop-mcp",
+				order: 60,
+				label: () => "MCP servers"
+			}, McpSettingsSection));
 		}
 		//#endregion
 		exports.apply = apply;

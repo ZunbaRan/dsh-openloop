@@ -27,8 +27,14 @@ export function apply(ctx: ClientContext): void {
     inject: (slot: string, register: () => () => void) => void
     register: (options: { name: string; label: () => string }, component: React.ComponentType) => () => void
   }
-  slots.inject('settings.section', () => slots.register(
-    { name: 'settings.section', label: () => 'MCP servers' },
+  // 官方注册形态（dsh-client-ui-settings-general 样例）：id（nav key/only 过滤）
+  // + order（nav 位置）必填——缺 id 的条目会被壳过滤不显示（21:58 真机事故）。
+  const slotsTyped = ctx.slots as unknown as {
+    inject: (slot: string, register: () => () => void) => void
+    register: (options: { name: string; id: string; order: number; label: () => string }, component: React.ComponentType) => () => void
+  }
+  slotsTyped.inject('settings.section', () => slotsTyped.register(
+    { name: 'settings.section', id: 'openloop-mcp', order: 60, label: () => 'MCP servers' },
     McpSettingsSection,
   ))
 }
