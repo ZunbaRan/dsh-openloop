@@ -4,10 +4,48 @@ window.__ModuleLoader__.load({
 		var module = { exports: {} };
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
-		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 		let react_jsx_runtime = require("react/jsx-runtime");
+		//#region src/client/base-bridge.tsx
+		/**
+		* OpenLoop Base client 懒桥（「关 base 不炸 loader」根治，2026-08-24）：
+		*
+		* 背景：external 依赖的顶层 import 会被 rolldown 编译成 bundle factory 体内
+		* 的立即 require——base 被禁用时 require 抛 "missed the module table"，
+		* materialize 失败炸掉整个插件树（页面 "Failed to load plugins"）。
+		*
+		* 方案：require 移入函数体（rolldown 原样保留调用位置）+ try/catch + 缓存
+		* （失败不缓存，插件启用后无需刷新即可恢复）。base 缺失时调用方渲染
+		* DependencyMissing 降级条，而不是让 loader 崩溃。
+		*/
+		let cached;
+		/** base 可用时返回其 client 模块；被禁用时返回 undefined（下次调用重试，不缓存失败） */
+		function getBaseClient() {
+			if (cached !== void 0) return cached;
+			try {
+				cached = require("@openloop/dsh-base/client");
+			} catch {
+				return;
+			}
+			return cached;
+		}
+		/** base 缺失时的统一降级 UI（说明依赖关系，指引用户启用） */
+		function DependencyMissing({ what, dep = "@openloop/dsh-base" }) {
+			return (0, react.createElement)("div", { style: {
+				padding: "14px 16px",
+				fontSize: 12,
+				lineHeight: 1.6,
+				opacity: .75,
+				border: "1px dashed rgba(127,127,127,.4)",
+				borderRadius: 10,
+				display: "flex",
+				gap: 8,
+				alignItems: "center",
+				flexWrap: "wrap"
+			} }, (0, react.createElement)("strong", { style: { fontSize: 12 } }, what), (0, react.createElement)("span", null, `依赖插件 ${dep} 未启用——在设置 · 插件页启用后自动恢复`));
+		}
+		//#endregion
 		//#region src/contract.ts
 		const ARTIFACT_HEIGHT_MESSAGE = "openloop-artifact:height";
 		const ARTIFACT_FETCH_MESSAGE = "openloop-artifact:fetch";
@@ -163,10 +201,17 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		function firstText(content) {
 			for (const part of content) if (typeof part === "object" && part !== null && "type" in part && part.type === "text" && "text" in part && typeof part.text === "string") return part.text;
 		}
-		function ArtifactFrame({ meta, token, fullscreen, scope }) {
+		function ArtifactFrame(props) {
+			if (props.scope === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, { what: "OpenLoop Artifact" });
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFrameInner, {
+				...props,
+				scope: props.scope
+			});
+		}
+		function ArtifactFrameInner({ meta, token, fullscreen, scope }) {
 			const [height, setHeight] = (0, react.useState)(fullscreen ? 700 : 520);
 			const frameRef = (0, react.useRef)(null);
-			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
+			const theme = getBaseClient().useOpenLoopVisualTheme(scope);
 			(0, react.useEffect)(() => {
 				const listener = (event) => {
 					const data = event.data;
@@ -243,7 +288,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		}
 		function ArtifactSurface({ meta, callId, scope }) {
 			const [fullscreen, setFullscreen] = (0, react.useState)(false);
-			const theme = (0, _openloop_dsh_base_client.useOpenLoopVisualTheme)(scope);
+			const theme = getBaseClient().useOpenLoopVisualTheme(scope);
 			(0, react.useEffect)(() => {
 				if (!fullscreen) return;
 				const listener = (event) => {
@@ -359,7 +404,14 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 				})]
 			})] });
 		}
-		function ArtifactCard({ callId, block, scope }) {
+		function ArtifactCard(props) {
+			if (props.scope === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, { what: "OpenLoop Artifact" });
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactCardInner, {
+				...props,
+				scope: props.scope
+			});
+		}
+		function ArtifactCardInner({ callId, block, scope }) {
 			if (!("kind" in block)) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: caption,
 				children: "HTML Artifact · building…"
@@ -386,7 +438,7 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 			ctx.inject(["openloop-dock/client"], (dockCtx) => {
 				setDockService(dockCtx["openloop-dock/client"]);
 			});
-			const scope = (0, _openloop_dsh_base_client.createOpenLoopSettingsScope)();
+			const scope = getBaseClient()?.createOpenLoopSettingsScope();
 			const ThemedArtifactCard = (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactCard, {
 				...props,
 				scope

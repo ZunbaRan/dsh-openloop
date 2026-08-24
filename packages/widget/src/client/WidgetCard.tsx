@@ -3,7 +3,8 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { HEIGHT_MESSAGE, widgetMetaFrom } from '../contract.ts'
 import { buildWidgetDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import type { OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
 
 const subtle: CSSProperties = { color: 'var(--dsw-alias-label-caption)', fontSize: 12, lineHeight: 1.4 }
 
@@ -14,9 +15,14 @@ function firstText(content: readonly unknown[]): string | undefined {
   return undefined
 }
 
-export function WidgetCard({ callId, block, scope }: ToolCallViewProps & { scope: OpenLoopSettingsScope }) {
+export function WidgetCard(props: ToolCallViewProps & { scope: OpenLoopSettingsScope | undefined }) {
+  if (props.scope === undefined) return <DependencyMissing what="OpenLoop Widget" />
+  return <WidgetCardInner {...props} scope={props.scope} />
+}
+
+function WidgetCardInner({ callId, block, scope }: ToolCallViewProps & { scope: OpenLoopSettingsScope }) {
   const [height, setHeight] = useState(72)
-  const theme = useOpenLoopVisualTheme(scope)
+  const theme = getBaseClient()!.useOpenLoopVisualTheme(scope)
   const meta = 'kind' in block && !block.isError ? widgetMetaFrom(block.meta) : undefined
 
   useEffect(() => {

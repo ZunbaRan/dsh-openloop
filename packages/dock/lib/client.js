@@ -11,9 +11,6 @@ window.__ModuleLoader__.load({
 		let react_dom_client = require("react-dom/client");
 		let react_dom = require("react-dom");
 		let react_jsx_runtime = require("react/jsx-runtime");
-		let _openloop_dsh_panels_client = require("@openloop/dsh-panels/client");
-		let _openloop_dsh_html_artifact_client = require("@openloop/dsh-html-artifact/client");
-		let _openloop_dsh_base_client = require("@openloop/dsh-base/client");
 		//#region src/client/DockHost.tsx
 		/**
 		* DockHost：右侧 dock 的挂载层（方案 A，DOCK_DESIGN §1）。
@@ -2482,6 +2479,67 @@ window.__ModuleLoader__.load({
 		};
 		const dockStore = new DockStore();
 		//#endregion
+		//#region src/client/base-bridge.tsx
+		/**
+		* OpenLoop Base client 懒桥（「关 base 不炸 loader」根治，2026-08-24）：
+		*
+		* 背景：external 依赖的顶层 import 会被 rolldown 编译成 bundle factory 体内
+		* 的立即 require——base 被禁用时 require 抛 "missed the module table"，
+		* materialize 失败炸掉整个插件树（页面 "Failed to load plugins"）。
+		*
+		* 方案：require 移入函数体（rolldown 原样保留调用位置）+ try/catch + 缓存
+		* （失败不缓存，插件启用后无需刷新即可恢复）。base 缺失时调用方渲染
+		* DependencyMissing 降级条，而不是让 loader 崩溃。
+		*/
+		let cached;
+		/** base 可用时返回其 client 模块；被禁用时返回 undefined（下次调用重试，不缓存失败） */
+		function getBaseClient() {
+			if (cached !== void 0) return cached;
+			try {
+				cached = require("@openloop/dsh-base/client");
+			} catch {
+				return;
+			}
+			return cached;
+		}
+		/** base 缺失时的统一降级 UI（说明依赖关系，指引用户启用） */
+		function DependencyMissing({ what, dep = "@openloop/dsh-base" }) {
+			return (0, react.createElement)("div", { style: {
+				padding: "14px 16px",
+				fontSize: 12,
+				lineHeight: 1.6,
+				opacity: .75,
+				border: "1px dashed rgba(127,127,127,.4)",
+				borderRadius: 10,
+				display: "flex",
+				gap: 8,
+				alignItems: "center",
+				flexWrap: "wrap"
+			} }, (0, react.createElement)("strong", { style: { fontSize: 12 } }, what), (0, react.createElement)("span", null, `依赖插件 ${dep} 未启用——在设置 · 插件页启用后自动恢复`));
+		}
+		//#endregion
+		//#region src/client/openloop-clients.ts
+		let panelsCache;
+		let artifactCache;
+		function getPanelsClient() {
+			if (panelsCache !== void 0) return panelsCache;
+			try {
+				panelsCache = require("@openloop/dsh-panels/client");
+			} catch {
+				return;
+			}
+			return panelsCache;
+		}
+		function getArtifactClient() {
+			if (artifactCache !== void 0) return artifactCache;
+			try {
+				artifactCache = require("@openloop/dsh-html-artifact/client");
+			} catch {
+				return;
+			}
+			return artifactCache;
+		}
+		//#endregion
 		//#region src/client/DockBoardView.tsx
 		/**
 		* DockBoardView：12 列网格画板（OCIX workbench 复刻）。
@@ -2489,7 +2547,12 @@ window.__ModuleLoader__.load({
 		* - 拖角 resize（右下角手柄，按格步进）
 		* - tile 渲染：panel → PanelCard（external panels/client）；artifact → ArtifactFrame（external artifact/client）
 		*/
-		const scope = (0, _openloop_dsh_base_client.createOpenLoopSettingsScope)();
+		/** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
+		let scopeCache;
+		function getScope() {
+			if (scopeCache === void 0) scopeCache = getBaseClient()?.createOpenLoopSettingsScope();
+			return scopeCache;
+		}
 		function TileChrome({ title, onRemove, children }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				style: {
@@ -2547,12 +2610,26 @@ window.__ModuleLoader__.load({
 			});
 		}
 		function TileContent({ tile }) {
-			if (tile.source.kind === "panel") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_openloop_dsh_panels_client.PanelSurface, { meta: tile.source.meta });
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_openloop_dsh_html_artifact_client.ArtifactFrame, {
+			if (tile.source.kind === "panel") {
+				const panels = getPanelsClient();
+				if (panels === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+					what: "Dock 面板 tile",
+					dep: "@openloop/dsh-panels"
+				});
+				const PanelSurface = panels.PanelSurface;
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta: tile.source.meta });
+			}
+			const artifact = getArtifactClient();
+			if (artifact === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+				what: "Dock Artifact tile",
+				dep: "@openloop/dsh-html-artifact"
+			});
+			const ArtifactFrame = artifact.ArtifactFrame;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFrame, {
 				meta: tile.source.meta,
 				token: `dock-${tile.tileId}`,
 				fullscreen: false,
-				scope
+				scope: getScope()
 			});
 		}
 		function GridTile({ tile, cellH, onRemove }) {

@@ -411,7 +411,8 @@ async function handle(req, res, options) {
 					source,
 					kind: config.transport.kind,
 					endpoint: config.transport.kind === "stdio" ? config.transport.command : config.transport.url,
-					protocol: config.protocol ?? "auto"
+					protocol: config.protocol ?? "auto",
+					state: options.statusOf?.(config.id) ?? "unknown"
 				}))
 			});
 			return;
@@ -968,11 +969,18 @@ const name = "openloop-dsh-mcp-runtime";
 const inject = ["webServer"];
 async function apply(ctx, config) {
 	const servers = mergeServerConfigs(config.servers ?? [], loadScopedMcpServers());
-	await new McpRuntimeService(ctx, {
+	const service = new McpRuntimeService(ctx, {
 		...config,
 		servers
-	}).start();
-	ctx.effect(() => registerMcpAdminRoutes(ctx, ctx.webServer), "openloop-dsh-mcp-runtime: admin routes");
+	});
+	await service.start();
+	ctx.effect(() => registerMcpAdminRoutes(ctx, ctx.webServer, { statusOf: (id) => {
+		try {
+			return service.status(id).state;
+		} catch {
+			return;
+		}
+	} }), "openloop-dsh-mcp-runtime: admin routes");
 }
 var src_default = {
 	name,

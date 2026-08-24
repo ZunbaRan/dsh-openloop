@@ -1,14 +1,14 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { createOpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import { getBaseClient } from './base-bridge.tsx'
 import { DeclarativeCard } from './DeclarativeCard.tsx'
 
 export const name = 'openloop-visual-declarative'
 export const inject = ['slots']
 
 export function apply(ctx: ClientContext): void {
-  const scope = createOpenLoopSettingsScope()
+  const scope = getBaseClient()?.createOpenLoopSettingsScope()
   const ThemedDeclarativeCard = (props: ToolCallViewProps) => <DeclarativeCard {...props} scope={scope} />
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register(
     { name: 'tool.call.toolview', key: 'visualize_ui' },

@@ -4,12 +4,8 @@
  * 故预设/明暗切换实时同步；token 快照（global/preset 系）直接取自 theme 包单一来源（§14）。
  */
 import { useEffect, useState } from 'react'
-import {
-  OPENLOOP_GLOBAL_TOKENS,
-  OPENLOOP_PRESETS,
-  OPENLOOP_PRESET_IDS,
-  type OpenLoopPreset,
-} from '@openloop/dsh-base/client' // external 共享模块（0.3.0 起经 ./client 出口再导出静态数据）
+import type { OpenLoopPreset } from '@openloop/dsh-base/client' // type-only：编译后消失，不触发评估期 require
+import { getBaseClient } from './base-bridge.tsx'
 
 const STORAGE_KEY = 'openloop.visuals.v1'
 const CHANGE_EVENT = 'openloop-visual-settings-change'
@@ -47,15 +43,21 @@ function resolveTheme(): PanelVisualTheme {
   const dark = systemIsDark()
   const appearance: 'light' | 'dark' =
     stored.appearance === 'light' || stored.appearance === 'dark' ? stored.appearance : dark ? 'dark' : 'light'
+  // 懒桥取 base 的静态 token 数据（base 被禁用时 token 快照降级为空映射——
+  // 面板以 CSS 变量默认值渲染，不再炸 loader）
+  const base = getBaseClient()
+  if (base === undefined) {
+    return { preset: FALLBACK_PRESET, appearance, global: {}, tokens: {} }
+  }
   // 非法/未存 preset 一律回退 FALLBACK_PRESET（与 theme 包 decodeOpenLoopSettings 同规则）
-  const preset: OpenLoopPreset = OPENLOOP_PRESET_IDS.includes(stored.preset as OpenLoopPreset)
+  const preset: OpenLoopPreset = base.OPENLOOP_PRESET_IDS.includes(stored.preset as OpenLoopPreset)
     ? (stored.preset as OpenLoopPreset)
     : FALLBACK_PRESET
   return {
     preset,
     appearance,
-    global: OPENLOOP_GLOBAL_TOKENS,
-    tokens: OPENLOOP_PRESETS[preset][appearance],
+    global: base.OPENLOOP_GLOBAL_TOKENS,
+    tokens: base.OPENLOOP_PRESETS[preset][appearance],
   }
 }
 

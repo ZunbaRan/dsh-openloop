@@ -142,6 +142,8 @@ declare const MCP_ADMIN_ROUTE = "/openloop/mcp/servers";
 interface AdminRouteOptions {
   dshHome?: string;
   projectDir?: string;
+  /** 活动 runtime 的连接状态查询（列表行实时状态点；缺省时 rows 不带 state） */
+  statusOf?: (id: string) => string | undefined;
 }
 declare function registerMcpAdminRoutes(ctx: Context, webServer: WebServer, options?: AdminRouteOptions): () => void;
 //#endregion

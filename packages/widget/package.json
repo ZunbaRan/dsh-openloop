@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-show-widget",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Small streaming sandboxed HTML widgets for DeepSeek Harness.",
   "private": true,
   "type": "module",

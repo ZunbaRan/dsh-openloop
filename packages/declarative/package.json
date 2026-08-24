@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-visual-declarative",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Native bounded-JSON Flow, Timeline, and Comparison visualizations for DeepSeek Harness.",
   "private": true,
   "type": "module",

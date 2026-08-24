@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-html-artifact",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Replayable static or scripted fullscreen HTML artifacts for DeepSeek Harness.",
   "private": true,
   "type": "module",

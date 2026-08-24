@@ -5,7 +5,8 @@ import { ARTIFACT_FETCH_MESSAGE, ARTIFACT_FETCH_RESULT_MESSAGE, ARTIFACT_HEIGHT_
 import { buildArtifactDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
 import { getDockService } from './dock-pin.ts'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import type { OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
 
 const caption: CSSProperties = { color: 'var(--dsw-alias-label-caption)', fontSize: 12 }
 
@@ -16,10 +17,15 @@ function firstText(content: readonly unknown[]): string | undefined {
   return undefined
 }
 
-export function ArtifactFrame({ meta, token, fullscreen, scope }: { meta: ArtifactMeta; token: string; fullscreen: boolean; scope: OpenLoopSettingsScope }) {
+export function ArtifactFrame(props: { meta: ArtifactMeta; token: string; fullscreen: boolean; scope: OpenLoopSettingsScope | undefined }) {
+  if (props.scope === undefined) return <DependencyMissing what="OpenLoop Artifact" />
+  return <ArtifactFrameInner {...props} scope={props.scope} />
+}
+
+function ArtifactFrameInner({ meta, token, fullscreen, scope }: { meta: ArtifactMeta; token: string; fullscreen: boolean; scope: OpenLoopSettingsScope }) {
   const [height, setHeight] = useState(fullscreen ? 700 : 520)
   const frameRef = useRef<HTMLIFrameElement>(null)
-  const theme = useOpenLoopVisualTheme(scope)
+  const theme = getBaseClient()!.useOpenLoopVisualTheme(scope)
   useEffect(() => {
     const listener = (event: MessageEvent) => {
       const data = event.data as { type?: unknown; token?: unknown; height?: unknown } | null
@@ -66,7 +72,7 @@ export function ArtifactFrame({ meta, token, fullscreen, scope }: { meta: Artifa
 
 function ArtifactSurface({ meta, callId, scope }: { meta: ArtifactMeta; callId: string; scope: OpenLoopSettingsScope }) {
   const [fullscreen, setFullscreen] = useState(false)
-  const theme = useOpenLoopVisualTheme(scope)
+  const theme = getBaseClient()!.useOpenLoopVisualTheme(scope)
   useEffect(() => {
     if (!fullscreen) return
     const listener = (event: KeyboardEvent) => { if (event.key === 'Escape') setFullscreen(false) }
@@ -90,7 +96,12 @@ function ArtifactSurface({ meta, callId, scope }: { meta: ArtifactMeta; callId: 
   </>
 }
 
-export function ArtifactCard({ callId, block, scope }: ToolCallViewProps & { scope: OpenLoopSettingsScope }) {
+export function ArtifactCard(props: ToolCallViewProps & { scope: OpenLoopSettingsScope | undefined }) {
+  if (props.scope === undefined) return <DependencyMissing what="OpenLoop Artifact" />
+  return <ArtifactCardInner {...props} scope={props.scope} />
+}
+
+function ArtifactCardInner({ callId, block, scope }: ToolCallViewProps & { scope: OpenLoopSettingsScope }) {
   if (!('kind' in block)) return <div style={caption}>HTML Artifact · building…</div>
   if (block.isError) return <div style={caption}>{firstText(block.content) ?? 'Artifact failed'}</div>
   const meta = artifactMetaFrom(block.meta)

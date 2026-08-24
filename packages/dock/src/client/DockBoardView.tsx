@@ -12,12 +12,17 @@ import {
 import { GRID_COLUMNS, clampLayout, collisionAt, gridHeight, swapLayouts, type TileLayout } from './layout.ts'
 import { dockStore, type DockTile } from './store.ts'
 
-// 跨插件 client 组件（DSH ModuleLoader external 解析）
-import { PanelSurface } from '@openloop/dsh-panels/client'
-import { ArtifactFrame } from '@openloop/dsh-html-artifact/client'
-import { createOpenLoopSettingsScope } from '@openloop/dsh-base/client'
+// 跨插件 client 组件懒桥（DSH ModuleLoader external：评估期 require 在插件
+// 被禁用时炸 loader——懒 require 后 tile 按需取，缺失渲染降级条）
+import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
+import { getPanelsClient, getArtifactClient } from './openloop-clients.ts'
 
-const scope = createOpenLoopSettingsScope()
+/** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
+let scopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>['createOpenLoopSettingsScope']> | undefined
+function getScope() {
+  if (scopeCache === undefined) scopeCache = getBaseClient()?.createOpenLoopSettingsScope()
+  return scopeCache
+}
 
 const CELL_MIN_PX = 22 // 单元格最小视觉高度（行高）；列宽由容器 12 等分
 
@@ -35,9 +40,19 @@ function TileChrome({ title, onRemove, children }: { title: string; onRemove: ()
 
 function TileContent({ tile }: { tile: DockTile }) {
   if (tile.source.kind === 'panel') {
+    const panels = getPanelsClient()
+    if (panels === undefined) {
+      return <DependencyMissing what="Dock 面板 tile" dep="@openloop/dsh-panels" />
+    }
+    const PanelSurface = panels.PanelSurface
     return <PanelSurface meta={tile.source.meta as never} />
   }
-  return <ArtifactFrame meta={tile.source.meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={scope} />
+  const artifact = getArtifactClient()
+  if (artifact === undefined) {
+    return <DependencyMissing what="Dock Artifact tile" dep="@openloop/dsh-html-artifact" />
+  }
+  const ArtifactFrame = artifact.ArtifactFrame
+  return <ArtifactFrame meta={tile.source.meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={getScope()} />
 }
 
 function GridTile({ tile, cellH, onRemove }: { tile: DockTile; cellH: number; onRemove: () => void }) {

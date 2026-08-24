@@ -4,7 +4,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { extractStreamingFragment, HEIGHT_MESSAGE, previewFragment, SHOW_WIDGET_TOOL, STREAM_MESSAGE } from '../contract.ts'
 import { buildStreamingDocument } from '../shell.ts'
 import { resolveTheme } from './theme.ts'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import type { OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import { getBaseClient } from './base-bridge.tsx'
 
 type Props = PropsRuntime<'conversation.input.dock'>
 
@@ -13,7 +14,7 @@ function Preview({ raw, scope }: { raw: string; scope: OpenLoopSettingsScope }) 
   const frame = useRef<HTMLIFrameElement | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [height, setHeight] = useState(0)
-  const theme = useOpenLoopVisualTheme(scope)
+  const theme = getBaseClient()!.useOpenLoopVisualTheme(scope)
   const doc = useMemo(() => buildStreamingDocument('openloop-widget-preview', resolveTheme(theme.palette, theme.appearance)), [theme.palette, theme.appearance])
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -35,7 +36,13 @@ function Preview({ raw, scope }: { raw: string; scope: OpenLoopSettingsScope }) 
   </div>
 }
 
-export function StreamingPreview({ session, scope }: Props & { scope: OpenLoopSettingsScope }) {
+export function StreamingPreview(props: Props & { scope: OpenLoopSettingsScope | undefined }) {
+  // 流预览是输入框旁的小部件：base 缺失时静默隐藏（降级条在这里太吵）
+  if (props.scope === undefined) return null
+  return <StreamingPreviewInner {...props} scope={props.scope} />
+}
+
+function StreamingPreviewInner({ session, scope }: Props & { scope: OpenLoopSettingsScope }) {
   let raw: string | undefined
   for (const block of session?.partial?.blocks ?? []) if (block.kind === 'tool-call' && block.name === SHOW_WIDGET_TOOL) raw = block.argsRaw
   return raw === undefined ? null : <Preview raw={raw} scope={scope} />

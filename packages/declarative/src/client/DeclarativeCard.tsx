@@ -1,7 +1,8 @@
 import { useState, type CSSProperties } from 'react'
 import { Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { useOpenLoopVisualTheme, type OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import type { OpenLoopSettingsScope } from '@openloop/dsh-base/client'
+import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
 import { declarativeMetaFrom, type ComparisonDocument, type DeclarativeDocument, type FlowDocument, type TimelineDocument, type Tone } from '../document.ts'
 
 const palette: Record<Tone, { soft: string; strong: string }> = {
@@ -22,7 +23,7 @@ const titleStyle: CSSProperties = { margin: 0, fontSize: 18, lineHeight: 1.3, le
 const descriptionStyle: CSSProperties = { margin: '5px 0 0', color: 'var(--openloop-muted-foreground)', fontSize: 13, lineHeight: 1.55 }
 
 function Frame({ document, scope }: { document: DeclarativeDocument; scope: OpenLoopSettingsScope }) {
-  const theme = useOpenLoopVisualTheme(scope)
+  const theme = getBaseClient()!.useOpenLoopVisualTheme(scope)
   return <section style={{ ...shell, ...theme.style }} data-openloop-visual={document.kind} data-openloop-preset={theme.settings.preset} data-openloop-appearance={theme.appearance}>
     <header style={header}>
       <h3 style={titleStyle}>{document.title}</h3>
@@ -92,7 +93,12 @@ function firstLine(block: { content: readonly { type: string; text?: string }[] 
   return block.content.find(part => part.type === 'text' && part.text)?.text?.split('\n')[0] ?? 'Visualization unavailable'
 }
 
-export function DeclarativeCard({ block, scope }: ToolCallViewProps & { scope: OpenLoopSettingsScope }) {
+export function DeclarativeCard(props: ToolCallViewProps & { scope: OpenLoopSettingsScope | undefined }) {
+  if (props.scope === undefined) return <DependencyMissing what="OpenLoop Declarative" />
+  return <DeclarativeCardInner {...props} scope={props.scope} />
+}
+
+function DeclarativeCardInner({ block, scope }: ToolCallViewProps & { scope: OpenLoopSettingsScope }) {
   if (!('kind' in block)) return <div style={descriptionStyle}>OpenLoop Visual · rendering…</div>
   if (block.isError) return <div style={descriptionStyle}>{firstLine(block)}</div>
   const meta = declarativeMetaFrom(block.meta)
