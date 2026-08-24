@@ -7,12 +7,8 @@ export interface DockServiceLike {
   pinArtifact(meta: unknown, title: string, origin?: unknown): void
 }
 
-let dockService: DockServiceLike | undefined
-
-export function setDockService(service: DockServiceLike | undefined): void {
-  dockService = service
-}
-
+// 2026-08-24：cordis client 侧动态 inject 回调真机未触发——改读 dock 挂在
+// window 上的 service 直通（渲染时读取，天然支持加载时序；dock 未装时 undefined）
 export function getDockService(): DockServiceLike | undefined {
-  return dockService
+  return (globalThis as unknown as { __openloopDockService?: DockServiceLike }).__openloopDockService
 }

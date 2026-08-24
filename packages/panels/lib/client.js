@@ -6,7 +6,10 @@ window.__ModuleLoader__.load({
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
 		let react_jsx_runtime = require("react/jsx-runtime");
-		function getDockService() {}
+		//#region src/client/dock-pin.ts
+		function getDockService() {
+			return globalThis.__openloopDockService;
+		}
 		//#endregion
 		//#region src/presets/accordion/schema.ts
 		/**
@@ -5703,7 +5706,28 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			};
 		}
 		function PinToDock({ meta, title }) {
-			return null;
+			const dock = getDockService();
+			if (!dock) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				title: "固定到 OpenLoop Dock",
+				onClick: () => dock.pinPanel(meta, title),
+				style: {
+					position: "absolute",
+					top: 6,
+					right: 6,
+					zIndex: 5,
+					width: 24,
+					height: 24,
+					borderRadius: 7,
+					border: "1px solid var(--openloop-border)",
+					background: "var(--openloop-elevated)",
+					cursor: "pointer",
+					fontSize: 11,
+					lineHeight: 1
+				},
+				children: "📌"
+			});
 		}
 		function PanelCard({ block }) {
 			if (!("kind" in block)) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

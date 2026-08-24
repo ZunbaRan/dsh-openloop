@@ -57,9 +57,23 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
   )
 }
 
+const WIDTH_KEY = 'openloop.dock.width.v1'
+const DEFAULT_WIDTH = 420
+
+function readStoredWidth(): number {
+  try {
+    const raw = localStorage.getItem(WIDTH_KEY)
+    const n = raw === null ? NaN : Number(raw)
+    return Number.isFinite(n) ? Math.max(280, Math.min(760, n)) : DEFAULT_WIDTH
+  } catch {
+    return DEFAULT_WIDTH
+  }
+}
+
 function DockShell(): ReactNode {
   const [open, setOpen] = useState(() => dockStore.getSnapshot().tiles.length > 0)
   const [version, setVersion] = useState(0)
+  const [width, setWidth] = useState(readStoredWidth)
   useEffect(() => dockStore.subscribe(() => setVersion(v => v + 1)), [])
   const tiles = dockStore.getSnapshot().tiles
   // toggle 跟随 bsb 右缘（bsb 开时挪到其左侧 10px，避免与其按钮重叠）
@@ -73,16 +87,23 @@ function DockShell(): ReactNode {
     return () => { clearInterval(timer); window.removeEventListener('resize', update) }
   }, [])
 
-  // service 桥（toggle 供外部按钮调用）
+  // service 桥：toggle 给手动操作、ensureOpen 给 pin（2026-08-24 修复：pinPanel
+  // 之前用 toggle 但 toggle 无状态翻转——dock 已开时 pin 反而把它关掉；
+  // ensureOpen 强制开，幂等）
   useEffect(() => {
-    ;(window as unknown as Record<string, unknown>).__openloopDockToggle = () => setOpen(o => !o)
-    return () => { delete (window as unknown as Record<string, unknown>).__openloopDockToggle }
+    const w = window as unknown as Record<string, unknown>
+    w.__openloopDockToggle = () => setOpen(o => !o)
+    w.__openloopDockOpen = () => setOpen(true)
+    return () => {
+      delete w.__openloopDockToggle
+      delete w.__openloopDockOpen
+    }
   }, [])
 
   return (
     <>
       <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={tiles.length} right={toggleRight} />
-      <DockHost open={open} width={420}>
+      <DockHost open={open} width={width} onWidthChange={(w) => { setWidth(w); try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ } }}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-dock-version={version}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))', flexShrink: 0 }}>
             <strong style={{ fontSize: 13 }}>OpenLoop Dock</strong>
@@ -105,11 +126,11 @@ export function apply(ctx: Context): void {
   const service: DockClientService = {
     pinPanel(meta, title, origin) {
       dockStore.pin({ kind: 'panel', meta }, title, origin)
-      ;(window as unknown as { __openloopDockToggle?: () => void }).__openloopDockToggle?.()
+      ;(window as unknown as { __openloopDockOpen?: () => void }).__openloopDockOpen?.()
     },
     pinArtifact(meta, title, origin) {
       dockStore.pin({ kind: 'artifact', meta }, title, origin)
-      ;(window as unknown as { __openloopDockToggle?: () => void }).__openloopDockToggle?.()
+      ;(window as unknown as { __openloopDockOpen?: () => void }).__openloopDockOpen?.()
     },
     toggle() {
       ;(window as unknown as { __openloopDockToggle?: () => void }).__openloopDockToggle?.()
@@ -118,7 +139,12 @@ export function apply(ctx: Context): void {
       return document.querySelector('[data-openloop-dock-panel]') !== null
     },
   }
+  // service 双通道：cordis provide（保留语义）+ window 直通（消费方零 inject 依赖——
+  // 真机验证 cordis client 侧动态 inject(['openloop-dock/client']) 回调未触发，
+  // pin 按钮两包全灭；window 直通是 __openloopDockToggle 已实证的同款模式，
+  // 且渲染时读取天然支持时序（晚渲染的卡片拿到最新状态））
   ctx.provide('openloop-dock/client', service)
+  ;(window as unknown as Record<string, unknown>).__openloopDockService = service
   // 自主渲染（better-sidebar 同款模式）：自建 host + createRoot，
   // cordis 生命周期负责 dispose。
   ctx.effect(() => {
@@ -131,6 +157,7 @@ export function apply(ctx: Context): void {
       root.render(createElement(DockShell))
     } catch { /* 渲染失败静默——不影响宿主页面 */ }
     return () => {
+      delete (window as unknown as Record<string, unknown>).__openloopDockService
       void root?.unmount()
       host.remove()
     }

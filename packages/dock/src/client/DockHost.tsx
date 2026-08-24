@@ -4,24 +4,20 @@
  * 冲突规避三件套：
  * 1. host div 挂 body（data-openloop-dock），MutationObserver 保活——与 better-sidebar 各挂各的；
  * 2. 挤压用 #root 的 padding-right（better-sidebar 用 margin-right，天然叠加不覆盖）；
- * 3. 空间探测（非 API 对接）：[data-dsh-better-sidebar] 存在 → dock 贴其左侧；
- *    不存在 → 贴视口右缘。ResizeObserver + MutationObserver 跟踪其开/关/宽度变化。
+ * 3. 空间探测（bsb 的公开布局副作用：#root computed margin-right）+ 500ms poll。
+ *
+ * 展开交互（2026-08-24 重做，对齐 better-sidebar 体验）：
+ * - 面板常驻渲染，宽度过渡（width 0 ↔ W）——从右侧推出的动画效果；
+ * - 左缘 6px 拖宽手柄（col-resize），实时生效，松手持久化 localStorage；
+ * - 拖动期间禁用 width 过渡（否则动画滞后手感）；内容层固定宽度不随动画压缩。
  */
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 const DOCK_WIDTH_VAR = '--openloop-dock-width'
+const TRANSITION = 'width .22s ease'
 
-/**
- * 右侧空间探测（2026-08-24 第二次修正）：锚点从 bsb host DOM 改为
- * #root 的 computed margin-right——better-sidebar 的核心机制就是给 #root
- * 加 margin-right 推布局（layout.css），这是它的「公开布局副作用」：
- * 右侧栏开 → margin-right = 侧栏宽（实测 448px）；关 → 0。
- * 相比 DOM 探测的两次失败（host 常驻 h=0 误判、内部容器全视口），
- * margin 信号语义稳定且与面板显隐严格同步，也不耦合其内部结构。
- * dock 用 padding-right 推（与 margin 天然叠加），读 margin 不读 padding，
- * 不会读到自己的 push。
- */
+/** 右侧空间探测：锚 #root 的 computed margin-right（bsb 的公开布局副作用） */
 export function probeDockRightEdge(): number {
   if (typeof window === 'undefined') return 0
   const root = document.getElementById('root')
@@ -35,12 +31,16 @@ export function probeDockRightEdge(): number {
 export interface DockHostProps {
   open: boolean
   width: number
+  onWidthChange?: (width: number) => void
   children: ReactNode
 }
 
-export function DockHost({ open, width, children }: DockHostProps): ReactNode {
+export function DockHost({ open, width, onWidthChange, children }: DockHostProps): ReactNode {
   const [host, setHost] = useState<HTMLElement | null>(null)
   const [rightEdge, setRightEdge] = useState(() => probeDockRightEdge())
+  const [resizing, setResizing] = useState(false)
+  const widthRef = useRef(width)
+  widthRef.current = width
 
   // host 挂载 + 保活（body 被清空时重挂——better-sidebar 同款防御）
   useEffect(() => {
@@ -58,9 +58,7 @@ export function DockHost({ open, width, children }: DockHostProps): ReactNode {
     }
   }, [])
 
-  // 空间探测：bsb 的 push 经 CSS 变量（--bsb-width）驱动——#root 的 style
-  // 属性本身不变，MutationObserver 抓不到（2026-08-24 第三次修正）。
-  // 改 500ms poll getComputedStyle（开/关侧栏是低频动作，开销可忽略）。
+  // 空间探测：500ms poll（CSS 变量驱动的 push 无法被 MutationObserver 捕获）
   useEffect(() => {
     const update = () => setRightEdge(probeDockRightEdge())
     update()
@@ -73,12 +71,11 @@ export function DockHost({ open, width, children }: DockHostProps): ReactNode {
   }, [])
 
   // 挤压：#root 的 padding-right（与 better-sidebar 的 margin-right 叠加共存）。
-  // 2026-08-24 修复：此前只 setProperty 变量、无规则消费——push 从未生效。
-  // 注入一次全局样式（#root padding-right: var(--openloop-dock-width)）。
+  // 注入一次全局样式（padding 过渡与面板 width 过渡时长一致，两侧同步推出）
   useEffect(() => {
     const styleEl = document.createElement('style')
     styleEl.setAttribute('data-openloop-dock-style', '')
-    styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .18s ease }`
+    styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .22s ease }`
     document.head.appendChild(styleEl)
     return () => styleEl.remove()
   }, [])
@@ -91,29 +88,72 @@ export function DockHost({ open, width, children }: DockHostProps): ReactNode {
     }
   }, [open, width])
 
-  if (!host || !open) return null
+  // 左缘拖宽：实时调 onWidthChange（拖动中禁过渡），松手由调用方持久化
+  const startResize = (event: React.PointerEvent): void => {
+    if (!open) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startW = widthRef.current
+    setResizing(true)
+    const move = (e: PointerEvent): void => {
+      const next = Math.round(Math.max(280, Math.min(760, startW + (startX - e.clientX))))
+      onWidthChange?.(next)
+    }
+    const up = (): void => {
+      setResizing(false)
+      removeEventListener('pointermove', move)
+      removeEventListener('pointerup', up)
+    }
+    addEventListener('pointermove', move)
+    addEventListener('pointerup', up)
+  }
 
-  // right 定位 = 视口右缘到 rightEdge 的距离：
-  // - 无 bsb：rightEdge = window.innerWidth → right = 0 → 贴视口右缘
-  // - 有 bsb：rightEdge = bsb.left → right = window.innerWidth - bsb.left = bsb 占据的左缘
-  //   距离 → dock 右边贴 bsb 左边，width 由 prop 决定（不超出 rightEdge）
-  // 修前 bug：旧版用 `left: rightEdge - width` 在 bsb 存在时让 dock 跑出屏幕左外
-  const style: CSSProperties = {
+  if (!host) return null
+
+  // 外层：宽度动画容器（0 ↔ W），右缘固定 → 从右侧推出；内层固定宽度防内容压缩
+  const outer: CSSProperties = {
     position: 'fixed',
     top: 0,
     bottom: 0,
     right: typeof window === 'undefined' ? 0 : Math.max(0, window.innerWidth - rightEdge),
+    width: open ? width : 0,
+    transition: resizing ? 'none' : TRANSITION,
+    overflow: 'hidden',
+    zIndex: 2147483050,
+    background: 'var(--dsw-alias-bg-layer-1, #fff)',
+    boxSizing: 'border-box',
+  }
+  const inner: CSSProperties = {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    right: 0,
     width,
-    zIndex: 2147483050, // 略高于 better-sidebar 渲染层，避免被遮（其 zIndex 段 2147483xxx）
+    height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    background: 'var(--dsw-alias-bg-layer-1, #fff)',
     borderLeft: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))',
     boxShadow: '-4px 0 14px rgba(0,0,0,.06)',
+    background: 'var(--dsw-alias-bg-layer-1, #fff)',
     boxSizing: 'border-box',
   }
   return createPortal(
-    <div style={style} data-openloop-dock-panel="">{children}</div>,
+    <div style={outer} data-openloop-dock-panel="">
+      <div style={inner}>
+        {children}
+        {/* 左缘拖宽手柄 */}
+        <div
+          onPointerDown={startResize}
+          style={{
+            position: 'absolute', left: 0, top: 0, bottom: 0, width: 7,
+            cursor: open ? 'col-resize' : 'default',
+            pointerEvents: open ? 'auto' : 'none',
+            zIndex: 10,
+          }}
+          title="拖动调整宽度"
+        />
+      </div>
+    </div>,
     host,
   )
 }

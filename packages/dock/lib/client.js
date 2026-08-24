@@ -18,20 +18,16 @@ window.__ModuleLoader__.load({
 		* 冲突规避三件套：
 		* 1. host div 挂 body（data-openloop-dock），MutationObserver 保活——与 better-sidebar 各挂各的；
 		* 2. 挤压用 #root 的 padding-right（better-sidebar 用 margin-right，天然叠加不覆盖）；
-		* 3. 空间探测（非 API 对接）：[data-dsh-better-sidebar] 存在 → dock 贴其左侧；
-		*    不存在 → 贴视口右缘。ResizeObserver + MutationObserver 跟踪其开/关/宽度变化。
+		* 3. 空间探测（bsb 的公开布局副作用：#root computed margin-right）+ 500ms poll。
+		*
+		* 展开交互（2026-08-24 重做，对齐 better-sidebar 体验）：
+		* - 面板常驻渲染，宽度过渡（width 0 ↔ W）——从右侧推出的动画效果；
+		* - 左缘 6px 拖宽手柄（col-resize），实时生效，松手持久化 localStorage；
+		* - 拖动期间禁用 width 过渡（否则动画滞后手感）；内容层固定宽度不随动画压缩。
 		*/
 		const DOCK_WIDTH_VAR = "--openloop-dock-width";
-		/**
-		* 右侧空间探测（2026-08-24 第二次修正）：锚点从 bsb host DOM 改为
-		* #root 的 computed margin-right——better-sidebar 的核心机制就是给 #root
-		* 加 margin-right 推布局（layout.css），这是它的「公开布局副作用」：
-		* 右侧栏开 → margin-right = 侧栏宽（实测 448px）；关 → 0。
-		* 相比 DOM 探测的两次失败（host 常驻 h=0 误判、内部容器全视口），
-		* margin 信号语义稳定且与面板显隐严格同步，也不耦合其内部结构。
-		* dock 用 padding-right 推（与 margin 天然叠加），读 margin 不读 padding，
-		* 不会读到自己的 push。
-		*/
+		const TRANSITION = "width .22s ease";
+		/** 右侧空间探测：锚 #root 的 computed margin-right（bsb 的公开布局副作用） */
 		function probeDockRightEdge() {
 			if (typeof window === "undefined") return 0;
 			const root = document.getElementById("root");
@@ -40,9 +36,12 @@ window.__ModuleLoader__.load({
 			const occupied = marginRight > 0 && marginRight < window.innerWidth * .7 ? marginRight : 0;
 			return window.innerWidth - occupied;
 		}
-		function DockHost({ open, width, children }) {
+		function DockHost({ open, width, onWidthChange, children }) {
 			const [host, setHost] = (0, react.useState)(null);
 			const [rightEdge, setRightEdge] = (0, react.useState)(() => probeDockRightEdge());
+			const [resizing, setResizing] = (0, react.useState)(false);
+			const widthRef = (0, react.useRef)(width);
+			widthRef.current = width;
 			(0, react.useEffect)(() => {
 				const el = document.createElement("div");
 				el.setAttribute("data-openloop-dock", "");
@@ -70,7 +69,7 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				const styleEl = document.createElement("style");
 				styleEl.setAttribute("data-openloop-dock-style", "");
-				styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .18s ease }`;
+				styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .22s ease }`;
 				document.head.appendChild(styleEl);
 				return () => styleEl.remove();
 			}, []);
@@ -82,25 +81,70 @@ window.__ModuleLoader__.load({
 					root.style.removeProperty(DOCK_WIDTH_VAR);
 				};
 			}, [open, width]);
-			if (!host || !open) return null;
-			const style = {
+			const startResize = (event) => {
+				if (!open) return;
+				event.preventDefault();
+				const startX = event.clientX;
+				const startW = widthRef.current;
+				setResizing(true);
+				const move = (e) => {
+					const next = Math.round(Math.max(280, Math.min(760, startW + (startX - e.clientX))));
+					onWidthChange?.(next);
+				};
+				const up = () => {
+					setResizing(false);
+					removeEventListener("pointermove", move);
+					removeEventListener("pointerup", up);
+				};
+				addEventListener("pointermove", move);
+				addEventListener("pointerup", up);
+			};
+			if (!host) return null;
+			const outer = {
 				position: "fixed",
 				top: 0,
 				bottom: 0,
 				right: typeof window === "undefined" ? 0 : Math.max(0, window.innerWidth - rightEdge),
-				width,
+				width: open ? width : 0,
+				transition: resizing ? "none" : TRANSITION,
+				overflow: "hidden",
 				zIndex: 2147483050,
-				display: "flex",
-				flexDirection: "column",
 				background: "var(--dsw-alias-bg-layer-1, #fff)",
-				borderLeft: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
-				boxShadow: "-4px 0 14px rgba(0,0,0,.06)",
 				boxSizing: "border-box"
 			};
 			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-				style,
+				style: outer,
 				"data-openloop-dock-panel": "",
-				children
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						position: "absolute",
+						top: 0,
+						bottom: 0,
+						right: 0,
+						width,
+						height: "100%",
+						display: "flex",
+						flexDirection: "column",
+						borderLeft: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
+						boxShadow: "-4px 0 14px rgba(0,0,0,.06)",
+						background: "var(--dsw-alias-bg-layer-1, #fff)",
+						boxSizing: "border-box"
+					},
+					children: [children, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						onPointerDown: startResize,
+						style: {
+							position: "absolute",
+							left: 0,
+							top: 0,
+							bottom: 0,
+							width: 7,
+							cursor: open ? "col-resize" : "default",
+							pointerEvents: open ? "auto" : "none",
+							zIndex: 10
+						},
+						title: "拖动调整宽度"
+					})]
+				})
 			}), host);
 		}
 		//#endregion
@@ -2712,7 +2756,7 @@ window.__ModuleLoader__.load({
 				delay: 120,
 				tolerance: 6
 			} }));
-			const tiles = (0, react.useMemo)(() => dockStore.getSnapshot().tiles, [dragging]);
+			const tiles = dockStore.getSnapshot().tiles;
 			const onDragStart = (event) => {
 				setDragging(tiles.find((t) => t.tileId === event.active.id) ?? null);
 			};
@@ -2842,9 +2886,21 @@ window.__ModuleLoader__.load({
 				}) : null]
 			});
 		}
+		const WIDTH_KEY = "openloop.dock.width.v1";
+		const DEFAULT_WIDTH = 420;
+		function readStoredWidth() {
+			try {
+				const raw = localStorage.getItem(WIDTH_KEY);
+				const n = raw === null ? NaN : Number(raw);
+				return Number.isFinite(n) ? Math.max(280, Math.min(760, n)) : DEFAULT_WIDTH;
+			} catch {
+				return DEFAULT_WIDTH;
+			}
+		}
 		function DockShell() {
 			const [open, setOpen] = (0, react.useState)(() => dockStore.getSnapshot().tiles.length > 0);
 			const [version, setVersion] = (0, react.useState)(0);
+			const [width, setWidth] = (0, react.useState)(readStoredWidth);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
 			const tiles = dockStore.getSnapshot().tiles;
 			const [toggleRight, setToggleRight] = (0, react.useState)(10);
@@ -2859,9 +2915,12 @@ window.__ModuleLoader__.load({
 				};
 			}, []);
 			(0, react.useEffect)(() => {
-				window.__openloopDockToggle = () => setOpen((o) => !o);
+				const w = window;
+				w.__openloopDockToggle = () => setOpen((o) => !o);
+				w.__openloopDockOpen = () => setOpen(true);
 				return () => {
-					delete window.__openloopDockToggle;
+					delete w.__openloopDockToggle;
+					delete w.__openloopDockOpen;
 				};
 			}, []);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockToggle, {
@@ -2871,7 +2930,13 @@ window.__ModuleLoader__.load({
 				right: toggleRight
 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockHost, {
 				open,
-				width: 420,
+				width,
+				onWidthChange: (w) => {
+					setWidth(w);
+					try {
+						localStorage.setItem(WIDTH_KEY, String(w));
+					} catch {}
+				},
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
 						display: "flex",
@@ -2936,20 +3001,20 @@ window.__ModuleLoader__.load({
 			})] });
 		}
 		function apply(ctx) {
-			ctx.provide("openloop-dock/client", {
+			const service = {
 				pinPanel(meta, title, origin) {
 					dockStore.pin({
 						kind: "panel",
 						meta
 					}, title, origin);
-					window.__openloopDockToggle?.();
+					window.__openloopDockOpen?.();
 				},
 				pinArtifact(meta, title, origin) {
 					dockStore.pin({
 						kind: "artifact",
 						meta
 					}, title, origin);
-					window.__openloopDockToggle?.();
+					window.__openloopDockOpen?.();
 				},
 				toggle() {
 					window.__openloopDockToggle?.();
@@ -2957,7 +3022,9 @@ window.__ModuleLoader__.load({
 				isOpen() {
 					return document.querySelector("[data-openloop-dock-panel]") !== null;
 				}
-			});
+			};
+			ctx.provide("openloop-dock/client", service);
+			window.__openloopDockService = service;
 			ctx.effect(() => {
 				const host = document.createElement("div");
 				host.setAttribute("data-openloop-dock-root", "");
@@ -2968,6 +3035,7 @@ window.__ModuleLoader__.load({
 					root.render((0, react.createElement)(DockShell));
 				} catch {}
 				return () => {
+					delete window.__openloopDockService;
 					root?.unmount();
 					host.remove();
 				};

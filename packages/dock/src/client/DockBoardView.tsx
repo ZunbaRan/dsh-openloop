@@ -4,7 +4,7 @@
  * - 拖角 resize（右下角手柄，按格步进）
  * - tile 渲染：panel → PanelCard（external panels/client）；artifact → ArtifactFrame（external artifact/client）
  */
-import { useCallback, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import {
   DndContext, DragOverlay, PointerSensor, TouchSensor, closestCenter,
   useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent,
@@ -115,7 +115,10 @@ export function DockBoardView({ onEmpty }: { onEmpty?: () => void }): ReactNode 
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } }),
   )
-  const tiles = useMemo(() => dockStore.getSnapshot().tiles, [dragging]) // 简化：随交互刷新（store listener 由外层驱动重渲染）
+  // 每渲染读最新 snapshot（2026-08-24 修复：此前 useMemo 依赖 [dragging]，
+  // resize 的 dockStore.move 更新后 memo 不重算——拖大小无实时反馈，
+  // 重开 dock 才显示新尺寸。外层 DockShell 的 store 订阅驱动本组件重渲染）
+  const tiles = dockStore.getSnapshot().tiles
 
   const onDragStart = (event: DragStartEvent) => {
     setDragging(tiles.find(t => t.tileId === event.active.id) ?? null)

@@ -6,16 +6,13 @@ import { getBaseClient } from './base-bridge.tsx'
 import { ArtifactCard, ArtifactFrame } from './ArtifactCard.tsx'
 
 // ---- OpenLoop Dock pin 接线（可选依赖）----
-import { setDockService, type DockServiceLike } from './dock-pin.ts'
+import type { DockServiceLike } from './dock-pin.ts'
 export { getDockService } from './dock-pin.ts' 
 
 export { ArtifactFrame }
 export const name = 'openloop-html-artifact'
 export const inject = ['slots']
 export function apply(ctx: ClientContext): void {
-  ctx.inject(['openloop-dock/client'], (dockCtx: ClientContext) => {
-    setDockService((dockCtx as ClientContext & { 'openloop-dock/client'?: DockServiceLike })['openloop-dock/client'])
-  })
   const scope = getBaseClient()?.createOpenLoopSettingsScope()
   const ThemedArtifactCard = (props: ToolCallViewProps) => <ArtifactCard {...props} scope={scope} />
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key: 'html_artifact' }, ThemedArtifactCard))

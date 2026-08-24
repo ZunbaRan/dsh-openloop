@@ -185,12 +185,8 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		}
 		//#endregion
 		//#region src/client/dock-pin.ts
-		let dockService;
-		function setDockService(service) {
-			dockService = service;
-		}
 		function getDockService() {
-			return dockService;
+			return globalThis.__openloopDockService;
 		}
 		//#endregion
 		//#region src/client/ArtifactCard.tsx
@@ -435,9 +431,6 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 		const name = "openloop-html-artifact";
 		const inject = ["slots"];
 		function apply(ctx) {
-			ctx.inject(["openloop-dock/client"], (dockCtx) => {
-				setDockService(dockCtx["openloop-dock/client"]);
-			});
 			const scope = getBaseClient()?.createOpenLoopSettingsScope();
 			const ThemedArtifactCard = (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactCard, {
 				...props,
