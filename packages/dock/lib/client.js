@@ -147,8 +147,6 @@ window.__ModuleLoader__.load({
 						height: "100%",
 						display: "flex",
 						flexDirection: "column",
-						borderLeft: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
-						boxShadow: "-4px 0 14px rgba(0,0,0,.06)",
 						background: "var(--dsw-alias-bg-layer-1, #fff)",
 						boxSizing: "border-box"
 					},
@@ -4965,11 +4963,14 @@ window.__ModuleLoader__.load({
 		const name = "openloop-dock";
 		const inject = [];
 		function DockToggle({ open, onToggle, count, right }) {
+			const [hover, setHover] = (0, react.useState)(false);
 			if (open) return null;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
 				onClick: onToggle,
 				title: "展开 OpenLoop Dock",
+				onMouseEnter: () => setHover(true),
+				onMouseLeave: () => setHover(false),
 				style: {
 					position: "fixed",
 					top: 52,
@@ -4984,7 +4985,8 @@ window.__ModuleLoader__.load({
 					cursor: "pointer",
 					fontSize: 14,
 					lineHeight: 1,
-					boxShadow: "0 1px 4px rgba(0,0,0,.08)",
+					opacity: hover ? 1 : .55,
+					transition: "opacity .15s ease",
 					display: "flex",
 					alignItems: "center",
 					gap: 4

@@ -123,6 +123,9 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     background: 'var(--dsw-alias-bg-layer-1, #fff)',
     boxSizing: 'border-box',
   }
+  // bsb 同款「嵌入式」处理（2026-08-24 对比实测）：无 box-shadow、无 border-left——
+  // 面板与主内容仅靠背景色差分层（panel rgb(35,35,36) vs 主区更深），
+  // 阴影/边线是「悬浮」感的来源，bsb 面板实测 shadow:none / radius:0 / 无描边。
   const inner: CSSProperties = {
     position: 'absolute',
     top: 0,
@@ -132,8 +135,6 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     height: '100%',
     display: 'flex',
     flexDirection: 'column',
-    borderLeft: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))',
-    boxShadow: '-4px 0 14px rgba(0,0,0,.06)',
     background: 'var(--dsw-alias-bg-layer-1, #fff)',
     boxSizing: 'border-box',
   }

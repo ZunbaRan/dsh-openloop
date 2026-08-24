@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-dock",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "OpenLoop Dock: pin panels and html artifacts to a right-side grid dock powered by react-grid-layout (drag, resize, snap, compaction). Coexists with dsh-better-sidebar via padding-right push + margin probing.",
   "type": "module",
   "exports": {

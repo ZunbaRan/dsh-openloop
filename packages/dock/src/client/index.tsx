@@ -30,12 +30,15 @@ export interface DockClientService {
 function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
   // 开态隐藏：面板 header 自带「收起」按钮（bsb 同款——开着的面板用面板自己的
   // 关闭控制，不再让浮动按钮遮挡 tile 内容）
+  const [hover, setHover] = useState(false)
   if (open) return null
   return (
     <button
       type="button"
       onClick={onToggle}
       title="展开 OpenLoop Dock"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         position: 'fixed',
         // top 52 错层（2026-08-24 真机冲突修复）：bsb 的面板开关在 header 行
@@ -47,12 +50,15 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
         height: 34,
         padding: '0 8px',
         borderRadius: 10,
+        // 低存在感处理（2026-08-24 对比 bsb）：无阴影、静止半透明，
+        // hover 才完全显现——浮动按钮不该抢视觉
         border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))',
         background: 'var(--dsw-alias-bg-layer-1, #fff)',
         cursor: 'pointer',
         fontSize: 14,
         lineHeight: 1,
-        boxShadow: '0 1px 4px rgba(0,0,0,.08)',
+        opacity: hover ? 1 : 0.55,
+        transition: 'opacity .15s ease',
         display: 'flex',
         alignItems: 'center',
         gap: 4,
