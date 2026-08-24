@@ -659,7 +659,11 @@ export async function apply(ctx: Context, config: McpRuntimeOptions): Promise<vo
   await service.start()
   // MCP admin 路由（settings page 服务端：list/upsert/remove/test）
   ctx.effect(
-    () => registerMcpAdminRoutes(ctx, ctx.webServer),
+    () => registerMcpAdminRoutes(ctx, ctx.webServer, {
+      statusOf: (id) => {
+        try { return service.status(id).state } catch { return undefined }
+      },
+    }),
     'openloop-dsh-mcp-runtime: admin routes',
   )
 }

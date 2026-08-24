@@ -8557,43 +8557,104 @@ container holding the app. Specify either width or maxWidth, and either height o
 		//#endregion
 		//#region src/client/McpSettingsSection.tsx
 		/**
-		* "MCP servers" settings section：可视化 server 管理（列表/新增/删除/试连）。
-		* 数据经 admin 路由（/openloop/mcp/servers*）读写 mcp.json；保存后提示重启生效。
+		* "MCP servers" settings section：可视化 server 管理。
+		*
+		* 设计语言对齐 DSH 设置壳 recipe（参照 dsh-better-sidebar SideCardSection）：
+		* 容器卡片（l2 hairline + 16px radius + layer-3 fill）、标题行 + 计数徽章、
+		* 行内 hairline 分隔。交互零弹窗：行级测试就地出结果（加载态 → ✓ 工具数 /
+		* ✗ 错误）、删除走两步内联确认、编辑载入底部表单并标记「编辑中」。
+		*
+		* 数据经 admin 路由（/openloop/mcp/servers*）读写 mcp.json；保存后需重启生效。
 		*/
-		const rowStyle = {
+		const card = {
+			border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
+			borderRadius: 16,
+			background: "var(--dsw-alias-bg-layer-3, rgba(0,0,0,.015))",
+			overflow: "hidden"
+		};
+		const rowLine = {
 			display: "flex",
 			alignItems: "center",
 			gap: 10,
-			padding: "10px 12px",
-			borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))",
-			flexWrap: "wrap"
+			padding: "11px 14px",
+			borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))"
 		};
 		const mono = {
-			font: "11px ui-monospace, monospace",
-			opacity: .75
+			font: "11px ui-monospace, SFMono-Regular, monospace",
+			opacity: .72
 		};
+		const badge = (fg, bg) => ({
+			fontSize: 10,
+			lineHeight: "16px",
+			padding: "0 7px",
+			borderRadius: 8,
+			color: fg,
+			background: bg,
+			whiteSpace: "nowrap"
+		});
 		const btn = {
 			fontSize: 11,
 			padding: "3px 10px",
-			borderRadius: 7,
+			borderRadius: 8,
+			cursor: "pointer",
 			border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14))",
 			background: "transparent",
-			cursor: "pointer"
+			color: "inherit",
+			whiteSpace: "nowrap"
 		};
 		const input = {
 			flex: 1,
-			minWidth: 120,
+			minWidth: 110,
 			fontSize: 12,
-			padding: "5px 8px",
-			borderRadius: 7,
+			padding: "6px 9px",
+			borderRadius: 8,
 			border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.14))",
-			background: "transparent",
+			background: "var(--dsw-alias-bg-layer-1, transparent)",
 			color: "inherit"
 		};
+		const STATE_DOT = {
+			connected: "#2da44e",
+			connecting: "#d4a72c",
+			error: "#cf222e",
+			disconnected: "#8c959f",
+			closed: "#8c959f",
+			unknown: "#8c959f"
+		};
+		const STATE_LABEL = {
+			connected: "已连接",
+			connecting: "连接中",
+			error: "错误",
+			disconnected: "未连接",
+			closed: "已关闭",
+			unknown: "未知"
+		};
+		function SectionHeading({ title, count }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					display: "flex",
+					alignItems: "center",
+					gap: 8,
+					margin: "18px 0 8px"
+				},
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					style: {
+						fontSize: 13,
+						fontWeight: 600
+					},
+					children: title
+				}), count !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					style: badge("var(--dsw-alias-fg-secondary, #57606a)", "var(--dsw-alias-bg-layer-2, rgba(0,0,0,.05))"),
+					children: count
+				})]
+			});
+		}
 		function McpSettingsSection() {
 			const [servers, setServers] = (0, react.useState)([]);
 			const [loading, setLoading] = (0, react.useState)(true);
 			const [note, setNote] = (0, react.useState)("");
+			const [rowTests, setRowTests] = (0, react.useState)({});
+			const [confirmDelete, setConfirmDelete] = (0, react.useState)(null);
+			const confirmTimer = (0, react.useRef)(void 0);
 			const [scope, setScope] = (0, react.useState)("user");
 			const [id, setId] = (0, react.useState)("");
 			const [type, setType] = (0, react.useState)("http");
@@ -8602,7 +8663,8 @@ container holding the app. Specify either width or maxWidth, and either height o
 			const [url, setUrl] = (0, react.useState)("");
 			const [protocol, setProtocol] = (0, react.useState)("auto");
 			const [busy, setBusy] = (0, react.useState)(false);
-			const [testResult, setTestResult] = (0, react.useState)("");
+			const [testResult, setTestResult] = (0, react.useState)(null);
+			const [editing, setEditing] = (0, react.useState)(null);
 			const refresh = (0, react.useCallback)(async () => {
 				setLoading(true);
 				try {
@@ -8617,6 +8679,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 			(0, react.useEffect)(() => {
 				refresh();
 			}, [refresh]);
+			(0, react.useEffect)(() => () => clearTimeout(confirmTimer.current), []);
 			const buildEntry = () => {
 				if (id.trim() === "") {
 					setNote("id 必填");
@@ -8647,11 +8710,11 @@ container holding the app. Specify either width or maxWidth, and either height o
 				if (protocol !== "auto") entry.protocol = protocol;
 				return entry;
 			};
-			const test = async () => {
+			const testForm = async () => {
 				const entry = buildEntry();
 				if (entry === null) return;
 				setBusy(true);
-				setTestResult("测试中…");
+				setTestResult(null);
 				try {
 					const data = await (await fetch("/openloop/mcp/servers/test", {
 						method: "POST",
@@ -8661,9 +8724,18 @@ container holding the app. Specify either width or maxWidth, and either height o
 							entry
 						})
 					})).json();
-					setTestResult(data.ok ? `✓ 连接成功，${data.toolCount} 个工具` : `✗ ${data.error ?? "连接失败"}`);
+					setTestResult(data.ok ? {
+						ok: true,
+						text: `连接成功 · ${data.toolCount} 个工具`
+					} : {
+						ok: false,
+						text: data.error ?? "连接失败"
+					});
 				} catch (error) {
-					setTestResult(`✗ ${error instanceof Error ? error.message : String(error)}`);
+					setTestResult({
+						ok: false,
+						text: error instanceof Error ? error.message : String(error)
+					});
 				} finally {
 					setBusy(false);
 				}
@@ -8679,185 +8751,245 @@ container holding the app. Specify either width or maxWidth, and either height o
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify(entry)
 					})).json();
-					setNote(data.ok ? `✓ 已保存（${data.note ?? ""}）` : `✗ ${data.error}`);
+					setNote(data.ok ? "已保存 · 重启 DSH 后生效" : `保存失败：${data.error}`);
 					if (data.ok) {
-						setId("");
-						setCommand("");
-						setArgs("");
-						setUrl("");
-						setTestResult("");
+						resetForm();
 						await refresh();
 					}
 				} finally {
 					setBusy(false);
 				}
 			};
+			const resetForm = () => {
+				setId("");
+				setCommand("");
+				setArgs("");
+				setUrl("");
+				setProtocol("auto");
+				setTestResult(null);
+				setEditing(null);
+			};
+			const startEdit = (row) => {
+				setScope(row.source);
+				setId(row.id);
+				setType(row.kind === "stdio" ? "stdio" : "http");
+				setCommand(row.kind === "stdio" ? row.endpoint : "");
+				setUrl(row.kind === "stdio" ? "" : row.endpoint);
+				setProtocol(row.protocol);
+				setTestResult(null);
+				setEditing(row.id);
+				setNote("");
+			};
 			const remove = async (row) => {
-				if (!confirm(`删除 server "${row.id}"（${row.source}）？`)) return;
+				const key = `${row.source}/${row.id}`;
+				if (confirmDelete !== key) {
+					setConfirmDelete(key);
+					clearTimeout(confirmTimer.current);
+					confirmTimer.current = setTimeout(() => setConfirmDelete(null), 3e3);
+					return;
+				}
+				clearTimeout(confirmTimer.current);
+				setConfirmDelete(null);
 				await fetch(`/openloop/mcp/servers/${row.source}/${encodeURIComponent(row.id)}`, { method: "DELETE" });
 				await refresh();
 			};
 			const testRow = async (row) => {
-				await fetch("/openloop/mcp/servers/test", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({
-						id: row.id,
-						entry: row.kind === "stdio" ? {
-							type: "stdio",
-							command: row.endpoint
+				const key = `${row.source}/${row.id}`;
+				setRowTests((prev) => ({
+					...prev,
+					[key]: { phase: "testing" }
+				}));
+				try {
+					const data = await (await fetch("/openloop/mcp/servers/test", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({
+							id: row.id,
+							entry: row.kind === "stdio" ? {
+								type: "stdio",
+								command: row.endpoint
+							} : {
+								type: "http",
+								url: row.endpoint
+							}
+						})
+					})).json();
+					setRowTests((prev) => ({
+						...prev,
+						[key]: data.ok ? {
+							phase: "ok",
+							toolCount: data.toolCount ?? 0
 						} : {
-							type: "http",
-							url: row.endpoint
+							phase: "fail",
+							error: data.error ?? "连接失败"
 						}
-					})
-				});
-				alert(`测试请求已发送——请看下方"新增 server"区的"测试连接"输出？\n（行级测试结果见 console；简化 UI：可在下方表单粘贴同样的 endpoint 测试）`);
+					}));
+				} catch (error) {
+					setRowTests((prev) => ({
+						...prev,
+						[key]: {
+							phase: "fail",
+							error: error instanceof Error ? error.message : String(error)
+						}
+					}));
+				}
 			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("p", {
 					style: {
 						fontSize: 12,
-						opacity: .75,
-						marginTop: 0
+						opacity: .72,
+						marginTop: 0,
+						lineHeight: 1.6
 					},
 					children: [
-						"MCP server 管理（配置文件 ",
+						"管理 Agent 可用的 MCP server（写入 ",
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("code", { children: "mcp.json" }),
-						" 的可视化编辑）。保存后需重启 DSH 生效。"
+						" 配置文件；保存后重启 DSH 生效）。"
 					]
 				}),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h4", {
-					style: {
-						fontSize: 13,
-						margin: "14px 0 6px"
-					},
-					children: [
-						"当前 servers（",
-						loading ? "加载中…" : servers.length,
-						"）"
-					]
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SectionHeading, {
+					title: "Servers",
+					count: loading ? void 0 : servers.length
 				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
-						borderRadius: 10,
-						overflow: "hidden"
-					},
+					style: card,
 					children: [servers.length === 0 && !loading && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: {
-							padding: 14,
+							padding: 16,
 							fontSize: 12,
 							opacity: .6
 						},
-						children: "暂无 server——在下方添加"
-					}), servers.map((row) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: rowStyle,
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {
-								style: { fontSize: 12 },
-								children: row.id
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									...mono,
-									border: "1px solid var(--dsw-alias-border-l2)",
-									borderRadius: 5,
-									padding: "1px 6px"
-								},
-								children: row.source
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: mono,
-								children: row.kind
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									...mono,
-									flex: 1,
-									minWidth: 100,
-									overflow: "hidden",
-									textOverflow: "ellipsis"
-								},
-								children: row.endpoint
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: mono,
-								children: row.protocol
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								style: btn,
-								onClick: () => {
-									setScope(row.source);
-									setId(row.id);
-									setType(row.kind === "stdio" ? "stdio" : "http");
-									setCommand(row.kind === "stdio" ? row.endpoint : "");
-									setUrl(row.kind === "stdio" ? "" : row.endpoint);
-									setProtocol(row.protocol);
-									setTestResult("");
-								},
-								children: "编辑"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								style: btn,
-								onClick: () => void testRow(row),
-								children: "测试"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								style: btn,
-								onClick: () => void remove(row),
-								children: "删除"
-							})
-						]
-					}, `${row.source}/${row.id}`))]
+						children: "暂无 server——在下方添加你的第一个"
+					}), servers.map((row, index) => {
+						const key = `${row.source}/${row.id}`;
+						const test = rowTests[key] ?? { phase: "idle" };
+						const confirming = confirmDelete === key;
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								...rowLine,
+								...index === servers.length - 1 ? { borderBottom: "none" } : {}
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									title: STATE_LABEL[row.state] ?? row.state,
+									style: {
+										width: 8,
+										height: 8,
+										borderRadius: "50%",
+										flexShrink: 0,
+										background: STATE_DOT[row.state] ?? STATE_DOT.unknown,
+										...row.state === "connecting" ? { animation: "openloop-mcp-pulse 1.2s ease-in-out infinite" } : {}
+									}
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {
+									style: { fontSize: 12 },
+									children: row.id
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: badge("var(--dsw-alias-fg-secondary, #57606a)", "var(--dsw-alias-bg-layer-2, rgba(0,0,0,.05))"),
+									children: row.source
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: mono,
+									children: row.kind
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: {
+										...mono,
+										flex: 1,
+										minWidth: 90,
+										overflow: "hidden",
+										textOverflow: "ellipsis",
+										whiteSpace: "nowrap"
+									},
+									children: row.endpoint
+								}),
+								test.phase === "testing" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: {
+										fontSize: 11,
+										opacity: .6
+									},
+									children: "测试中…"
+								}),
+								test.phase === "ok" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									style: badge("#1a7f37", "rgba(45,164,78,.12)"),
+									children: [
+										"✓ ",
+										test.toolCount,
+										" 工具"
+									]
+								}),
+								test.phase === "fail" && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									title: test.error,
+									style: {
+										...badge("#cf222e", "rgba(207,34,46,.1)"),
+										maxWidth: 180,
+										overflow: "hidden",
+										textOverflow: "ellipsis"
+									},
+									children: ["✗ ", test.error.slice(0, 40)]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									style: btn,
+									onClick: () => startEdit(row),
+									children: "编辑"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									style: btn,
+									disabled: test.phase === "testing",
+									onClick: () => void testRow(row),
+									children: "测试"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									style: confirming ? {
+										...btn,
+										borderColor: "#cf222e",
+										color: "#cf222e",
+										fontWeight: 600
+									} : btn,
+									onClick: () => void remove(row),
+									children: confirming ? "确认删除？" : "删除"
+								})
+							]
+						}, key);
+					})]
 				}),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h4", {
-					style: {
-						fontSize: 13,
-						margin: "18px 0 6px"
-					},
-					children: "新增 / 编辑 server"
-				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SectionHeading, { title: editing !== null ? `编辑 server：${editing}` : "新增 server" }),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
-						border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
-						borderRadius: 10,
-						padding: 12,
+						...card,
+						padding: 14,
 						display: "flex",
 						flexDirection: "column",
-						gap: 8
+						gap: 9
 					},
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							style: {
 								display: "flex",
-								gap: 10,
-								alignItems: "center"
+								gap: 14,
+								alignItems: "center",
+								fontSize: 12
 							},
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									style: { fontSize: 12 },
+									style: { opacity: .72 },
 									children: "作用域"
 								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-									style: { fontSize: 12 },
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-										type: "radio",
-										checked: scope === "user",
-										onChange: () => setScope("user")
-									}), " 用户级（~/.dsh/mcp.json）"]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", {
-									style: { fontSize: 12 },
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-										type: "radio",
-										checked: scope === "project",
-										onChange: () => setScope("project")
-									}), " 项目级（.dsh/mcp.json）"]
-								})
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									type: "radio",
+									checked: scope === "user",
+									onChange: () => setScope("user")
+								}), " 用户级（~/.dsh/mcp.json）"] }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("label", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									type: "radio",
+									checked: scope === "project",
+									onChange: () => setScope("project")
+								}), " 项目级（.dsh/mcp.json）"] })
 							]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -8875,7 +9007,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
 									style: {
 										...input,
-										maxWidth: 100
+										maxWidth: 96
 									},
 									value: type,
 									onChange: (e) => setType(e.target.value === "stdio" ? "stdio" : "http"),
@@ -8890,14 +9022,14 @@ container holding the app. Specify either width or maxWidth, and either height o
 								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("select", {
 									style: {
 										...input,
-										maxWidth: 110
+										maxWidth: 116
 									},
 									value: protocol,
 									onChange: (e) => setProtocol(e.target.value),
 									children: [
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 											value: "auto",
-											children: "auto"
+											children: "protocol: auto"
 										}),
 										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("option", {
 											value: "legacy",
@@ -8919,8 +9051,9 @@ container holding the app. Specify either width or maxWidth, and either height o
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
 							style: {
 								...input,
-								minHeight: 44,
-								resize: "vertical"
+								minHeight: 46,
+								resize: "vertical",
+								fontFamily: "ui-monospace, monospace"
 							},
 							placeholder: "args（每行一个，如：\n-y\n@modelcontextprotocol/server-github）",
 							value: args,
@@ -8935,7 +9068,8 @@ container holding the app. Specify either width or maxWidth, and either height o
 							style: {
 								display: "flex",
 								gap: 8,
-								alignItems: "center"
+								alignItems: "center",
+								flexWrap: "wrap"
 							},
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -8945,32 +9079,49 @@ container holding the app. Specify either width or maxWidth, and either height o
 										padding: "5px 14px"
 									},
 									disabled: busy,
-									onClick: () => void test(),
-									children: "测试连接"
+									onClick: () => void testForm(),
+									children: busy ? "请求中…" : "测试连接"
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									type: "button",
 									style: {
 										...btn,
 										padding: "5px 14px",
-										fontWeight: 600
+										fontWeight: 600,
+										background: "var(--dsw-alias-bg-inverse, #1f2328)",
+										color: "var(--dsw-alias-fg-inverse, #fff)",
+										border: "none"
 									},
 									disabled: busy,
 									onClick: () => void save(),
-									children: "保存"
+									children: editing !== null ? "保存修改" : "添加"
 								}),
-								testResult !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									style: { fontSize: 12 },
-									children: testResult
+								editing !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									style: btn,
+									onClick: resetForm,
+									children: "取消编辑"
+								}),
+								testResult !== null && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									style: testResult.ok ? badge("#1a7f37", "rgba(45,164,78,.12)") : badge("#cf222e", "rgba(207,34,46,.1)"),
+									children: [
+										testResult.ok ? "✓" : "✗",
+										" ",
+										testResult.text
+									]
 								}),
 								note !== "" && /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									style: { fontSize: 12 },
+									style: {
+										fontSize: 11,
+										opacity: .75
+									},
 									children: note
 								})
 							]
 						})
 					]
-				})
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("style", { children: "@keyframes openloop-mcp-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }" })
 			] });
 		}
 		//#endregion

@@ -35,6 +35,8 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 interface AdminRouteOptions {
   dshHome?: string
   projectDir?: string
+  /** 活动 runtime 的连接状态查询（列表行实时状态点；缺省时 rows 不带 state） */
+  statusOf?: (id: string) => string | undefined
 }
 
 export function registerMcpAdminRoutes(ctx: Context, webServer: WebServer, options: AdminRouteOptions = {}): () => void {
@@ -81,6 +83,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, options: AdminR
           kind: config.transport.kind,
           endpoint: config.transport.kind === 'stdio' ? config.transport.command : config.transport.url,
           protocol: config.protocol ?? 'auto',
+          state: options.statusOf?.(config.id) ?? 'unknown',
         })),
       })
       return
