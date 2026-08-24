@@ -28,31 +28,37 @@ export interface DockClientService {
 }
 
 function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
+  // 开态隐藏：面板 header 自带「收起」按钮（bsb 同款——开着的面板用面板自己的
+  // 关闭控制，不再让浮动按钮遮挡 tile 内容）
+  if (open) return null
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={open ? '收起 OpenLoop Dock' : '展开 OpenLoop Dock'}
+      title="展开 OpenLoop Dock"
       style={{
         position: 'fixed',
         // top 52 错层（2026-08-24 真机冲突修复）：bsb 的面板开关在 header 行
-        // （y≈3-40），dock toggle 原 top:10 与其重叠且 z-index 更高——CDP/用户
-        // 点击 bsb 按钮实际命中 dock toggle（表现为「点 bsb 按钮 dock 关了」）。
+        // （y≈3-40），dock toggle 与其垂直错开避免命中冲突。
         top: 52,
         right,
         zIndex: 2147483100,
-        width: 34,
+        minWidth: 34,
         height: 34,
+        padding: '0 8px',
         borderRadius: 10,
-        border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12))',
+        border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))',
         background: 'var(--dsw-alias-bg-layer-1, #fff)',
         cursor: 'pointer',
         fontSize: 14,
         lineHeight: 1,
-        boxShadow: '0 2px 8px rgba(0,0,0,.12)',
+        boxShadow: '0 1px 4px rgba(0,0,0,.08)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 4,
       }}
     >
-      {open ? '▶' : '📌'}{count > 0 && !open ? <span style={{ fontSize: 10, marginLeft: 2 }}>{count}</span> : null}
+      📌{count > 0 ? <span style={{ fontSize: 10, opacity: 0.7 }}>{count}</span> : null}
     </button>
   )
 }
@@ -70,10 +76,43 @@ function readStoredWidth(): number {
   }
 }
 
+/** header ghost 按钮（bsb 工具栏风格：无边框、hover 淡底、可 danger 态） */
+function HeaderButton({ label, title, onClick, danger = false }: { label: string; title: string; onClick: () => void; danger?: boolean }): ReactNode {
+  const [hover, setHover] = useState(false)
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        fontSize: 11,
+        padding: '3px 8px',
+        borderRadius: 6,
+        border: 'none',
+        cursor: 'pointer',
+        lineHeight: 1.5,
+        color: danger ? 'var(--dsw-alias-danger, #d4453a)' : 'inherit',
+        opacity: danger ? 1 : 0.72,
+        background: hover ? (danger ? 'rgba(212,69,58,.12)' : 'rgba(127,127,127,.14)') : 'transparent',
+        transition: 'background .12s ease',
+      }}
+    >{label}</button>
+  )
+}
+
 function DockShell(): ReactNode {
   const [open, setOpen] = useState(() => dockStore.getSnapshot().tiles.length > 0)
   const [version, setVersion] = useState(0)
   const [width, setWidth] = useState(readStoredWidth)
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  // 两步确认 3 秒未确认自动复位（替代原生 confirm 弹窗）
+  useEffect(() => {
+    if (!confirmingClear) return
+    const timer = setTimeout(() => setConfirmingClear(false), 3000)
+    return () => clearTimeout(timer)
+  }, [confirmingClear])
   useEffect(() => dockStore.subscribe(() => setVersion(v => v + 1)), [])
   const tiles = dockStore.getSnapshot().tiles
   // toggle 跟随 bsb 右缘（bsb 开时挪到其左侧 10px，避免与其按钮重叠）
@@ -105,15 +144,37 @@ function DockShell(): ReactNode {
       <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={tiles.length} right={toggleRight} />
       <DockHost open={open} width={width} onWidthChange={(w) => { setWidth(w); try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ } }}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-dock-version={version}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))', flexShrink: 0 }}>
-            <strong style={{ fontSize: 13 }}>OpenLoop Dock</strong>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" onClick={() => dockStore.compact()} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12))', background: 'transparent', cursor: 'pointer' }}>整理</button>
-              <button type="button" onClick={() => { if (confirm('清空 Dock 画板？')) dockStore.clear() }} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12))', background: 'transparent', cursor: 'pointer' }}>清空</button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))', flexShrink: 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.2, opacity: 0.85 }}>OpenLoop Dock</span>
+            <div style={{ display: 'flex', gap: 2 }}>
+              <HeaderButton label="整理" title="重力紧凑：消除空洞，保持相对顺序" onClick={() => dockStore.compact()} />
+              <HeaderButton label="收起" title="收起 Dock（tile 保留，再点右上角 📌 展开）" onClick={() => setOpen(false)} />
+              <HeaderButton
+                label={confirmingClear ? '确认清空？' : '清空'}
+                title={confirmingClear ? '再次点击确认移除全部 tile' : '移除画板上的全部 tile'}
+                danger={confirmingClear}
+                onClick={() => {
+                  if (confirmingClear) {
+                    dockStore.clear()
+                    setConfirmingClear(false)
+                  } else {
+                    setConfirmingClear(true)
+                  }
+                }}
+              />
             </div>
           </div>
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            <DockBoardView />
+            {tiles.length === 0
+              ? (
+                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: 0.45, padding: 24, textAlign: 'center', userSelect: 'none' }}>
+                  <div style={{ fontSize: 24 }}>📌</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                    面板或页面卡片右上角点「📌 固定」<br />把 widget / artifact 钉到这里自由排布
+                  </div>
+                </div>
+              )
+              : <DockBoardView />}
           </div>
         </div>
       </DockHost>

@@ -4484,6 +4484,31 @@ window.__ModuleLoader__.load({
 			}
 			return result;
 		}
+		/**
+		* 重力紧凑（「整理」按钮，2026-08-24 恢复）：按视觉顺序（row→col）排序后，
+		* 每个 tile 从顶部找最近空位重新落位——消除拖拽产生的空洞，
+		* 保持相对顺序（用户的人工排列意图不被打乱）。
+		*/
+		function compactTiles(tiles) {
+			const sorted = [...tiles].sort((a, b) => a.layout.row - b.layout.row || a.layout.column - b.layout.column);
+			const placed = [];
+			const next = /* @__PURE__ */ new Map();
+			for (const t of sorted) {
+				const layout = findNearestSlot(placed, {
+					columns: t.layout.columns,
+					rows: t.layout.rows
+				});
+				placed.push({
+					tileId: t.tileId,
+					layout
+				});
+				next.set(t.tileId, layout);
+			}
+			return tiles.map((t) => ({
+				...t,
+				layout: next.get(t.tileId) ?? t.layout
+			}));
+		}
 		//#endregion
 		//#region src/client/store.ts
 		/**
@@ -4611,6 +4636,16 @@ window.__ModuleLoader__.load({
 			}
 			clear() {
 				this.emit(emptyBoard());
+			}
+			/** 「整理」：重力紧凑（消除空洞、保持相对顺序）——无变化时不 emit */
+			compact() {
+				const current = this.getSnapshot();
+				if (current.tiles.length === 0) return;
+				const compacted = compactTiles(current.tiles);
+				if (compacted.some((t, i) => t.layout !== current.tiles[i]?.layout)) this.emit({
+					version: 1,
+					tiles: compacted
+				});
 			}
 		};
 		const dockStore = new DockStore();
@@ -4816,6 +4851,39 @@ window.__ModuleLoader__.load({
 				})]
 			});
 		}
+		/**
+		* tile 级错误边界（2026-08-24 真机事故）：单个 tile 内容渲染崩溃（如持久化的
+		* 损坏 meta、上游面板/artifact 组件抛错）不再炸掉整个 dock React 树——
+		* 降级为该 tile 内的错误卡，用户可单独 unpin。
+		*/
+		var TileErrorBoundary = class extends react.Component {
+			constructor(props) {
+				super(props);
+				this.state = { failed: false };
+			}
+			static getDerivedStateFromError() {
+				return { failed: true };
+			}
+			componentDidCatch(error) {
+				console.warn(`[openloop-dock] tile ${this.props.tileId} render failed:`, error);
+			}
+			render() {
+				if (this.state.failed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						padding: 14,
+						fontSize: 12,
+						lineHeight: 1.7,
+						opacity: .7
+					},
+					children: [
+						"此 tile 渲染失败（内容数据可能已损坏）——",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						"可点右上角 ✕ 移除后重新固定"
+					]
+				});
+				return this.props.children;
+			}
+		};
 		function TileContent({ tile }) {
 			if (tile.source.kind === "panel") {
 				const panels = getPanelsClient();
@@ -4884,7 +4952,10 @@ window.__ModuleLoader__.load({
 							dockStore.remove(tile.tileId);
 							if (dockStore.getSnapshot().tiles.length === 0) onEmpty?.();
 						},
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
+							tileId: tile.tileId,
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+						})
 					}) }, tile.tileId))
 				}) : null]
 			});
@@ -4894,29 +4965,34 @@ window.__ModuleLoader__.load({
 		const name = "openloop-dock";
 		const inject = [];
 		function DockToggle({ open, onToggle, count, right }) {
+			if (open) return null;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
 				onClick: onToggle,
-				title: open ? "收起 OpenLoop Dock" : "展开 OpenLoop Dock",
+				title: "展开 OpenLoop Dock",
 				style: {
 					position: "fixed",
 					top: 52,
 					right,
 					zIndex: 2147483100,
-					width: 34,
+					minWidth: 34,
 					height: 34,
+					padding: "0 8px",
 					borderRadius: 10,
-					border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12))",
+					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))",
 					background: "var(--dsw-alias-bg-layer-1, #fff)",
 					cursor: "pointer",
 					fontSize: 14,
 					lineHeight: 1,
-					boxShadow: "0 2px 8px rgba(0,0,0,.12)"
+					boxShadow: "0 1px 4px rgba(0,0,0,.08)",
+					display: "flex",
+					alignItems: "center",
+					gap: 4
 				},
-				children: [open ? "▶" : "📌", count > 0 && !open ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				children: ["📌", count > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					style: {
 						fontSize: 10,
-						marginLeft: 2
+						opacity: .7
 					},
 					children: count
 				}) : null]
@@ -4933,10 +5009,40 @@ window.__ModuleLoader__.load({
 				return DEFAULT_WIDTH;
 			}
 		}
+		/** header ghost 按钮（bsb 工具栏风格：无边框、hover 淡底、可 danger 态） */
+		function HeaderButton({ label, title, onClick, danger = false }) {
+			const [hover, setHover] = (0, react.useState)(false);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				title,
+				onClick,
+				onMouseEnter: () => setHover(true),
+				onMouseLeave: () => setHover(false),
+				style: {
+					fontSize: 11,
+					padding: "3px 8px",
+					borderRadius: 6,
+					border: "none",
+					cursor: "pointer",
+					lineHeight: 1.5,
+					color: danger ? "var(--dsw-alias-danger, #d4453a)" : "inherit",
+					opacity: danger ? 1 : .72,
+					background: hover ? danger ? "rgba(212,69,58,.12)" : "rgba(127,127,127,.14)" : "transparent",
+					transition: "background .12s ease"
+				},
+				children: label
+			});
+		}
 		function DockShell() {
 			const [open, setOpen] = (0, react.useState)(() => dockStore.getSnapshot().tiles.length > 0);
 			const [version, setVersion] = (0, react.useState)(0);
 			const [width, setWidth] = (0, react.useState)(readStoredWidth);
+			const [confirmingClear, setConfirmingClear] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				if (!confirmingClear) return;
+				const timer = setTimeout(() => setConfirmingClear(false), 3e3);
+				return () => clearTimeout(timer);
+			}, [confirmingClear]);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
 			const tiles = dockStore.getSnapshot().tiles;
 			const [toggleRight, setToggleRight] = (0, react.useState)(10);
@@ -4985,45 +5091,46 @@ window.__ModuleLoader__.load({
 							display: "flex",
 							alignItems: "center",
 							justifyContent: "space-between",
-							padding: "10px 14px",
-							borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
+							padding: "8px 12px",
+							borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
 							flexShrink: 0
 						},
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", {
-							style: { fontSize: 13 },
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: {
+								fontSize: 12,
+								fontWeight: 600,
+								letterSpacing: .2,
+								opacity: .85
+							},
 							children: "OpenLoop Dock"
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							style: {
 								display: "flex",
-								gap: 8
+								gap: 2
 							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => dockStore.compact(),
-								style: {
-									fontSize: 11,
-									padding: "3px 8px",
-									borderRadius: 6,
-									border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12))",
-									background: "transparent",
-									cursor: "pointer"
-								},
-								children: "整理"
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => {
-									if (confirm("清空 Dock 画板？")) dockStore.clear();
-								},
-								style: {
-									fontSize: 11,
-									padding: "3px 8px",
-									borderRadius: 6,
-									border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.12))",
-									background: "transparent",
-									cursor: "pointer"
-								},
-								children: "清空"
-							})]
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(HeaderButton, {
+									label: "整理",
+									title: "重力紧凑：消除空洞，保持相对顺序",
+									onClick: () => dockStore.compact()
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(HeaderButton, {
+									label: "收起",
+									title: "收起 Dock（tile 保留，再点右上角 📌 展开）",
+									onClick: () => setOpen(false)
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(HeaderButton, {
+									label: confirmingClear ? "确认清空？" : "清空",
+									title: confirmingClear ? "再次点击确认移除全部 tile" : "移除画板上的全部 tile",
+									danger: confirmingClear,
+									onClick: () => {
+										if (confirmingClear) {
+											dockStore.clear();
+											setConfirmingClear(false);
+										} else setConfirmingClear(true);
+									}
+								})
+							]
 						})]
 					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: {
@@ -5031,7 +5138,34 @@ window.__ModuleLoader__.load({
 							minHeight: 0,
 							overflow: "auto"
 						},
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, {})
+						children: tiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								height: "100%",
+								display: "flex",
+								flexDirection: "column",
+								alignItems: "center",
+								justifyContent: "center",
+								gap: 10,
+								opacity: .45,
+								padding: 24,
+								textAlign: "center",
+								userSelect: "none"
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: { fontSize: 24 },
+								children: "📌"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								style: {
+									fontSize: 12,
+									lineHeight: 1.8
+								},
+								children: [
+									"面板或页面卡片右上角点「📌 固定」",
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+									"把 widget / artifact 钉到这里自由排布"
+								]
+							})]
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, {})
 					})]
 				})
 			})] });

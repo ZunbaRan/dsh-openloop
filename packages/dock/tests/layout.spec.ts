@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clampLayout, findNearestSlot, toRglLayout, fromRglLayout } from '../src/client/layout.ts'
+import { clampLayout, compactTiles, findNearestSlot, toRglLayout, fromRglLayout } from '../src/client/layout.ts'
 
 describe('dock 布局坐标层（RGL v2 时代，2026-08-24）', () => {
   it('clamp：宽 1-12、不越右缘', () => {
@@ -34,5 +34,38 @@ describe('dock 布局坐标层（RGL v2 时代，2026-08-24）', () => {
     ]
     const round = fromRglLayout(toRglLayout(tiles))
     for (const t of tiles) expect(round.get(t.tileId)).toEqual(t.layout)
+  })
+})
+
+describe('compactTiles 重力紧凑（整理按钮，2026-08-24 恢复）', () => {
+  it('消除空洞且保持相对顺序', () => {
+    const tiles = [
+      { tileId: 'a', layout: { column: 0, row: 0, columns: 6, rows: 2 } },
+      { tileId: 'b', layout: { column: 0, row: 5, columns: 6, rows: 2 } }, // 与 a 之间有空洞
+      { tileId: 'c', layout: { column: 6, row: 8, columns: 6, rows: 2 } },
+    ]
+    const result = compactTiles(tiles)
+    // a 不动；b 上移到 row 0 右侧或 row 2；c 紧随其后——无重叠
+    const ids = result.map(t => t.tileId)
+    expect(ids).toEqual(['a', 'b', 'c'])
+    for (let i = 0; i < result.length; i++) {
+      for (let j = i + 1; j < result.length; j++) {
+        const x = result[i]!.layout, y = result[j]!.layout
+        const overlap = x.column < y.column + y.columns && y.column < x.column + x.columns && x.row < y.row + y.rows && y.row < x.row + x.rows
+        expect(overlap).toBe(false)
+      }
+    }
+    // 紧凑后最大 row 应小于紧凑前
+    expect(Math.max(...result.map(t => t.layout.row))).toBeLessThan(8)
+  })
+
+  it('已紧凑的板子不产生变化（幂等）', () => {
+    const tiles = [
+      { tileId: 'a', layout: { column: 0, row: 0, columns: 12, rows: 4 } },
+      { tileId: 'b', layout: { column: 0, row: 4, columns: 6, rows: 4 } },
+      { tileId: 'c', layout: { column: 6, row: 4, columns: 6, rows: 4 } },
+    ]
+    const result = compactTiles(tiles)
+    expect(result.map(t => t.layout)).toEqual(tiles.map(t => t.layout))
   })
 })

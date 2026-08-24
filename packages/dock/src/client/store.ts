@@ -2,7 +2,7 @@
  * Dock Board store：tile 集合 + localStorage 持久化（OCIX useExtensionWorkbenchStore 同款语义）。
  * 使用 useSyncExternalStore 友好的手写 store（无 zustand 依赖——bundle 尺寸考虑）。
  */
-import { clampLayout, findNearestSlot, fromRglLayout, type RglItem, type TileLayout } from './layout.ts'
+import { clampLayout, compactTiles, findNearestSlot, fromRglLayout, type RglItem, type TileLayout } from './layout.ts'
 
 const STORAGE_KEY = 'openloop.dock.board.v1'
 
@@ -127,6 +127,15 @@ class DockStore {
 
   clear(): void {
     this.emit(emptyBoard())
+  }
+
+  /** 「整理」：重力紧凑（消除空洞、保持相对顺序）——无变化时不 emit */
+  compact(): void {
+    const current = this.getSnapshot()
+    if (current.tiles.length === 0) return
+    const compacted = compactTiles(current.tiles)
+    const changed = compacted.some((t, i) => t.layout !== current.tiles[i]?.layout)
+    if (changed) this.emit({ version: 1, tiles: compacted })
   }
 }
 

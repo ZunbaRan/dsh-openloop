@@ -104,3 +104,20 @@ export function fromRglLayout(items: ReadonlyArray<RglItem>): Map<string, TileLa
   }
   return result
 }
+
+/**
+ * 重力紧凑（「整理」按钮，2026-08-24 恢复）：按视觉顺序（row→col）排序后，
+ * 每个 tile 从顶部找最近空位重新落位——消除拖拽产生的空洞，
+ * 保持相对顺序（用户的人工排列意图不被打乱）。
+ */
+export function compactTiles<T extends { tileId: string; layout: TileLayout }>(tiles: readonly T[]): T[] {
+  const sorted = [...tiles].sort((a, b) => a.layout.row - b.layout.row || a.layout.column - b.layout.column)
+  const placed: Array<{ tileId: string; layout: TileLayout }> = []
+  const next = new Map<string, TileLayout>()
+  for (const t of sorted) {
+    const layout = findNearestSlot(placed, { columns: t.layout.columns, rows: t.layout.rows })
+    placed.push({ tileId: t.tileId, layout })
+    next.set(t.tileId, layout)
+  }
+  return tiles.map(t => ({ ...t, layout: next.get(t.tileId) ?? t.layout }))
+}

@@ -9,7 +9,7 @@
  * 数据流：dockStore（TileLayout 坐标）↔ RGL LayoutItem 双向映射（layout.ts）；
  * onLayoutChange 一次回写全部（applyLayout），localStorage 持久化语义不变。
  */
-import { useEffect, type ReactNode } from 'react'
+import { Component, useEffect, type ReactNode } from 'react'
 import { GridLayout, useContainerWidth } from 'react-grid-layout'
 import { GRID_COLUMNS, MAX_ROWS, toRglLayout } from './layout.ts'
 import { dockStore, type DockTile } from './store.ts'
@@ -126,6 +126,37 @@ function TileChrome({ title, onRemove, children }: { title: string; onRemove: ()
   )
 }
 
+/**
+ * tile 级错误边界（2026-08-24 真机事故）：单个 tile 内容渲染崩溃（如持久化的
+ * 损坏 meta、上游面板/artifact 组件抛错）不再炸掉整个 dock React 树——
+ * 降级为该 tile 内的错误卡，用户可单独 unpin。
+ */
+class TileErrorBoundary extends Component<{ tileId: string; children: ReactNode }, { failed: boolean }> {
+  constructor(props: { tileId: string; children: ReactNode }) {
+    super(props)
+    this.state = { failed: false }
+  }
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown): void {
+    console.warn(`[openloop-dock] tile ${this.props.tileId} render failed:`, error)
+  }
+
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <div style={{ padding: 14, fontSize: 12, lineHeight: 1.7, opacity: 0.7 }}>
+          此 tile 渲染失败（内容数据可能已损坏）——<br />可点右上角 ✕ 移除后重新固定
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function TileContent({ tile }: { tile: DockTile }) {
   if (tile.source.kind === 'panel') {
     const panels = getPanelsClient()
@@ -179,7 +210,9 @@ export function DockBoardView({ onEmpty }: { onEmpty?: () => void }): ReactNode 
                     if (dockStore.getSnapshot().tiles.length === 0) onEmpty?.()
                   }}
                 >
-                  <TileContent tile={tile} />
+                  <TileErrorBoundary tileId={tile.tileId}>
+                    <TileContent tile={tile} />
+                  </TileErrorBoundary>
                 </TileChrome>
               </div>
             ))}
