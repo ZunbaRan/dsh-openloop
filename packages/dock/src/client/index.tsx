@@ -8,7 +8,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createElement, useEffect, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { DockHost } from './DockHost.tsx'
+import { DockHost, probeDockRightEdge } from './DockHost.tsx'
 import { DockBoardView } from './DockBoardView.tsx'
 import { dockStore, type DockTile } from './store.ts'
 
@@ -27,7 +27,7 @@ export interface DockClientService {
   isOpen(): boolean
 }
 
-function DockToggle({ open, onToggle, count }: { open: boolean; onToggle: () => void; count: number }): ReactNode {
+function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
   return (
     <button
       type="button"
@@ -35,8 +35,11 @@ function DockToggle({ open, onToggle, count }: { open: boolean; onToggle: () => 
       title={open ? '收起 OpenLoop Dock' : '展开 OpenLoop Dock'}
       style={{
         position: 'fixed',
-        top: 10,
-        right: 10,
+        // top 52 错层（2026-08-24 真机冲突修复）：bsb 的面板开关在 header 行
+        // （y≈3-40），dock toggle 原 top:10 与其重叠且 z-index 更高——CDP/用户
+        // 点击 bsb 按钮实际命中 dock toggle（表现为「点 bsb 按钮 dock 关了」）。
+        top: 52,
+        right,
         zIndex: 2147483100,
         width: 34,
         height: 34,
@@ -59,6 +62,16 @@ function DockShell(): ReactNode {
   const [version, setVersion] = useState(0)
   useEffect(() => dockStore.subscribe(() => setVersion(v => v + 1)), [])
   const tiles = dockStore.getSnapshot().tiles
+  // toggle 跟随 bsb 右缘（bsb 开时挪到其左侧 10px，避免与其按钮重叠）
+  const [toggleRight, setToggleRight] = useState(10)
+  useEffect(() => {
+    const update = () => setToggleRight(Math.max(10, window.innerWidth - probeDockRightEdge() + 10))
+    update()
+    // 与 DockHost 同款：500ms poll（CSS 变量驱动的 push 无法被 MutationObserver 捕获）
+    const timer = setInterval(update, 500)
+    window.addEventListener('resize', update)
+    return () => { clearInterval(timer); window.removeEventListener('resize', update) }
+  }, [])
 
   // service 桥（toggle 供外部按钮调用）
   useEffect(() => {
@@ -68,7 +81,7 @@ function DockShell(): ReactNode {
 
   return (
     <>
-      <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={tiles.length} />
+      <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={tiles.length} right={toggleRight} />
       <DockHost open={open} width={420}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-dock-version={version}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))', flexShrink: 0 }}>

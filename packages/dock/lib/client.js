@@ -25,19 +25,27 @@ window.__ModuleLoader__.load({
 		*    不存在 → 贴视口右缘。ResizeObserver + MutationObserver 跟踪其开/关/宽度变化。
 		*/
 		const DOCK_WIDTH_VAR = "--openloop-dock-width";
-		const BSB_HOST = "[data-dsh-better-sidebar]";
-		/** 读取 better-sidebar 的右缘（存在且可见时返回其左边界 x；否则返回视口宽） */
-		function probeRightEdge() {
+		/**
+		* 右侧空间探测（2026-08-24 第二次修正）：锚点从 bsb host DOM 改为
+		* #root 的 computed margin-right——better-sidebar 的核心机制就是给 #root
+		* 加 margin-right 推布局（layout.css），这是它的「公开布局副作用」：
+		* 右侧栏开 → margin-right = 侧栏宽（实测 448px）；关 → 0。
+		* 相比 DOM 探测的两次失败（host 常驻 h=0 误判、内部容器全视口），
+		* margin 信号语义稳定且与面板显隐严格同步，也不耦合其内部结构。
+		* dock 用 padding-right 推（与 margin 天然叠加），读 margin 不读 padding，
+		* 不会读到自己的 push。
+		*/
+		function probeDockRightEdge() {
 			if (typeof window === "undefined") return 0;
-			const host = document.querySelector(BSB_HOST);
-			if (!host) return window.innerWidth;
-			const rect = host.getBoundingClientRect();
-			if (rect.width <= 0 || rect.right <= 0) return window.innerWidth;
-			return rect.left;
+			const root = document.getElementById("root");
+			if (!root) return window.innerWidth;
+			const marginRight = parseFloat(getComputedStyle(root).marginRight) || 0;
+			const occupied = marginRight > 0 && marginRight < window.innerWidth * .7 ? marginRight : 0;
+			return window.innerWidth - occupied;
 		}
 		function DockHost({ open, width, children }) {
 			const [host, setHost] = (0, react.useState)(null);
-			const [rightEdge, setRightEdge] = (0, react.useState)(() => probeRightEdge());
+			const [rightEdge, setRightEdge] = (0, react.useState)(() => probeDockRightEdge());
 			(0, react.useEffect)(() => {
 				const el = document.createElement("div");
 				el.setAttribute("data-openloop-dock", "");
@@ -53,34 +61,26 @@ window.__ModuleLoader__.load({
 				};
 			}, []);
 			(0, react.useEffect)(() => {
-				const update = () => setRightEdge(probeRightEdge());
+				const update = () => setRightEdge(probeDockRightEdge());
 				update();
-				const bsb = document.querySelector(BSB_HOST);
-				const observers = [];
-				if (bswObserve(bsb)) {
-					const ro = new ResizeObserver(update);
-					ro.observe(bsb);
-					observers.push(ro);
-				}
-				const mo = new MutationObserver(update);
-				mo.observe(document.body, {
-					childList: true,
-					subtree: false
-				});
-				observers.push(mo);
+				const timer = setInterval(update, 500);
 				window.addEventListener("resize", update);
 				return () => {
-					for (const o of observers) o.disconnect();
+					clearInterval(timer);
 					window.removeEventListener("resize", update);
 				};
 			}, []);
 			(0, react.useEffect)(() => {
+				const styleEl = document.createElement("style");
+				styleEl.setAttribute("data-openloop-dock-style", "");
+				styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .18s ease }`;
+				document.head.appendChild(styleEl);
+				return () => styleEl.remove();
+			}, []);
+			(0, react.useEffect)(() => {
 				const root = document.getElementById("root");
 				if (!root) return;
-				const apply = () => {
-					root.style.setProperty(DOCK_WIDTH_VAR, open ? `${width}px` : "0px");
-				};
-				apply();
+				root.style.setProperty(DOCK_WIDTH_VAR, open ? `${width}px` : "0px");
 				return () => {
 					root.style.removeProperty(DOCK_WIDTH_VAR);
 				};
@@ -105,9 +105,6 @@ window.__ModuleLoader__.load({
 				"data-openloop-dock-panel": "",
 				children
 			}), host);
-		}
-		function bswObserve(target) {
-			return target instanceof Element && target.isConnected;
 		}
 		//#endregion
 		//#region ../../node_modules/.pnpm/@dnd-kit+utilities@3.2.2_react@18.3.1/node_modules/@dnd-kit/utilities/dist/utilities.cjs.production.min.js
@@ -2739,15 +2736,15 @@ window.__ModuleLoader__.load({
 		//#region src/client/index.tsx
 		const name = "openloop-dock";
 		const inject = [];
-		function DockToggle({ open, onToggle, count }) {
+		function DockToggle({ open, onToggle, count, right }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
 				onClick: onToggle,
 				title: open ? "收起 OpenLoop Dock" : "展开 OpenLoop Dock",
 				style: {
 					position: "fixed",
-					top: 10,
-					right: 10,
+					top: 52,
+					right,
 					zIndex: 2147483100,
 					width: 34,
 					height: 34,
@@ -2773,6 +2770,17 @@ window.__ModuleLoader__.load({
 			const [version, setVersion] = (0, react.useState)(0);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
 			const tiles = dockStore.getSnapshot().tiles;
+			const [toggleRight, setToggleRight] = (0, react.useState)(10);
+			(0, react.useEffect)(() => {
+				const update = () => setToggleRight(Math.max(10, window.innerWidth - probeDockRightEdge() + 10));
+				update();
+				const timer = setInterval(update, 500);
+				window.addEventListener("resize", update);
+				return () => {
+					clearInterval(timer);
+					window.removeEventListener("resize", update);
+				};
+			}, []);
 			(0, react.useEffect)(() => {
 				window.__openloopDockToggle = () => setOpen((o) => !o);
 				return () => {
@@ -2782,7 +2790,8 @@ window.__ModuleLoader__.load({
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockToggle, {
 				open,
 				onToggle: () => setOpen((o) => !o),
-				count: tiles.length
+				count: tiles.length,
+				right: toggleRight
 			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockHost, {
 				open,
 				width: 420,

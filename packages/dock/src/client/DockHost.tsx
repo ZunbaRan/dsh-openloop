@@ -11,17 +11,25 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 const DOCK_WIDTH_VAR = '--openloop-dock-width'
-const BSB_HOST = '[data-dsh-better-sidebar]'
 
-/** 读取 better-sidebar 的右缘（存在且可见时返回其左边界 x；否则返回视口宽） */
-function probeRightEdge(): number {
+/**
+ * 右侧空间探测（2026-08-24 第二次修正）：锚点从 bsb host DOM 改为
+ * #root 的 computed margin-right——better-sidebar 的核心机制就是给 #root
+ * 加 margin-right 推布局（layout.css），这是它的「公开布局副作用」：
+ * 右侧栏开 → margin-right = 侧栏宽（实测 448px）；关 → 0。
+ * 相比 DOM 探测的两次失败（host 常驻 h=0 误判、内部容器全视口），
+ * margin 信号语义稳定且与面板显隐严格同步，也不耦合其内部结构。
+ * dock 用 padding-right 推（与 margin 天然叠加），读 margin 不读 padding，
+ * 不会读到自己的 push。
+ */
+export function probeDockRightEdge(): number {
   if (typeof window === 'undefined') return 0
-  const host = document.querySelector(BSB_HOST)
-  if (!host) return window.innerWidth
-  const rect = host.getBoundingClientRect()
-  // 不可见（宽 0 或不在视口内）视为不存在
-  if (rect.width <= 0 || rect.right <= 0) return window.innerWidth
-  return rect.left
+  const root = document.getElementById('root')
+  if (!root) return window.innerWidth
+  const marginRight = parseFloat(getComputedStyle(root).marginRight) || 0
+  // 防御：异常大值（>70% 视口）视为无效，贴视口右缘
+  const occupied = marginRight > 0 && marginRight < window.innerWidth * 0.7 ? marginRight : 0
+  return window.innerWidth - occupied
 }
 
 export interface DockHostProps {
@@ -32,7 +40,7 @@ export interface DockHostProps {
 
 export function DockHost({ open, width, children }: DockHostProps): ReactNode {
   const [host, setHost] = useState<HTMLElement | null>(null)
-  const [rightEdge, setRightEdge] = useState(() => probeRightEdge())
+  const [rightEdge, setRightEdge] = useState(() => probeDockRightEdge())
 
   // host 挂载 + 保活（body 被清空时重挂——better-sidebar 同款防御）
   useEffect(() => {
@@ -50,35 +58,34 @@ export function DockHost({ open, width, children }: DockHostProps): ReactNode {
     }
   }, [])
 
-  // 空间探测：better-sidebar 开/关/宽度变化 → 更新右缘
+  // 空间探测：bsb 的 push 经 CSS 变量（--bsb-width）驱动——#root 的 style
+  // 属性本身不变，MutationObserver 抓不到（2026-08-24 第三次修正）。
+  // 改 500ms poll getComputedStyle（开/关侧栏是低频动作，开销可忽略）。
   useEffect(() => {
-    const update = () => setRightEdge(probeRightEdge())
+    const update = () => setRightEdge(probeDockRightEdge())
     update()
-    const bsb = document.querySelector(BSB_HOST)
-    const observers: Array<ResizeObserver | MutationObserver> = []
-    if (bswObserve(bsb)) {
-      const ro = new ResizeObserver(update)
-      ro.observe(bsb as Element)
-      observers.push(ro)
-    }
-    const mo = new MutationObserver(update)
-    mo.observe(document.body, { childList: true, subtree: false })
-    observers.push(mo)
+    const timer = setInterval(update, 500)
     window.addEventListener('resize', update)
     return () => {
-      for (const o of observers) o.disconnect()
+      clearInterval(timer)
       window.removeEventListener('resize', update)
     }
   }, [])
 
-  // 挤压：#root 的 padding-right（与 better-sidebar 的 margin-right 叠加共存）
+  // 挤压：#root 的 padding-right（与 better-sidebar 的 margin-right 叠加共存）。
+  // 2026-08-24 修复：此前只 setProperty 变量、无规则消费——push 从未生效。
+  // 注入一次全局样式（#root padding-right: var(--openloop-dock-width)）。
+  useEffect(() => {
+    const styleEl = document.createElement('style')
+    styleEl.setAttribute('data-openloop-dock-style', '')
+    styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .18s ease }`
+    document.head.appendChild(styleEl)
+    return () => styleEl.remove()
+  }, [])
   useEffect(() => {
     const root = document.getElementById('root')
     if (!root) return
-    const apply = () => {
-      root.style.setProperty(DOCK_WIDTH_VAR, open ? `${width}px` : '0px')
-    }
-    apply()
+    root.style.setProperty(DOCK_WIDTH_VAR, open ? `${width}px` : '0px')
     return () => {
       root.style.removeProperty(DOCK_WIDTH_VAR)
     }
@@ -109,9 +116,4 @@ export function DockHost({ open, width, children }: DockHostProps): ReactNode {
     <div style={style} data-openloop-dock-panel="">{children}</div>,
     host,
   )
-}
-
-// bswObserve：bsb host 可观察性守卫（Element 且 connected）
-function bswObserve(target: Element | null): boolean {
-  return target instanceof Element && target.isConnected
 }
