@@ -1,15 +1,17 @@
 /**
- * DockBoardView：12 列网格画板（OCIX workbench 复刻）。
- * - dnd-kit 拖放：drop 时按指针换算网格坐标，碰撞则 swap、空位则 move
- * - 拖角 resize（右下角手柄，按格步进）
- * - tile 渲染：panel → PanelCard（external panels/client）；artifact → ArtifactFrame（external artifact/client）
+ * DockBoardView：12 列网格画板（2026-08-24 v0.3.0 起交互引擎 = react-grid-layout v2）。
+ *
+ * 迁移背景（用户验收反馈）：手写 dnd-kit 网格的拖拽 hover 丢失、无吸附预览、
+ * 视觉对齐散乱。RGL（Grafana/Kibana 生产验证）提供：指针捕获式拖拽（无 hover 丢失）、
+ * 拖拽 placeholder 实时占位预览、松手网格吸附、碰撞自动推挤 + verticalCompactor
+ * 重力紧凑、CSS Transform 定位（GPU 平滑）。
+ *
+ * 数据流：dockStore（TileLayout 坐标）↔ RGL LayoutItem 双向映射（layout.ts）；
+ * onLayoutChange 一次回写全部（applyLayout），localStorage 持久化语义不变。
  */
-import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import {
-  DndContext, DragOverlay, PointerSensor, TouchSensor, closestCenter,
-  useDraggable, useSensor, useSensors, type DragEndEvent, type DragStartEvent,
-} from '@dnd-kit/core'
-import { GRID_COLUMNS, clampLayout, collisionAt, gridHeight, swapLayouts, type TileLayout } from './layout.ts'
+import { useEffect, type ReactNode } from 'react'
+import { GridLayout, useContainerWidth } from 'react-grid-layout'
+import { GRID_COLUMNS, MAX_ROWS, toRglLayout } from './layout.ts'
 import { dockStore, type DockTile } from './store.ts'
 
 // 跨插件 client 组件懒桥（DSH ModuleLoader external：评估期 require 在插件
@@ -24,16 +26,102 @@ function getScope() {
   return scopeCache
 }
 
-const CELL_MIN_PX = 22 // 单元格最小视觉高度（行高）；列宽由容器 12 等分
+const ROW_HEIGHT = 48
+const GRID_MARGIN: readonly [number, number] = [12, 12]
+
+/**
+ * RGL 运行必需 CSS + dock 主题化覆写（注入一次）。
+ * 必需部分等价于官方 styles.css 的核心规则（容器 transition / item 定位过渡 /
+ * placeholder / resize 手柄）；主题化部分：placeholder 虚线框、手柄隐藏至 hover、
+ * 拖拽中 tile 抬升阴影——对齐 DSH 设置壳的设计语言（hairline、克制的层次）。
+ */
+const GRID_CSS = `
+.react-grid-layout { position: relative; transition: height 200ms ease; }
+.react-grid-item { box-sizing: border-box; transition: all 200ms ease; transition-property: left, top, width, height; }
+.react-grid-item img { pointer-events: none; user-select: none; }
+.react-grid-item.cssTransforms { transition-property: transform, width, height; }
+.react-grid-item.resizing { transition: none; z-index: 3; will-change: width, height; }
+.react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; }
+.react-grid-item.dropping { visibility: hidden; }
+.react-grid-item.react-grid-placeholder {
+  background: var(--dsw-alias-accent, rgba(88, 101, 242, 0.35));
+  opacity: 0.14;
+  border: 1.5px dashed var(--dsw-alias-accent, rgba(88, 101, 242, 0.55));
+  border-radius: 10px;
+  transition-duration: 100ms;
+  z-index: 2;
+  user-select: none;
+}
+.react-grid-item.react-grid-placeholder.placeholder-resizing { transition: none; }
+.react-grid-item > .react-resizable-handle { position: absolute; width: 18px; height: 18px; opacity: 0; transition: opacity .15s ease; }
+.react-grid-item:hover > .react-resizable-handle { opacity: 1; }
+.react-grid-item > .react-resizable-handle::after {
+  content: ""; position: absolute; right: 4px; bottom: 4px; width: 5px; height: 5px;
+  border-right: 2px solid var(--dsw-alias-label-caption, rgba(128, 128, 128, 0.7));
+  border-bottom: 2px solid var(--dsw-alias-label-caption, rgba(128, 128, 128, 0.7));
+}
+.react-grid-item > .react-resizable-handle.react-resizable-handle-se { bottom: 0; right: 0; cursor: se-resize; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-e { top: 50%; margin-top: -9px; right: 0; cursor: ew-resize; }
+.react-grid-item > .react-resizable-handle.react-resizable-handle-s { left: 50%; margin-left: -9px; bottom: 0; cursor: ns-resize; }
+/* dock tile 抬升感：拖拽/缩放中的 tile 略微上浮（阴影在 chrome 上，避免双 border 视觉） */
+.react-grid-item.react-draggable-dragging > .dock-tile-chrome,
+.react-grid-item.resizing > .dock-tile-chrome {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.dock-tile-handle { cursor: grab; }
+.dock-tile-handle:active { cursor: grabbing; }
+`
+
+function GridStyles(): null {
+  useEffect(() => {
+    const el = document.createElement('style')
+    el.setAttribute('data-openloop-dock-grid', '')
+    el.textContent = GRID_CSS
+    document.head.appendChild(el)
+    return () => el.remove()
+  }, [])
+  return null
+}
 
 function TileChrome({ title, onRemove, children }: { title: string; onRemove: () => void; children: ReactNode }) {
   return (
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', borderRadius: 12, border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))', background: 'var(--dsw-alias-bg-layer-1, #fff)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))', fontSize: 12, fontWeight: 600, flexShrink: 0 }}>
+    <div
+      className="dock-tile-chrome"
+      style={{
+        position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+        borderRadius: 10,
+        border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))',
+        background: 'var(--dsw-alias-bg-layer-1, #fff)',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        className="dock-tile-handle"
+        title="拖动排列"
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 8, padding: '5px 6px 5px 10px', flexShrink: 0,
+          borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))',
+          fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
+          color: 'var(--dsw-alias-label-title, inherit)',
+          userSelect: 'none',
+        }}
+      >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-        <button type="button" onClick={onRemove} aria-label="unpin" style={{ border: 0, background: 'transparent', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '2px 4px' }}>✕</button>
+        <button
+          type="button"
+          className="dock-tile-cancel"
+          onClick={onRemove}
+          aria-label="unpin"
+          title="取消固定"
+          style={{
+            border: 0, background: 'transparent', cursor: 'pointer', flexShrink: 0,
+            fontSize: 12, lineHeight: 1, padding: '3px 6px', borderRadius: 6,
+            color: 'var(--dsw-alias-label-caption, #888)',
+          }}
+        >✕</button>
       </div>
-      <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto', padding: 8 }}>{children}</div>
+      <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto', padding: 10 }}>{children}</div>
     </div>
   )
 }
@@ -55,120 +143,11 @@ function TileContent({ tile }: { tile: DockTile }) {
   return <ArtifactFrame meta={tile.source.meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={getScope()} />
 }
 
-function GridTile({ tile, cellH, onRemove }: { tile: DockTile; cellH: number; onRemove: () => void }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: tile.tileId })
-  const boardRef = useRef<HTMLDivElement | null>(null)
-  const [resizing, setResizing] = useState(false)
-
-  // resize 手柄（右下角）：按格步进调 columns/rows
-  const startResize = useCallback((event: React.PointerEvent) => {
-    event.stopPropagation()
-    event.preventDefault()
-    const startX = event.clientX
-    const startY = event.clientY
-    const start = { ...tile.layout }
-    const colW = (boardRef.current?.parentElement?.clientWidth ?? 300) / GRID_COLUMNS
-    const move = (e: PointerEvent) => {
-      const dCols = Math.round((e.clientX - startX) / colW)
-      const dRows = Math.round((e.clientY - startY) / cellH)
-      dockStore.move(tile.tileId, clampLayout({ ...start, columns: start.columns + dCols, rows: start.rows + dRows }))
-    }
-    const up = () => {
-      setResizing(false)
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-    }
-    setResizing(true)
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }, [tile.tileId, tile.layout, cellH])
-
-  const style: CSSProperties = {
-    position: 'absolute',
-    left: `${(tile.layout.column / GRID_COLUMNS) * 100}%`,
-    width: `${(tile.layout.columns / GRID_COLUMNS) * 100}%`,
-    top: tile.layout.row * cellH,
-    height: tile.layout.rows * cellH,
-    padding: 4,
-    boxSizing: 'border-box',
-    opacity: isDragging || resizing ? 0.4 : 1,
-  }
-  return (
-    <div ref={(node) => { setNodeRef(node); boardRef.current = node }} style={style} {...attributes} {...listeners}>
-      <TileChrome title={tile.title} onRemove={onRemove}>
-        <TileContent tile={tile} />
-      </TileChrome>
-      <div
-        onPointerDown={startResize}
-        title="拖动调整大小"
-        style={{ position: 'absolute', right: 2, bottom: 2, width: 14, height: 14, cursor: 'nwse-resize', background: 'linear-gradient(135deg, transparent 50%, var(--dsw-alias-border-l2, rgba(0,0,0,.25)) 50%)', borderRadius: 3, zIndex: 2 }}
-      />
-    </div>
-  )
-}
-
 export function DockBoardView({ onEmpty }: { onEmpty?: () => void }): ReactNode {
-  const [cellH, setCellH] = useState(52)
-  const boardRef = useRef<HTMLDivElement | null>(null)
-  const [dragging, setDragging] = useState<DockTile | null>(null)
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } }),
-  )
-  // 每渲染读最新 snapshot（2026-08-24 修复：此前 useMemo 依赖 [dragging]，
-  // resize 的 dockStore.move 更新后 memo 不重算——拖大小无实时反馈，
-  // 重开 dock 才显示新尺寸。外层 DockShell 的 store 订阅驱动本组件重渲染）
+  const { width, containerRef, mounted } = useContainerWidth()
+  // 每渲染读最新 snapshot（外层 DockShell 的 store 订阅驱动重渲染）
   const tiles = dockStore.getSnapshot().tiles
-
-  const onDragStart = (event: DragStartEvent) => {
-    setDragging(tiles.find(t => t.tileId === event.active.id) ?? null)
-  }
-
-  const onDragEnd = (event: DragEndEvent) => {
-    setDragging(null)
-    const dragId = String(event.active.id)
-    const overId = event.over?.id !== undefined ? String(event.over.id) : null
-    const board = boardRef.current
-    if (!board) return
-    if (overId && overId !== dragId) {
-      // 拖到别的 tile 上：swap（OCIX 行为）
-      const current = dockStore.getSnapshot().tiles
-      const swapped = swapLayouts(current, dragId, overId)
-      for (const t of swapped) {
-        const before = current.find(x => x.tileId === t.tileId)
-        if (before && before.layout !== t.layout) dockStore.move(t.tileId, t.layout)
-      }
-      dockStore.compact()
-      return
-    }
-    // 自由放置：按指针位置换算目标网格
-    const pointer = event.activatorEvent instanceof PointerEvent ? event.activatorEvent : null
-    const px = pointer?.clientX ?? 0
-    const py = pointer?.clientY ?? 0
-    const rect = board.getBoundingClientRect()
-    const colW = rect.width / GRID_COLUMNS
-    const tile = tiles.find(t => t.tileId === dragId)
-    if (!tile || colW <= 0) return
-    const target: TileLayout = clampLayout({
-      ...tile.layout,
-      column: Math.floor((px - rect.left) / colW - tile.layout.columns / 2),
-      row: Math.max(0, Math.round((py - rect.top) / cellH - tile.layout.rows / 2)),
-    })
-    const hit = collisionAt(dockStore.getSnapshot().tiles, dragId, target)
-    if (hit) {
-      const current = dockStore.getSnapshot().tiles
-      const swapped = swapLayouts(current, dragId, hit.tileId)
-      for (const t of swapped) {
-        const before = current.find(x => x.tileId === t.tileId)
-        if (before && before.layout !== t.layout) dockStore.move(t.tileId, t.layout)
-      }
-    } else {
-      dockStore.move(dragId, target)
-    }
-    dockStore.compact()
-  }
-
-  const height = Math.max(gridHeight(tiles) * cellH, cellH * 2)
+  const layout = toRglLayout(tiles)
 
   if (tiles.length === 0) {
     return (
@@ -179,22 +158,34 @@ export function DockBoardView({ onEmpty }: { onEmpty?: () => void }): ReactNode 
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-      <div ref={boardRef} style={{ position: 'relative', height, minHeight: 104 }}>
-        {tiles.map(tile => (
-          <GridTile key={tile.tileId} tile={tile} cellH={cellH} onRemove={() => { dockStore.remove(tile.tileId); if (dockStore.getSnapshot().tiles.length === 0) onEmpty?.() }} />
-        ))}
-      </div>
-      <DragOverlay dropAnimation={null}>
-        {dragging ? (
-          <div style={{ width: 240, opacity: 0.85 }}>
-            <TileChrome title={dragging.title} onRemove={() => {}}>
-              <TileContent tile={dragging} />
-            </TileChrome>
-          </div>
-        ) : null}
-      </DragOverlay>
-      <button type="button" hidden onClick={() => setCellH(cellH)} />
-    </DndContext>
+    <div ref={containerRef} style={{ minHeight: 104 }}>
+      <GridStyles />
+      {mounted && width > 0
+        ? (
+          <GridLayout
+            width={width}
+            layout={layout}
+            gridConfig={{ cols: GRID_COLUMNS, rowHeight: ROW_HEIGHT, margin: GRID_MARGIN, maxRows: MAX_ROWS }}
+            dragConfig={{ enabled: true, handle: '.dock-tile-handle', cancel: '.dock-tile-cancel' }}
+            resizeConfig={{ enabled: true, handles: ['se', 'e', 's'] }}
+            onLayoutChange={items => dockStore.applyLayout(items)}
+          >
+            {tiles.map(tile => (
+              <div key={tile.tileId}>
+                <TileChrome
+                  title={tile.title}
+                  onRemove={() => {
+                    dockStore.remove(tile.tileId)
+                    if (dockStore.getSnapshot().tiles.length === 0) onEmpty?.()
+                  }}
+                >
+                  <TileContent tile={tile} />
+                </TileChrome>
+              </div>
+            ))}
+          </GridLayout>
+        )
+        : null}
+    </div>
   )
 }

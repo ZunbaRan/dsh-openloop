@@ -1,6 +1,13 @@
 /**
- * Dock 布局引擎（移植自 OCIX workbench-layout，12 列网格）。
- * 纯函数、无 DOM 依赖——可单测。
+ * Dock 布局坐标层（2026-08-24 v0.3.0：交互引擎迁至 react-grid-layout v2）。
+ *
+ * 本文件只保留纯数据语义：
+ * - TileLayout 坐标模型 + clamp 边界（store 持久化/容错用）
+ * - findNearestSlot（pin 新 tile 落位——RGL 只管既有 tile 的排列）
+ * - 与 RGL LayoutItem {i,x,y,w,h} 的双向映射（view 边界转换）
+ *
+ * 拖拽/resize/碰撞/紧凑全部由 RGL 的 verticalCompactor 承担——
+ * 此前的手写 collisionAt/swapLayouts/compactTiles 已删（dnd-kit 时代产物）。
  */
 
 export const GRID_COLUMNS = 12
@@ -17,6 +24,15 @@ export interface TileLayout {
   rows: number
 }
 
+/** react-grid-layout 的 LayoutItem（结构映射子集） */
+export interface RglItem {
+  i: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 const int = (value: number, fallback: number): number =>
   Number.isFinite(value) ? Math.round(value) : fallback
 
@@ -29,13 +45,7 @@ export function clampLayout(layout: Partial<TileLayout>): TileLayout {
   return { column, row, columns, rows }
 }
 
-export interface Rect extends TileLayout {}
-
-const overlaps = (a: Rect, b: Rect): boolean =>
-  a.column < b.column + b.columns && b.column < a.column + a.columns &&
-  a.row < b.row + b.rows && b.row < a.row + a.rows
-
-/** 网格占用图（行数动态）：occupied[r][c] = tileId */
+/** 网格占用图（行数动态）：occupied[r][c] */
 function buildOccupancy(tiles: ReadonlyArray<{ tileId: string; layout: TileLayout }>, skipId?: string): Map<number, Set<number>> {
   const occupied = new Map<number, Set<number>>()
   for (const tile of tiles) {
@@ -53,7 +63,10 @@ function buildOccupancy(tiles: ReadonlyArray<{ tileId: string; layout: TileLayou
 const cellFree = (occupied: Map<number, Set<number>>, row: number, column: number): boolean =>
   !(occupied.get(row)?.has(column) ?? false)
 
-/** 从上往下找第一个能放下的空位（紧凑布局：新 tile 落到最上可用位置） */
+/**
+ * pin 落位：从上往下找第一个能放下的空位（RGL 接管后仍保留——
+ * 新 tile 进板需要一个合法非重叠的初始位置，RGL 不会为外部新增项找位）。
+ */
 export function findNearestSlot(
   tiles: ReadonlyArray<{ tileId: string; layout: TileLayout }>,
   size: { columns: number; rows: number },
@@ -72,48 +85,22 @@ export function findNearestSlot(
       if (free) return { column: c, row: r, columns, rows }
     }
   }
-  // 满了：落到网格底部之后（clamp 引擎允许溢出行，渲染层滚动）
   return { column: 0, row: MAX_ROWS, columns, rows }
 }
 
-/** 紧凑化：所有 tile 依次按原顺序下落到最低可能位置（重力排序） */
-export function compactTiles<T extends { tileId: string; layout: TileLayout }>(tiles: readonly T[]): T[] {
-  const sorted = [...tiles].sort((a, b) => (a.layout.row - b.layout.row) || (a.layout.column - b.layout.column))
-  const placed: Array<{ tileId: string; layout: TileLayout }> = []
-  const result: T[] = []
-  for (const tile of sorted) {
-    const slot = findNearestSlot(placed, tile.layout)
-    placed.push({ tileId: tile.tileId, layout: slot })
-    result.push({ ...tile, layout: slot })
+// ---- RGL LayoutItem 双向映射（view 边界） ----
+
+/** DockTile[] → RGL layout（渲染输入） */
+export function toRglLayout(tiles: ReadonlyArray<{ tileId: string; layout: TileLayout }>): RglItem[] {
+  return tiles.map(t => ({ i: t.tileId, x: t.layout.column, y: t.layout.row, w: t.layout.columns, h: t.layout.rows }))
+}
+
+/** RGL layout → tileId → TileLayout（onLayoutChange 回写输入；非法项钳制） */
+export function fromRglLayout(items: ReadonlyArray<RglItem>): Map<string, TileLayout> {
+  const result = new Map<string, TileLayout>()
+  for (const item of items) {
+    if (typeof item?.i !== 'string' || item.i.length === 0 || typeof item.x !== 'number' || typeof item.y !== 'number') continue
+    result.set(item.i, clampLayout({ column: item.x, row: item.y, columns: item.w, rows: item.h }))
   }
   return result
-}
-
-/** 网格总高度（行数）：空板为 0 */
-export function gridHeight(tiles: ReadonlyArray<{ layout: TileLayout }>): number {
-  return tiles.reduce((max, t) => Math.max(max, t.layout.row + t.layout.rows), 0)
-}
-
-/** 放置校验：target 位置若与其他 tile 碰撞则返回被撞者（用于拖放交换判定） */
-export function collisionAt(
-  tiles: ReadonlyArray<{ tileId: string; layout: TileLayout }>,
-  tileId: string,
-  target: TileLayout,
-): { tileId: string; layout: TileLayout } | undefined {
-  const clamped = clampLayout(target)
-  return tiles.find(other => other.tileId !== tileId && overlaps(clamped, other.layout))
-}
-
-/** 交换两 tile 的布局（拖到已占用格时的 OCIX swap 行为） */
-export function swapLayouts<T extends { tileId: string; layout: TileLayout }>(
-  tiles: readonly T[], dragId: string, overId: string,
-): T[] {
-  const drag = tiles.find(t => t.tileId === dragId)
-  const over = tiles.find(t => t.tileId === overId)
-  if (!drag || !over) return [...tiles]
-  return tiles.map(t => {
-    if (t.tileId === dragId) return { ...t, layout: over.layout }
-    if (t.tileId === overId) return { ...t, layout: drag.layout }
-    return t
-  })
 }

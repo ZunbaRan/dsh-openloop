@@ -13,7 +13,6 @@ const allowed = new Set([
   'react/jsx-runtime',
   'react-dom',
   'react-dom/client',
-  '@dnd-kit/core',
 ])
 const forbidden = [...new Set(requires.filter(id => !allowed.has(id)))]
 
