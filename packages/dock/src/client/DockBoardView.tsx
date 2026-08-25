@@ -1,18 +1,18 @@
 /**
- * DockBoardView：12 列网格画板（2026-08-24 v0.3.0 起交互引擎 = react-grid-layout v2）。
+ * DockBoardView：看板视图（Dock 2.0，RGL v2 引擎保留不变）。
  *
- * 迁移背景（用户验收反馈）：手写 dnd-kit 网格的拖拽 hover 丢失、无吸附预览、
- * 视觉对齐散乱。RGL（Grafana/Kibana 生产验证）提供：指针捕获式拖拽（无 hover 丢失）、
- * 拖拽 placeholder 实时占位预览、松手网格吸附、碰撞自动推挤 + verticalCompactor
- * 重力紧凑、CSS Transform 定位（GPU 平滑）。
- *
- * 数据流：dockStore（TileLayout 坐标）↔ RGL LayoutItem 双向映射（layout.ts）；
- * onLayoutChange 一次回写全部（applyLayout），localStorage 持久化语义不变。
+ * v2 变更（2026-08-25，原型 direction-a.jsx 看板段直搬）：
+ * - 头部：当前页名（双击重命名）+ tile 计数 + 整理/清空/收起（收起经 onCollapse 上抛）
+ * - tile 外壳：别名内联编辑（Enter/失焦提交、Esc 取消、置空恢复原名、✎ 标记）
+ *   + 右下角来源 ID（包名:组件名，命名即寻址）
+ * - 空态：引导去 APP 页固定 / 让 Agent 生成
+ * - 数据流不变：dockStore（v2 多板）→ 激活板 tiles ↔ RGL 双向映射
  */
-import { Component, useEffect, type ReactNode } from 'react'
+import { Component, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { GridLayout, useContainerWidth } from 'react-grid-layout'
 import { GRID_COLUMNS, MAX_ROWS, toRglLayout } from './layout.ts'
-import { dockStore, type DockTile } from './store.ts'
+import { dockStore, type DockTile, type DockTileSource } from './store.ts'
+import { icons } from './icons.tsx'
 
 // 跨插件 client 组件懒桥（DSH ModuleLoader external：评估期 require 在插件
 // 被禁用时炸 loader——懒 require 后 tile 按需取，缺失渲染降级条）
@@ -44,9 +44,9 @@ const GRID_CSS = `
 .react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; }
 .react-grid-item.dropping { visibility: hidden; }
 .react-grid-item.react-grid-placeholder {
-  background: var(--dsw-alias-accent, rgba(88, 101, 242, 0.35));
+  background: var(--dsw-alias-state-business-primary, rgba(88, 101, 242, 0.35));
   opacity: 0.14;
-  border: 1.5px dashed var(--dsw-alias-accent, rgba(88, 101, 242, 0.55));
+  border: 1.5px dashed var(--dsw-alias-state-business-primary, rgba(88, 101, 242, 0.55));
   border-radius: 10px;
   transition-duration: 100ms;
   z-index: 2;
@@ -83,7 +83,32 @@ function GridStyles(): null {
   return null
 }
 
-function TileChrome({ title, onRemove, children }: { title: string; onRemove: () => void; children: ReactNode }) {
+/** 来源 ID（包名:组件名）：panel meta.panel.id / artifact meta.path 文件名；拿不到则不显示 */
+function sourceIdOf(source: DockTileSource): string | null {
+  if (source.kind === 'panel') {
+    const panel = (source.meta as { panel?: { id?: unknown } } | null)?.panel
+    return typeof panel?.id === 'string' && panel.id.length > 0 ? `openloop:${panel.id}` : null
+  }
+  const path = (source.meta as { path?: unknown } | null)?.path
+  if (typeof path !== 'string' || path.length === 0) return null
+  const base = path.split('/').pop() ?? path
+  return base.length > 0 ? `openloop:${base}` : null
+}
+
+function TileChrome({ tile, onRemove, onAlias, children }: { tile: DockTile; onRemove: () => void; onAlias: (alias: string | null) => void; children: ReactNode }): ReactNode {
+  const [editing, setEditing] = useState(false)
+  const displayTitle = tile.alias ?? tile.title
+  const sourceId = sourceIdOf(tile.source)
+  const commit = (value: string): void => {
+    const trimmed = value.trim()
+    // 置空或与原名相同 → 清除别名（恢复原名）
+    onAlias(!trimmed || trimmed === tile.title ? null : trimmed)
+    setEditing(false)
+  }
+  const onEditKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') commit(e.currentTarget.value)
+    if (e.key === 'Escape') setEditing(false)
+  }
   return (
     <div
       className="dock-tile-chrome"
@@ -103,11 +128,30 @@ function TileChrome({ title, onRemove, children }: { title: string; onRemove: ()
           gap: 8, padding: '5px 6px 5px 10px', flexShrink: 0,
           borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))',
           fontSize: 11.5, fontWeight: 600, letterSpacing: 0.2,
-          color: 'var(--dsw-alias-label-title, inherit)',
+          color: 'var(--dsw-alias-label-primary, inherit)',
           userSelect: 'none',
         }}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+        {editing ? (
+          <input
+            className="d2-title-edit"
+            defaultValue={displayTitle}
+            autoFocus
+            aria-label="编辑别名"
+            onBlur={e => commit(e.target.value)}
+            onKeyDown={onEditKeyDown}
+          />
+        ) : (
+          <span
+            className="d2-tile-title"
+            style={{ flex: 1 }}
+            title={`双击编辑别名（原名：${tile.title}）`}
+            onDoubleClick={() => setEditing(true)}
+          >
+            {displayTitle}
+            {tile.alias ? <span className="d2-alias-mark" title={`原名：${tile.title}`}>✎</span> : null}
+          </span>
+        )}
         <button
           type="button"
           className="dock-tile-cancel"
@@ -122,6 +166,7 @@ function TileChrome({ title, onRemove, children }: { title: string; onRemove: ()
         >✕</button>
       </div>
       <div style={{ position: 'relative', flex: 1, minHeight: 0, overflow: 'auto', padding: 10 }}>{children}</div>
+      {sourceId ? <span className="d2-tile-src" style={{ right: 26 }}>{sourceId}</span> : null}
     </div>
   )
 }
@@ -174,51 +219,112 @@ function TileContent({ tile }: { tile: DockTile }) {
   return <ArtifactFrame meta={tile.source.meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={getScope()} />
 }
 
-export function DockBoardView({ onEmpty }: { onEmpty?: () => void }): ReactNode {
+export function DockBoardView({ onCollapse }: { onCollapse: () => void }): ReactNode {
   const { width, containerRef, mounted } = useContainerWidth()
   // 每渲染读最新 snapshot（外层 DockShell 的 store 订阅驱动重渲染）
-  const tiles = dockStore.getSnapshot().tiles
+  const state = dockStore.getSnapshot()
+  const board = state.boards.find(b => b.id === state.activeBoardId) ?? state.boards[0]
+  const tiles = board?.tiles ?? []
   const layout = toRglLayout(tiles)
 
-  if (tiles.length === 0) {
-    return (
-      <div style={{ padding: 24, color: 'var(--dsw-alias-label-caption, #888)', fontSize: 13, textAlign: 'center' }}>
-        空画板——在面板 / HTML artifact 卡片上点 📌 固定到这里
-      </div>
-    )
+  const [editingName, setEditingName] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  // 两步确认 3 秒未确认自动复位（替代原生 confirm 弹窗）
+  useEffect(() => {
+    if (!confirmingClear) return
+    const timer = setTimeout(() => setConfirmingClear(false), 3000)
+    return () => clearTimeout(timer)
+  }, [confirmingClear])
+
+  const commitName = (value: string): void => {
+    const trimmed = value.trim()
+    if (trimmed && board !== undefined) dockStore.renameBoard(board.id, trimmed)
+    setEditingName(false)
+  }
+  const onNameKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') commitName(e.currentTarget.value)
+    if (e.key === 'Escape') setEditingName(false)
   }
 
   return (
-    <div ref={containerRef} style={{ minHeight: 104 }}>
-      <GridStyles />
-      {mounted && width > 0
-        ? (
-          <GridLayout
-            width={width}
-            layout={layout}
-            gridConfig={{ cols: GRID_COLUMNS, rowHeight: ROW_HEIGHT, margin: GRID_MARGIN, maxRows: MAX_ROWS }}
-            dragConfig={{ enabled: true, handle: '.dock-tile-handle', cancel: '.dock-tile-cancel' }}
-            resizeConfig={{ enabled: true, handles: ['se', 'e', 's'] }}
-            onLayoutChange={items => dockStore.applyLayout(items)}
+    <section style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }} data-screen-label="board">
+      <header className="d2-board-head">
+        {board === undefined ? null : editingName ? (
+          <input
+            className="d2-board-rename"
+            autoFocus
+            defaultValue={board.name}
+            size={Math.max(4, board.name.length + 2)}
+            aria-label="重命名看板页"
+            onBlur={e => commitName(e.target.value)}
+            onKeyDown={onNameKeyDown}
+          />
+        ) : (
+          <span className="d2-board-name" title="双击重命名看板页" onDoubleClick={() => setEditingName(true)}>{board.name}</span>
+        )}
+        <span className="d2-badge kind">{tiles.length} tiles</span>
+        <div className="d2-actions">
+          <button type="button" className="d2-ghost-btn" title="重力紧凑：消除空洞，保持相对顺序" onClick={() => dockStore.compact()}>
+            <icons.sort size={13} /> 整理
+          </button>
+          <button
+            type="button"
+            className={confirmingClear ? 'd2-ghost-btn danger' : 'd2-ghost-btn'}
+            title={confirmingClear ? '再次点击确认清空当前页 tile' : '清空当前页 tile（其他看板页不受影响）'}
+            onClick={() => {
+              if (confirmingClear) {
+                dockStore.clear()
+                setConfirmingClear(false)
+              } else {
+                setConfirmingClear(true)
+              }
+            }}
           >
-            {tiles.map(tile => (
-              <div key={tile.tileId}>
-                <TileChrome
-                  title={tile.title}
-                  onRemove={() => {
-                    dockStore.remove(tile.tileId)
-                    if (dockStore.getSnapshot().tiles.length === 0) onEmpty?.()
-                  }}
-                >
-                  <TileErrorBoundary tileId={tile.tileId}>
-                    <TileContent tile={tile} />
-                  </TileErrorBoundary>
-                </TileChrome>
-              </div>
-            ))}
-          </GridLayout>
-        )
-        : null}
-    </div>
+            <icons.trash size={13} /> {confirmingClear ? '确认清空？' : '清空'}
+          </button>
+          <button type="button" className="d2-ghost-btn" title="收起 Dock（tile 保留，再点右上角 📌 展开）" onClick={onCollapse}>收起</button>
+        </div>
+      </header>
+
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+        {tiles.length === 0 ? (
+          <div className="d2-empty-note" style={{ paddingTop: 60 }}>
+            <div style={{ fontSize: 22, opacity: 0.6 }}>📌</div>
+            <div>这一页还是空的</div>
+            <div className="d2-tcap">到 APP 页把组件「固定」到看板，或让 Agent 帮你生成</div>
+          </div>
+        ) : (
+          <div ref={containerRef} style={{ minHeight: 104 }}>
+            <GridStyles />
+            {mounted && width > 0
+              ? (
+                  <GridLayout
+                    width={width}
+                    layout={layout}
+                    gridConfig={{ cols: GRID_COLUMNS, rowHeight: ROW_HEIGHT, margin: GRID_MARGIN, maxRows: MAX_ROWS }}
+                    dragConfig={{ enabled: true, handle: '.dock-tile-handle', cancel: '.dock-tile-cancel, .d2-title-edit' }}
+                    resizeConfig={{ enabled: true, handles: ['se', 'e', 's'] }}
+                    onLayoutChange={items => dockStore.applyLayout(items)}
+                  >
+                    {tiles.map(tile => (
+                      <div key={tile.tileId}>
+                        <TileChrome
+                          tile={tile}
+                          onRemove={() => dockStore.remove(tile.tileId)}
+                          onAlias={alias => dockStore.setTileAlias(tile.tileId, alias)}
+                        >
+                          <TileErrorBoundary tileId={tile.tileId}>
+                            <TileContent tile={tile} />
+                          </TileErrorBoundary>
+                        </TileChrome>
+                      </div>
+                    ))}
+                  </GridLayout>
+                )
+              : null}
+          </div>
+        )}
+      </div>
+    </section>
   )
 }

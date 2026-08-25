@@ -1,6 +1,8 @@
 /**
- * OpenLoop Dock client 半：
- * - DockHost 挂载（padding-right push + better-sidebar 空间探测，见 DockHost.tsx）
+ * OpenLoop Dock client 半（Dock 2.0，2026-08-25）：
+ * - DockHost 挂载（margin+width push，与 better-sidebar 共通道；空间探测读 --dsh-sidebar-width，见 DockHost.tsx）
+ * - RailNav 两态导航轨（52 图标态 ↔ 216 中枢态）+ 内容区（board | apps）
+ * - UI 态独立持久化：rail 宽 / 当前 tab（不进 dockStore——store 只收看板数据）
  * - cordis service `openloop-dock/client`：pinPanel / pinArtifact / toggle / open
  *   （panels/artifact 的 PinButton 经可选 inject 消费——dock 未装时按钮自动降级隐藏）
  * - 右上角浮动开关（不依赖 slots，零冲突）
@@ -8,8 +10,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { createElement, useEffect, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { DockHost, probeDockRightEdge } from './DockHost.tsx'
+import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './DockHost.tsx'
 import { DockBoardView } from './DockBoardView.tsx'
+import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab } from './RailNav.tsx'
+import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
 
 export const name = 'openloop-dock'
@@ -28,7 +32,7 @@ export interface DockClientService {
 }
 
 function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
-  // 开态隐藏：面板 header 自带「收起」按钮（bsb 同款——开着的面板用面板自己的
+  // 开态隐藏：面板 board head 自带「收起」按钮（bsb 同款——开着的面板用面板自己的
   // 关闭控制，不再让浮动按钮遮挡 tile 内容）
   const [hover, setHover] = useState(false)
   if (open) return null
@@ -70,57 +74,65 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
 }
 
 const WIDTH_KEY = 'openloop.dock.width.v1'
+const RAIL_WIDTH_KEY = 'openloop.dock.rail-width.v1'
+const TAB_KEY = 'openloop.dock.tab.v1'
 const DEFAULT_WIDTH = 420
 
 function readStoredWidth(): number {
   try {
     const raw = localStorage.getItem(WIDTH_KEY)
     const n = raw === null ? NaN : Number(raw)
-    return Number.isFinite(n) ? Math.max(280, Math.min(760, n)) : DEFAULT_WIDTH
+    return Number.isFinite(n) ? clampDockWidth(n) : DEFAULT_WIDTH
   } catch {
     return DEFAULT_WIDTH
   }
 }
 
-/** header ghost 按钮（bsb 工具栏风格：无边框、hover 淡底、可 danger 态） */
-function HeaderButton({ label, title, onClick, danger = false }: { label: string; title: string; onClick: () => void; danger?: boolean }): ReactNode {
-  const [hover, setHover] = useState(false)
+function readRailWidth(): number {
+  try {
+    const raw = localStorage.getItem(RAIL_WIDTH_KEY)
+    const n = raw === null ? NaN : Number(raw)
+    return n === RAIL_ICON_WIDTH || n === RAIL_HUB_WIDTH ? n : RAIL_ICON_WIDTH
+  } catch {
+    return RAIL_ICON_WIDTH
+  }
+}
+
+function readTab(): DockTab {
+  try {
+    return localStorage.getItem(TAB_KEY) === 'apps' ? 'apps' : 'board'
+  } catch {
+    return 'board'
+  }
+}
+
+/** APP tab 占位（M1：注册表未接，M2 由 AppListPanel + AppDetail 替换） */
+function AppsPlaceholder(): ReactNode {
   return (
-    <button
-      type="button"
-      title={title}
-      onClick={onClick}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        fontSize: 11,
-        padding: '3px 8px',
-        borderRadius: 6,
-        border: 'none',
-        cursor: 'pointer',
-        lineHeight: 1.5,
-        color: danger ? 'var(--dsw-alias-danger, #d4453a)' : 'inherit',
-        opacity: danger ? 1 : 0.72,
-        background: hover ? (danger ? 'rgba(212,69,58,.12)' : 'rgba(127,127,127,.14)') : 'transparent',
-        transition: 'background .12s ease',
-      }}
-    >{label}</button>
+    <section style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="d2-empty-note">
+        <div style={{ fontSize: 22, opacity: 0.6 }}>🧩</div>
+        <div>APP 体系建设中</div>
+        <div className="d2-tcap">组件与 API 注册表接入后，这里可以浏览和固定资源</div>
+      </div>
+    </section>
   )
 }
 
 function DockShell(): ReactNode {
-  const [open, setOpen] = useState(() => dockStore.getSnapshot().tiles.length > 0)
+  const [open, setOpen] = useState(() => dockStore.getSnapshot().boards.some(b => b.tiles.length > 0))
   const [version, setVersion] = useState(0)
   const [width, setWidth] = useState(readStoredWidth)
-  const [confirmingClear, setConfirmingClear] = useState(false)
-  // 两步确认 3 秒未确认自动复位（替代原生 confirm 弹窗）
-  useEffect(() => {
-    if (!confirmingClear) return
-    const timer = setTimeout(() => setConfirmingClear(false), 3000)
-    return () => clearTimeout(timer)
-  }, [confirmingClear])
+  const [tab, setTab] = useState<DockTab>(readTab)
+  const [railWidth, setRailWidth] = useState(readRailWidth)
+  const [toast, setToast] = useState<string | null>(null)
   useEffect(() => dockStore.subscribe(() => setVersion(v => v + 1)), [])
-  const tiles = dockStore.getSnapshot().tiles
+  // toast 2.2s 自动消隐（原型同款节奏）
+  useEffect(() => {
+    if (toast === null) return
+    const timer = setTimeout(() => setToast(null), 2200)
+    return () => clearTimeout(timer)
+  }, [toast])
   // toggle 跟随 bsb 右缘（bsb 开时挪到其左侧 10px，避免与其按钮重叠）
   const [toggleRight, setToggleRight] = useState(10)
   useEffect(() => {
@@ -130,6 +142,15 @@ function DockShell(): ReactNode {
     const timer = setInterval(update, 500)
     window.addEventListener('resize', update)
     return () => { clearInterval(timer); window.removeEventListener('resize', update) }
+  }, [])
+
+  // v2 组件样式注入一次（token 直接引用宿主 --dsw-alias-*，见 v2-styles.ts）
+  useEffect(() => {
+    const el = document.createElement('style')
+    el.setAttribute('data-openloop-dock-v2', '')
+    el.textContent = V2_CSS
+    document.head.appendChild(el)
+    return () => el.remove()
   }, [])
 
   // service 桥：toggle 给手动操作、ensureOpen 给 pin（2026-08-24 修复：pinPanel
@@ -145,45 +166,64 @@ function DockShell(): ReactNode {
     }
   }, [])
 
+  const state = dockStore.getSnapshot()
+  const totalTiles = state.boards.reduce((n, b) => n + b.tiles.length, 0)
+
+  const persistTab = (next: DockTab): void => {
+    setTab(next)
+    try { localStorage.setItem(TAB_KEY, next) } catch { /* ignore */ }
+  }
+
+  /** rail 松手吸附：持久化 rail 宽；内容区保底 DOCK_MIN_WIDTH（rail 变宽挤压时自动撑开 dock） */
+  const commitRailWidth = (next: number): void => {
+    setRailWidth(next)
+    try { localStorage.setItem(RAIL_WIDTH_KEY, String(next)) } catch { /* ignore */ }
+    if (width < next + DOCK_MIN_WIDTH) {
+      const widened = clampDockWidth(next + DOCK_MIN_WIDTH)
+      setWidth(widened)
+      try { localStorage.setItem(WIDTH_KEY, String(widened)) } catch { /* ignore */ }
+    }
+  }
+
+  const addBoard = (): void => {
+    const board = dockStore.getSnapshot().boards
+    dockStore.addBoard()
+    persistTab('board')
+    const created = dockStore.getSnapshot().boards[board.length]
+    if (created !== undefined) setToast(`已新增「${created.name}」（双击页名可重命名）`)
+  }
+
+  const removeBoard = (id: string): void => {
+    const target = state.boards.find(b => b.id === id)
+    dockStore.removeBoard(id)
+    if (target !== undefined) setToast(`已删除「${target.name}」`)
+  }
+
   return (
     <>
-      <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={tiles.length} right={toggleRight} />
+      <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={totalTiles} right={toggleRight} />
       <DockHost open={open} width={width} onWidthChange={(w) => { setWidth(w); try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ } }}>
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }} data-dock-version={version}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))', flexShrink: 0 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0.2, opacity: 0.85 }}>OpenLoop Dock</span>
-            <div style={{ display: 'flex', gap: 2 }}>
-              <HeaderButton label="整理" title="重力紧凑：消除空洞，保持相对顺序" onClick={() => dockStore.compact()} />
-              <HeaderButton label="收起" title="收起 Dock（tile 保留，再点右上角 📌 展开）" onClick={() => setOpen(false)} />
-              <HeaderButton
-                label={confirmingClear ? '确认清空？' : '清空'}
-                title={confirmingClear ? '再次点击确认移除全部 tile' : '移除画板上的全部 tile'}
-                danger={confirmingClear}
-                onClick={() => {
-                  if (confirmingClear) {
-                    dockStore.clear()
-                    setConfirmingClear(false)
-                  } else {
-                    setConfirmingClear(true)
-                  }
-                }}
-              />
-            </div>
-          </div>
-          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-            {tiles.length === 0
-              ? (
-                <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: 0.45, padding: 24, textAlign: 'center', userSelect: 'none' }}>
-                  <div style={{ fontSize: 24 }}>📌</div>
-                  <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-                    面板或页面卡片右上角点「📌 固定」<br />把 widget / artifact 钉到这里自由排布
-                  </div>
-                </div>
-              )
-              : <DockBoardView />}
-          </div>
+        <div style={{ display: 'flex', height: '100%', minWidth: 0 }} data-dock-version={version}>
+          <RailNav
+            tab={tab}
+            onTabChange={persistTab}
+            apps={[]}
+            selectedAppId={null}
+            onOpenApp={() => persistTab('apps')}
+            boards={state.boards}
+            activeBoardId={state.activeBoardId}
+            onSelectBoard={id => dockStore.setActiveBoard(id)}
+            onAddBoard={addBoard}
+            onRenameBoard={(id, name) => dockStore.renameBoard(id, name)}
+            onRemoveBoard={removeBoard}
+            width={railWidth}
+            onWidthChange={setRailWidth}
+            onWidthCommit={commitRailWidth}
+          />
+          {tab === 'board' ? <DockBoardView onCollapse={() => setOpen(false)} /> : <AppsPlaceholder />}
         </div>
       </DockHost>
+      {toast !== null ? <div className="d2-toast">{toast}</div> : null}
     </>
   )
 }

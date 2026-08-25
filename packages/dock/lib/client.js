@@ -33,14 +33,24 @@ window.__ModuleLoader__.load({
 		let react_dom = require("react-dom");
 		react_dom = __toESM(react_dom, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
+		/** 拖宽上限：跟随视口，封顶 1200px（对齐 bsb 的可拉宽体验） */
+		const dockMaxWidth = () => {
+			const viewport = globalThis.innerWidth;
+			const width = typeof viewport === "number" && Number.isFinite(viewport) ? viewport : void 0;
+			return width === void 0 ? 1200 : Math.min(1200, Math.round(width * .7));
+		};
+		const clampDockWidth = (value) => Math.max(320, Math.min(dockMaxWidth(), value));
+		//#endregion
 		//#region src/client/DockHost.tsx
 		/**
 		* DockHost：右侧 dock 的挂载层（方案 A，DOCK_DESIGN §1）。
 		*
 		* 冲突规避三件套：
 		* 1. host div 挂 body（data-openloop-dock），MutationObserver 保活——与 better-sidebar 各挂各的；
-		* 2. 挤压用 #root 的 padding-right（better-sidebar 用 margin-right，天然叠加不覆盖）；
-		* 3. 空间探测（bsb 的公开布局副作用：#root computed margin-right）+ 500ms poll。
+		* 2. 挤压用 bsb 同款 margin-right + width calc（见 DOCK_DESIGN §1.1 的 2026-08-24 更正：
+		*    padding-right 对固定轨道 grid 的 AppFrame 无挤压效果，已被实测证伪并替换）；
+		* 3. 空间探测读 bsb 的 --dsh-sidebar-width 变量（其设于 <html>，经继承在 #root computed 可见），
+		*    不能再读 computed margin-right——新机制下它包含 dock 自身宽度，会形成反馈回路。
 		*
 		* 展开交互（2026-08-24 重做，对齐 better-sidebar 体验）：
 		* - 面板常驻渲染，宽度过渡（width 0 ↔ W）——从右侧推出的动画效果；
@@ -48,14 +58,15 @@ window.__ModuleLoader__.load({
 		* - 拖动期间禁用 width 过渡（否则动画滞后手感）；内容层固定宽度不随动画压缩。
 		*/
 		const DOCK_WIDTH_VAR = "--openloop-dock-width";
+		const BSB_WIDTH_VAR = "--dsh-sidebar-width";
 		const TRANSITION = "width .22s ease";
-		/** 右侧空间探测：锚 #root 的 computed margin-right（bsb 的公开布局副作用） */
+		/** 右侧空间探测：bsb 占用 = 其 --dsh-sidebar-width（设于 <html>，继承到 #root）。 */
 		function probeDockRightEdge() {
 			if (typeof window === "undefined") return 0;
 			const root = document.getElementById("root");
 			if (!root) return window.innerWidth;
-			const marginRight = parseFloat(getComputedStyle(root).marginRight) || 0;
-			const occupied = marginRight > 0 && marginRight < window.innerWidth * .7 ? marginRight : 0;
+			const raw = parseFloat(getComputedStyle(root).getPropertyValue(BSB_WIDTH_VAR)) || 0;
+			const occupied = raw > 0 && raw < window.innerWidth * .7 ? raw : 0;
 			return window.innerWidth - occupied;
 		}
 		function DockHost({ open, width, onWidthChange, children }) {
@@ -91,7 +102,13 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				const styleEl = document.createElement("style");
 				styleEl.setAttribute("data-openloop-dock-style", "");
-				styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .22s ease }`;
+				styleEl.textContent = [
+					`#root {`,
+					`  margin-right: calc(var(${BSB_WIDTH_VAR}, 0px) + var(${DOCK_WIDTH_VAR}, 0px));`,
+					`  width: calc(100% - var(${BSB_WIDTH_VAR}, 0px) - var(${DOCK_WIDTH_VAR}, 0px));`,
+					`  transition: margin-right .22s ease, width .22s ease;`,
+					`}`
+				].join("\n");
 				document.head.appendChild(styleEl);
 				return () => styleEl.remove();
 			}, []);
@@ -110,7 +127,7 @@ window.__ModuleLoader__.load({
 				const startW = widthRef.current;
 				setResizing(true);
 				const move = (e) => {
-					const next = Math.round(Math.max(280, Math.min(760, startW + (startX - e.clientX))));
+					const next = clampDockWidth(Math.round(startW + (startX - e.clientX)));
 					onWidthChange?.(next);
 				};
 				const up = () => {
@@ -4510,8 +4527,12 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/store.ts
 		/**
-		* Dock Board store：tile 集合 + localStorage 持久化（OCIX useExtensionWorkbenchStore 同款语义）。
-		* 使用 useSyncExternalStore 友好的手写 store（无 zustand 依赖——bundle 尺寸考虑）。
+		* Dock Board store v2（2026-08-25 Dock 2.0）：多看板 + tile 别名 + localStorage 持久化。
+		* 手写 useSyncExternalStore 友好 store（无 zustand 依赖——bundle 尺寸考虑）。
+		*
+		* v1 → v2 迁移：读到 version:1（单看板）直接包成 boards:[{id:'b-default',...}]
+		* 写回 v2，不做双版本兼容层（工程原则：废弃路径直接移除）。
+		* STORAGE_KEY 沿用 v1 的 key——迁移在同一 key 原地完成，version 字段区分负载代际。
 		*/
 		const STORAGE_KEY = "openloop.dock.board.v1";
 		let seq = 0;
@@ -4519,56 +4540,194 @@ window.__ModuleLoader__.load({
 			seq += 1;
 			return `tile-${Date.now().toString(36)}-${seq.toString(36)}`;
 		};
-		const emptyBoard = () => ({
-			version: 1,
-			tiles: []
+		let boardSeq = 0;
+		const newBoardId = () => {
+			boardSeq += 1;
+			return `board-${Date.now().toString(36)}-${boardSeq.toString(36)}`;
+		};
+		const DEFAULT_BOARD_ID = "b-default";
+		const DEFAULT_BOARD_NAME = "默认看板";
+		const emptyState = () => ({
+			version: 2,
+			boards: [{
+				id: DEFAULT_BOARD_ID,
+				name: DEFAULT_BOARD_NAME,
+				tiles: []
+			}],
+			activeBoardId: DEFAULT_BOARD_ID
 		});
-		function readBoard() {
+		/** 容错：布局逐个 clamp；非法 tile 剔除（错误边界原则——坏数据不进 store） */
+		function sanitizeTiles(tiles) {
+			if (!Array.isArray(tiles)) return [];
+			return tiles.filter((t) => t && typeof t.tileId === "string" && typeof t.title === "string" && t.source && t.source.kind).map((t) => ({
+				...t,
+				layout: clampLayout(t.layout ?? {})
+			}));
+		}
+		function persistState(state) {
+			if (typeof localStorage === "undefined") return;
+			try {
+				localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+			} catch {}
+		}
+		/** v2 负载校验：boards 逐个规整（名称兜底、tile 容错）；activeBoardId 失效回落首板 */
+		function sanitizeStateV2(parsed) {
+			const boards = (Array.isArray(parsed.boards) ? parsed.boards : []).map((b) => {
+				const board = b;
+				if (!board || typeof board.id !== "string" || board.id.length === 0) return void 0;
+				const name = typeof board.name === "string" && board.name.trim().length > 0 ? board.name : DEFAULT_BOARD_NAME;
+				return {
+					id: board.id,
+					name,
+					tiles: sanitizeTiles(board.tiles)
+				};
+			}).filter((b) => b !== void 0);
+			if (boards.length === 0) return emptyState();
+			const first = boards[0];
+			if (first === void 0) return emptyState();
+			return {
+				version: 2,
+				boards,
+				activeBoardId: typeof parsed.activeBoardId === "string" && boards.some((b) => b.id === parsed.activeBoardId) ? parsed.activeBoardId : first.id
+			};
+		}
+		function readState() {
 			try {
 				const raw = localStorage.getItem(STORAGE_KEY);
-				if (raw === null) return emptyBoard();
+				if (raw === null) return emptyState();
 				const parsed = JSON.parse(raw);
-				if (parsed?.version !== 1 || !Array.isArray(parsed.tiles)) return emptyBoard();
-				return {
-					version: 1,
-					tiles: parsed.tiles.filter((t) => t && typeof t.tileId === "string" && t.source && t.source.kind).map((t) => ({
-						...t,
-						layout: clampLayout(t.layout ?? {})
-					}))
-				};
+				if (parsed?.version === 2) return sanitizeStateV2(parsed);
+				if (parsed?.version === 1 && Array.isArray(parsed.tiles)) {
+					const migrated = {
+						version: 2,
+						boards: [{
+							id: DEFAULT_BOARD_ID,
+							name: DEFAULT_BOARD_NAME,
+							tiles: sanitizeTiles(parsed.tiles)
+						}],
+						activeBoardId: DEFAULT_BOARD_ID
+					};
+					persistState(migrated);
+					return migrated;
+				}
+				return emptyState();
 			} catch {
-				return emptyBoard();
+				return emptyState();
 			}
 		}
 		var DockStore = class {
-			board = emptyBoard();
+			state = emptyState();
 			listeners = /* @__PURE__ */ new Set();
 			initialized = false;
 			subscribe(listener) {
-				if (!this.initialized && typeof localStorage !== "undefined") {
-					this.board = readBoard();
-					this.initialized = true;
-				}
+				this.ensureInit();
 				this.listeners.add(listener);
 				return () => this.listeners.delete(listener);
 			}
 			getSnapshot() {
+				this.ensureInit();
+				return this.state;
+			}
+			ensureInit() {
 				if (!this.initialized && typeof localStorage !== "undefined") {
-					this.board = readBoard();
+					this.state = readState();
 					this.initialized = true;
 				}
-				return this.board;
 			}
 			emit(next, persist = true) {
-				this.board = next;
-				if (persist && typeof localStorage !== "undefined") try {
-					localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-				} catch {}
+				this.state = next;
+				if (persist) persistState(next);
 				for (const listener of this.listeners) listener();
 			}
+			/** 当前激活板（activeBoardId 失效时回落首板；state 规整后恒有 ≥1 板，undefined 仅理论值） */
+			getActiveBoard() {
+				this.ensureInit();
+				return this.state.boards.find((b) => b.id === this.state.activeBoardId) ?? this.state.boards[0];
+			}
+			updateActiveTiles(fn) {
+				const board = this.getActiveBoard();
+				if (board === void 0) return;
+				const tiles = fn(board.tiles);
+				this.emit({
+					...this.state,
+					boards: this.state.boards.map((b) => b.id === board.id ? {
+						...b,
+						tiles
+					} : b)
+				});
+			}
+			/** 新增看板页并激活；返回新板 id */
+			addBoard() {
+				this.ensureInit();
+				const id = newBoardId();
+				const name = this.nextBoardName();
+				this.emit({
+					...this.state,
+					boards: [...this.state.boards, {
+						id,
+						name,
+						tiles: []
+					}],
+					activeBoardId: id
+				});
+				return id;
+			}
+			nextBoardName() {
+				for (let n = this.state.boards.length + 1;; n++) {
+					const name = `看板 ${n}`;
+					if (!this.state.boards.some((b) => b.name === name)) return name;
+				}
+			}
+			renameBoard(id, name) {
+				this.ensureInit();
+				const trimmed = name.trim();
+				if (!trimmed) return;
+				this.emit({
+					...this.state,
+					boards: this.state.boards.map((b) => b.id === id ? {
+						...b,
+						name: trimmed
+					} : b)
+				});
+			}
+			/** 删除看板页；末板不可删（UI 在单板时隐藏删除入口）；删的是激活板则回落首板 */
+			removeBoard(id) {
+				this.ensureInit();
+				if (this.state.boards.length <= 1) return;
+				const boards = this.state.boards.filter((b) => b.id !== id);
+				if (boards.length === this.state.boards.length) return;
+				const fallback = boards[0];
+				if (fallback === void 0) return;
+				const activeBoardId = this.state.activeBoardId === id ? fallback.id : this.state.activeBoardId;
+				this.emit({
+					...this.state,
+					boards,
+					activeBoardId
+				});
+			}
+			setActiveBoard(id) {
+				this.ensureInit();
+				if (id === this.state.activeBoardId || !this.state.boards.some((b) => b.id === id)) return;
+				this.emit({
+					...this.state,
+					activeBoardId: id
+				});
+			}
+			setTileAlias(tileId, alias) {
+				this.updateActiveTiles((tiles) => tiles.map((t) => {
+					if (t.tileId !== tileId) return t;
+					if (alias === null || alias.length === 0) {
+						const { alias: _dropped, ...rest } = t;
+						return rest;
+					}
+					return {
+						...t,
+						alias
+					};
+				}));
+			}
 			pin(source, title, origin = null, layoutHint) {
-				const current = this.getSnapshot();
-				const layout = findNearestSlot(current.tiles, {
+				const layout = findNearestSlot(this.getActiveBoard()?.tiles ?? [], {
 					columns: layoutHint?.columns ?? 6,
 					rows: layoutHint?.rows ?? 4
 				});
@@ -4586,28 +4745,17 @@ window.__ModuleLoader__.load({
 					origin,
 					createdAt: Date.now()
 				};
-				this.emit({
-					version: 1,
-					tiles: [...current.tiles, tile]
-				});
+				this.updateActiveTiles((tiles) => [...tiles, tile]);
 				return tile;
 			}
 			remove(tileId) {
-				const current = this.getSnapshot();
-				this.emit({
-					version: 1,
-					tiles: current.tiles.filter((t) => t.tileId !== tileId)
-				});
+				this.updateActiveTiles((tiles) => tiles.filter((t) => t.tileId !== tileId));
 			}
 			move(tileId, target) {
-				const current = this.getSnapshot();
-				this.emit({
-					version: 1,
-					tiles: current.tiles.map((t) => t.tileId === tileId ? {
-						...t,
-						layout: clampLayout(target)
-					} : t)
-				});
+				this.updateActiveTiles((tiles) => tiles.map((t) => t.tileId === tileId ? {
+					...t,
+					layout: clampLayout(target)
+				} : t));
 			}
 			/**
 			* RGL onLayoutChange 回写（2026-08-24 v0.3.0）：一次 emit 写回全部 tile 布局
@@ -4616,9 +4764,10 @@ window.__ModuleLoader__.load({
 			applyLayout(items) {
 				const next = fromRglLayout(items);
 				if (next.size === 0) return;
-				const current = this.getSnapshot();
+				const board = this.getActiveBoard();
+				if (board === void 0) return;
 				let changed = false;
-				const tiles = current.tiles.map((t) => {
+				const tiles = board.tiles.map((t) => {
 					const layout = next.get(t.tileId);
 					if (layout === void 0 || layout === t.layout) return t;
 					changed = true;
@@ -4628,25 +4777,141 @@ window.__ModuleLoader__.load({
 					};
 				});
 				if (changed) this.emit({
-					version: 1,
-					tiles
+					...this.state,
+					boards: this.state.boards.map((b) => b.id === board.id ? {
+						...b,
+						tiles
+					} : b)
 				});
 			}
+			/** 清空激活板的全部 tile */
 			clear() {
-				this.emit(emptyBoard());
+				const board = this.getActiveBoard();
+				if (board === void 0 || board.tiles.length === 0) return;
+				this.emit({
+					...this.state,
+					boards: this.state.boards.map((b) => b.id === board.id ? {
+						...b,
+						tiles: []
+					} : b)
+				});
 			}
 			/** 「整理」：重力紧凑（消除空洞、保持相对顺序）——无变化时不 emit */
 			compact() {
-				const current = this.getSnapshot();
-				if (current.tiles.length === 0) return;
-				const compacted = compactTiles(current.tiles);
-				if (compacted.some((t, i) => t.layout !== current.tiles[i]?.layout)) this.emit({
-					version: 1,
-					tiles: compacted
+				const board = this.getActiveBoard();
+				if (board === void 0 || board.tiles.length === 0) return;
+				const compacted = compactTiles(board.tiles);
+				if (compacted.some((t, i) => t.layout !== board.tiles[i]?.layout)) this.emit({
+					...this.state,
+					boards: this.state.boards.map((b) => b.id === board.id ? {
+						...b,
+						tiles: compacted
+					} : b)
 				});
 			}
 		};
 		const dockStore = new DockStore();
+		//#endregion
+		//#region src/client/icons.tsx
+		function I({ d, size = 15, sw = 1.5 }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("svg", {
+				width: size,
+				height: size,
+				viewBox: "0 0 24 24",
+				fill: "none",
+				stroke: "currentColor",
+				strokeWidth: sw,
+				strokeLinecap: "round",
+				strokeLinejoin: "round",
+				"aria-hidden": "true",
+				children: d.map((p, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: p }, i))
+			});
+		}
+		const icons = {
+			board: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M3 3h7v7H3z",
+					"M14 3h7v7h-7z",
+					"M3 14h7v7H3z",
+					"M14 14h7v7h-7z"
+				]
+			}),
+			apps: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M12 2l9 5-9 5-9-5 9-5z",
+					"M3 12l9 5 9-5",
+					"M3 17l9 5 9-5"
+				]
+			}),
+			pin: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M9 4h6l1 7 3 3H5l3-3 1-7z", "M12 14v7"]
+			}),
+			search: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M11 19a8 8 0 100-16 8 8 0 000 16z", "M21 21l-4.35-4.35"]
+			}),
+			chevronR: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M9 18l6-6-6-6"]
+			}),
+			chevronL: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M15 18l-6-6 6-6"]
+			}),
+			list: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M8 6h13",
+					"M8 12h13",
+					"M8 18h13",
+					"M3 6h.01",
+					"M3 12h.01",
+					"M3 18h.01"
+				]
+			}),
+			grid: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M3 3h7v7H3z",
+					"M14 3h7v7h-7z",
+					"M3 14h7v7H3z",
+					"M14 14h7v7h-7z"
+				]
+			}),
+			x: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M18 6L6 18", "M6 6l12 12"]
+			}),
+			plus: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M12 5v14", "M5 12h14"]
+			}),
+			check: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M20 6L9 17l-5-5"]
+			}),
+			trash: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M3 6h18",
+					"M8 6V4h8v2",
+					"M19 6l-1 14H6L5 6"
+				]
+			}),
+			sort: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M11 5h10",
+					"M11 9h7",
+					"M11 13h4",
+					"M3 17l3 3 3-3",
+					"M6 18V4"
+				]
+			})
+		};
 		//#endregion
 		//#region src/client/base-bridge.tsx
 		/**
@@ -4711,15 +4976,14 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/DockBoardView.tsx
 		/**
-		* DockBoardView：12 列网格画板（2026-08-24 v0.3.0 起交互引擎 = react-grid-layout v2）。
+		* DockBoardView：看板视图（Dock 2.0，RGL v2 引擎保留不变）。
 		*
-		* 迁移背景（用户验收反馈）：手写 dnd-kit 网格的拖拽 hover 丢失、无吸附预览、
-		* 视觉对齐散乱。RGL（Grafana/Kibana 生产验证）提供：指针捕获式拖拽（无 hover 丢失）、
-		* 拖拽 placeholder 实时占位预览、松手网格吸附、碰撞自动推挤 + verticalCompactor
-		* 重力紧凑、CSS Transform 定位（GPU 平滑）。
-		*
-		* 数据流：dockStore（TileLayout 坐标）↔ RGL LayoutItem 双向映射（layout.ts）；
-		* onLayoutChange 一次回写全部（applyLayout），localStorage 持久化语义不变。
+		* v2 变更（2026-08-25，原型 direction-a.jsx 看板段直搬）：
+		* - 头部：当前页名（双击重命名）+ tile 计数 + 整理/清空/收起（收起经 onCollapse 上抛）
+		* - tile 外壳：别名内联编辑（Enter/失焦提交、Esc 取消、置空恢复原名、✎ 标记）
+		*   + 右下角来源 ID（包名:组件名，命名即寻址）
+		* - 空态：引导去 APP 页固定 / 让 Agent 生成
+		* - 数据流不变：dockStore（v2 多板）→ 激活板 tiles ↔ RGL 双向映射
 		*/
 		/** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
 		let scopeCache;
@@ -4744,9 +5008,9 @@ window.__ModuleLoader__.load({
 .react-grid-item.react-draggable-dragging { transition: none; z-index: 3; will-change: transform; }
 .react-grid-item.dropping { visibility: hidden; }
 .react-grid-item.react-grid-placeholder {
-  background: var(--dsw-alias-accent, rgba(88, 101, 242, 0.35));
+  background: var(--dsw-alias-state-business-primary, rgba(88, 101, 242, 0.35));
   opacity: 0.14;
-  border: 1.5px dashed var(--dsw-alias-accent, rgba(88, 101, 242, 0.55));
+  border: 1.5px dashed var(--dsw-alias-state-business-primary, rgba(88, 101, 242, 0.55));
   border-radius: 10px;
   transition-duration: 100ms;
   z-index: 2;
@@ -4781,7 +5045,30 @@ window.__ModuleLoader__.load({
 			}, []);
 			return null;
 		}
-		function TileChrome({ title, onRemove, children }) {
+		/** 来源 ID（包名:组件名）：panel meta.panel.id / artifact meta.path 文件名；拿不到则不显示 */
+		function sourceIdOf(source) {
+			if (source.kind === "panel") {
+				const panel = source.meta?.panel;
+				return typeof panel?.id === "string" && panel.id.length > 0 ? `openloop:${panel.id}` : null;
+			}
+			const path = source.meta?.path;
+			if (typeof path !== "string" || path.length === 0) return null;
+			const base = path.split("/").pop() ?? path;
+			return base.length > 0 ? `openloop:${base}` : null;
+		}
+		function TileChrome({ tile, onRemove, onAlias, children }) {
+			const [editing, setEditing] = (0, react.useState)(false);
+			const displayTitle = tile.alias ?? tile.title;
+			const sourceId = sourceIdOf(tile.source);
+			const commit = (value) => {
+				const trimmed = value.trim();
+				onAlias(!trimmed || trimmed === tile.title ? null : trimmed);
+				setEditing(false);
+			};
+			const onEditKeyDown = (e) => {
+				if (e.key === "Enter") commit(e.currentTarget.value);
+				if (e.key === "Escape") setEditing(false);
+			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "dock-tile-chrome",
 				style: {
@@ -4794,59 +5081,77 @@ window.__ModuleLoader__.load({
 					background: "var(--dsw-alias-bg-layer-1, #fff)",
 					overflow: "hidden"
 				},
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "dock-tile-handle",
-					title: "拖动排列",
-					style: {
-						display: "flex",
-						alignItems: "center",
-						justifyContent: "space-between",
-						gap: 8,
-						padding: "5px 6px 5px 10px",
-						flexShrink: 0,
-						borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))",
-						fontSize: 11.5,
-						fontWeight: 600,
-						letterSpacing: .2,
-						color: "var(--dsw-alias-label-title, inherit)",
-						userSelect: "none"
-					},
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "dock-tile-handle",
+						title: "拖动排列",
 						style: {
-							overflow: "hidden",
-							textOverflow: "ellipsis",
-							whiteSpace: "nowrap"
-						},
-						children: title
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "dock-tile-cancel",
-						onClick: onRemove,
-						"aria-label": "unpin",
-						title: "取消固定",
-						style: {
-							border: 0,
-							background: "transparent",
-							cursor: "pointer",
+							display: "flex",
+							alignItems: "center",
+							justifyContent: "space-between",
+							gap: 8,
+							padding: "5px 6px 5px 10px",
 							flexShrink: 0,
-							fontSize: 12,
-							lineHeight: 1,
-							padding: "3px 6px",
-							borderRadius: 6,
-							color: "var(--dsw-alias-label-caption, #888)"
+							borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.06))",
+							fontSize: 11.5,
+							fontWeight: 600,
+							letterSpacing: .2,
+							color: "var(--dsw-alias-label-primary, inherit)",
+							userSelect: "none"
 						},
-						children: "✕"
-					})]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: {
-						position: "relative",
-						flex: 1,
-						minHeight: 0,
-						overflow: "auto",
-						padding: 10
-					},
-					children
-				})]
+						children: [editing ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							className: "d2-title-edit",
+							defaultValue: displayTitle,
+							autoFocus: true,
+							"aria-label": "编辑别名",
+							onBlur: (e) => commit(e.target.value),
+							onKeyDown: onEditKeyDown
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "d2-tile-title",
+							style: { flex: 1 },
+							title: `双击编辑别名（原名：${tile.title}）`,
+							onDoubleClick: () => setEditing(true),
+							children: [displayTitle, tile.alias ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-alias-mark",
+								title: `原名：${tile.title}`,
+								children: "✎"
+							}) : null]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "dock-tile-cancel",
+							onClick: onRemove,
+							"aria-label": "unpin",
+							title: "取消固定",
+							style: {
+								border: 0,
+								background: "transparent",
+								cursor: "pointer",
+								flexShrink: 0,
+								fontSize: 12,
+								lineHeight: 1,
+								padding: "3px 6px",
+								borderRadius: 6,
+								color: "var(--dsw-alias-label-caption, #888)"
+							},
+							children: "✕"
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							position: "relative",
+							flex: 1,
+							minHeight: 0,
+							overflow: "auto",
+							padding: 10
+						},
+						children
+					}),
+					sourceId ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "d2-tile-src",
+						style: { right: 26 },
+						children: sourceId
+					}) : null
+				]
 			});
 		}
 		/**
@@ -4905,59 +5210,428 @@ window.__ModuleLoader__.load({
 				scope: getScope()
 			});
 		}
-		function DockBoardView({ onEmpty }) {
+		function DockBoardView({ onCollapse }) {
 			const { width, containerRef, mounted } = useContainerWidth();
-			const tiles = dockStore.getSnapshot().tiles;
+			const state = dockStore.getSnapshot();
+			const board = state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0];
+			const tiles = board?.tiles ?? [];
 			const layout = toRglLayout(tiles);
-			if (tiles.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			const [editingName, setEditingName] = (0, react.useState)(false);
+			const [confirmingClear, setConfirmingClear] = (0, react.useState)(false);
+			(0, react.useEffect)(() => {
+				if (!confirmingClear) return;
+				const timer = setTimeout(() => setConfirmingClear(false), 3e3);
+				return () => clearTimeout(timer);
+			}, [confirmingClear]);
+			const commitName = (value) => {
+				const trimmed = value.trim();
+				if (trimmed && board !== void 0) dockStore.renameBoard(board.id, trimmed);
+				setEditingName(false);
+			};
+			const onNameKeyDown = (e) => {
+				if (e.key === "Enter") commitName(e.currentTarget.value);
+				if (e.key === "Escape") setEditingName(false);
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
 				style: {
-					padding: 24,
-					color: "var(--dsw-alias-label-caption, #888)",
-					fontSize: 13,
-					textAlign: "center"
+					flex: 1,
+					minWidth: 0,
+					minHeight: 0,
+					display: "flex",
+					flexDirection: "column"
 				},
-				children: "空画板——在面板 / HTML artifact 卡片上点 📌 固定到这里"
-			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				ref: containerRef,
-				style: { minHeight: 104 },
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridStyles, {}), mounted && width > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridLayout, {
-					width,
-					layout,
-					gridConfig: {
-						cols: 12,
-						rowHeight: ROW_HEIGHT,
-						margin: GRID_MARGIN,
-						maxRows: 24
-					},
-					dragConfig: {
-						enabled: true,
-						handle: ".dock-tile-handle",
-						cancel: ".dock-tile-cancel"
-					},
-					resizeConfig: {
-						enabled: true,
-						handles: [
-							"se",
-							"e",
-							"s"
-						]
-					},
-					onLayoutChange: (items) => dockStore.applyLayout(items),
-					children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
-						title: tile.title,
-						onRemove: () => {
-							dockStore.remove(tile.tileId);
-							if (dockStore.getSnapshot().tiles.length === 0) onEmpty?.();
-						},
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
-							tileId: tile.tileId,
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+				"data-screen-label": "board",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+					className: "d2-board-head",
+					children: [
+						board === void 0 ? null : editingName ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							className: "d2-board-rename",
+							autoFocus: true,
+							defaultValue: board.name,
+							size: Math.max(4, board.name.length + 2),
+							"aria-label": "重命名看板页",
+							onBlur: (e) => commitName(e.target.value),
+							onKeyDown: onNameKeyDown
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-board-name",
+							title: "双击重命名看板页",
+							onDoubleClick: () => setEditingName(true),
+							children: board.name
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							className: "d2-badge kind",
+							children: [tiles.length, " tiles"]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-actions",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: "d2-ghost-btn",
+									title: "重力紧凑：消除空洞，保持相对顺序",
+									onClick: () => dockStore.compact(),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.sort, { size: 13 }), " 整理"]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: confirmingClear ? "d2-ghost-btn danger" : "d2-ghost-btn",
+									title: confirmingClear ? "再次点击确认清空当前页 tile" : "清空当前页 tile（其他看板页不受影响）",
+									onClick: () => {
+										if (confirmingClear) {
+											dockStore.clear();
+											setConfirmingClear(false);
+										} else setConfirmingClear(true);
+									},
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.trash, { size: 13 }),
+										" ",
+										confirmingClear ? "确认清空？" : "清空"
+									]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "d2-ghost-btn",
+									title: "收起 Dock（tile 保留，再点右上角 📌 展开）",
+									onClick: onCollapse,
+									children: "收起"
+								})
+							]
 						})
-					}) }, tile.tileId))
-				}) : null]
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						flex: 1,
+						minHeight: 0,
+						overflow: "auto"
+					},
+					children: tiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-empty-note",
+						style: { paddingTop: 60 },
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: {
+									fontSize: 22,
+									opacity: .6
+								},
+								children: "📌"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "这一页还是空的" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-tcap",
+								children: "到 APP 页把组件「固定」到看板，或让 Agent 帮你生成"
+							})
+						]
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						ref: containerRef,
+						style: { minHeight: 104 },
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridStyles, {}), mounted && width > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridLayout, {
+							width,
+							layout,
+							gridConfig: {
+								cols: 12,
+								rowHeight: ROW_HEIGHT,
+								margin: GRID_MARGIN,
+								maxRows: 24
+							},
+							dragConfig: {
+								enabled: true,
+								handle: ".dock-tile-handle",
+								cancel: ".dock-tile-cancel, .d2-title-edit"
+							},
+							resizeConfig: {
+								enabled: true,
+								handles: [
+									"se",
+									"e",
+									"s"
+								]
+							},
+							onLayoutChange: (items) => dockStore.applyLayout(items),
+							children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
+								tile,
+								onRemove: () => dockStore.remove(tile.tileId),
+								onAlias: (alias) => dockStore.setTileAlias(tile.tileId, alias),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
+									tileId: tile.tileId,
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+								})
+							}) }, tile.tileId))
+						}) : null]
+					})
+				})]
 			});
 		}
+		//#endregion
+		//#region src/client/badges.tsx
+		function AppIcon({ app, size = 28 }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: `d2-app-icon ${app.kind}`,
+				style: size !== 28 ? {
+					width: size,
+					height: size,
+					fontSize: Math.round(size * .46)
+				} : void 0,
+				children: app.name.slice(0, 1)
+			});
+		}
+		//#endregion
+		//#region src/client/drag-resize.ts
+		function dragResize(e, startW, min, max, onLive, onDone) {
+			e.preventDefault();
+			e.stopPropagation();
+			const startX = e.clientX;
+			let last = startW;
+			const move = (ev) => {
+				last = Math.min(max, Math.max(min, startW + ev.clientX - startX));
+				onLive(last);
+			};
+			const up = () => {
+				window.removeEventListener("pointermove", move);
+				window.removeEventListener("pointerup", up);
+				onDone?.(last);
+			};
+			window.addEventListener("pointermove", move);
+			window.addEventListener("pointerup", up);
+		}
+		/** 拖宽 ≥ 此值进入中枢态（仅运行时判定；松手仍吸附 52/216） */
+		const RAIL_EXPAND_THRESHOLD = 100;
+		const RAIL_DRAG_MAX = 260;
+		function RailNav(props) {
+			const { tab, onTabChange, apps, selectedAppId, onOpenApp, boards, activeBoardId } = props;
+			const { onSelectBoard, onAddBoard, onRenameBoard, onRemoveBoard } = props;
+			const { width, onWidthChange, onWidthCommit } = props;
+			const expanded = width >= RAIL_EXPAND_THRESHOLD;
+			const [dragging, setDragging] = (0, react.useState)(false);
+			const [editingBoard, setEditingBoard] = (0, react.useState)(null);
+			const openBoard = (id) => {
+				onSelectBoard(id);
+				onTabChange("board");
+			};
+			const commitRename = (id, value) => {
+				const trimmed = value.trim();
+				if (trimmed) onRenameBoard(id, trimmed);
+				setEditingBoard(null);
+			};
+			const onRenameKeyDown = (e, id) => {
+				if (e.key === "Enter") commitRename(id, e.currentTarget.value);
+				if (e.key === "Escape") setEditingBoard(null);
+			};
+			const onHandleDown = (e) => {
+				setDragging(true);
+				dragResize(e, width, 52, RAIL_DRAG_MAX, onWidthChange, (w) => {
+					setDragging(false);
+					onWidthCommit(w < RAIL_EXPAND_THRESHOLD ? 52 : 216);
+				});
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("nav", {
+				className: `d2-rail${expanded ? " d2-expanded" : ""}${dragging ? " d2-dragging" : ""}`,
+				style: { width },
+				"aria-label": "Dock 导航",
+				children: [expanded ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-rail-sec",
+						children: ["工作台", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "d2-sec-add",
+							title: "新增看板页",
+							onClick: onAddBoard,
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
+						})]
+					}),
+					boards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+						className: "d2-board-rename d2-rail-rename",
+						autoFocus: true,
+						defaultValue: b.name,
+						size: Math.max(4, b.name.length + 2),
+						"aria-label": "重命名看板页",
+						onBlur: (e) => commitRename(b.id, e.target.value),
+						onKeyDown: (e) => onRenameKeyDown(e, b.id)
+					}, b.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						type: "button",
+						className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
+						onClick: () => openBoard(b.id),
+						onDoubleClick: () => setEditingBoard(b.id),
+						title: "双击重命名",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 14 }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-lbl",
+								children: b.name
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-cnt",
+								children: b.tiles.length
+							}),
+							boards.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								role: "button",
+								"aria-label": `删除 ${b.name}`,
+								title: "删除此页",
+								onClick: (e) => {
+									e.stopPropagation();
+									onRemoveBoard(b.id);
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.x, { size: 9 })
+							}) : null
+						]
+					}, b.id)),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-rail-sec",
+						children: "APP"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-rail-apps",
+						children: apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: `d2-rail-app${tab === "apps" && a.id === selectedAppId ? " on" : ""}`,
+							onClick: () => onOpenApp(a.id),
+							title: a.hint,
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+									app: a,
+									size: 22
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-lbl",
+									children: a.name
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.apiTone}` })
+							]
+						}, a.id))
+					})
+				] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: `d2-rail-tab${tab === "board" ? " on" : ""}`,
+						title: "看板",
+						onClick: () => onTabChange("board"),
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 17 })
+					}),
+					boards.map((b) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: `d2-rail-mini${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
+						title: b.name,
+						onClick: () => openBoard(b.id),
+						children: b.name.slice(0, 1)
+					}, b.id)),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { className: "d2-rail-sep" }),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: `d2-rail-tab${tab === "apps" ? " on" : ""}`,
+						title: "APP",
+						onClick: () => onTabChange("apps"),
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.apps, { size: 17 })
+					}),
+					apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: `d2-rail-mini${tab === "apps" && a.id === selectedAppId ? " on" : ""}`,
+						title: a.name,
+						onClick: () => onOpenApp(a.id),
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+							app: a,
+							size: 16
+						})
+					}, a.id))
+				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "d2-resize-h",
+					role: "separator",
+					"aria-orientation": "vertical",
+					"aria-label": "调整导航轨宽度",
+					title: "拖动调宽（≥100px 变中枢态，双击快捷切换）",
+					onPointerDown: onHandleDown,
+					onDoubleClick: () => onWidthCommit(expanded ? 52 : 216)
+				})]
+			});
+		}
+		//#endregion
+		//#region src/client/v2-styles.ts
+		/**
+		* Dock 2.0 组件样式（原型 <style> 直搬 + 类名 d2- 前缀化 + token 零映射）。
+		*
+		* token 策略（DOCK_V2_FRONTEND_IMPL §4）：原型 :root 的 --ds-* 定义块整体丢弃，
+		* 每处引用改指 DSH 宿主真实变量（--dsw-alias-*，定义于 @deepseek-ai/dsh-client-ui-theme），
+		* 带静态 fallback 兜底（与 0.3.x 既有内联样式同款写法）。明暗双板由宿主
+		* data-theme 自动生效，dock 不做主题切换。
+		*
+		* 注：构建链（tsdown CJS bundle）无 CSS import 通道，沿用 GRID_CSS 的
+		* 字符串注入模式（<style data-openloop-dock-v2>，DockShell 挂载时注入一次）。
+		*/
+		const V2_CSS = `
+/* ---------- 通用 ---------- */
+.d2-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); color: var(--dsw-alias-label-tertiary, inherit); white-space: nowrap; }
+.d2-badge.builtin { color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent); }
+.d2-badge.thirdparty { color: var(--dsw-alias-state-warn-primary, #f59e0b); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 10%, transparent); }
+.d2-badge.local { color: var(--dsw-alias-state-success-primary, #22c55e); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 10%, transparent); }
+.d2-badge.kind { color: var(--dsw-alias-label-secondary, inherit); }
+
+.d2-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.d2-dot.ok { background: var(--dsw-alias-state-success-primary, #22c55e); }
+.d2-dot.warn { background: var(--dsw-alias-state-warn-primary, #f59e0b); }
+
+.d2-app-icon { width: 28px; height: 28px; flex-shrink: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); }
+.d2-app-icon.builtin { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 16%, transparent); color: var(--dsw-alias-state-business-primary, #4176e6); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 35%, transparent); }
+.d2-app-icon.thirdparty { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 14%, transparent); color: var(--dsw-alias-state-warn-primary, #f59e0b); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 35%, transparent); }
+.d2-app-icon.local { background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 14%, transparent); color: var(--dsw-alias-state-success-primary, #22c55e); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 35%, transparent); }
+
+.d2-ghost-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 7px; font-size: 11.5px; color: var(--dsw-alias-label-secondary, inherit); background: none; border: 0; cursor: pointer; font-family: inherit; }
+.d2-ghost-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-ghost-btn.danger { color: var(--dsw-alias-state-error-primary, #d4453a); }
+.d2-ghost-btn.danger:hover { background: rgba(242,90,90,.15); color: var(--dsw-alias-state-error-primary, #d4453a); }
+
+.d2-tcap { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); }
+
+/* ---------- RailNav（两态一轨） ---------- */
+.d2-rail { position: relative; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-1, #fff); overflow-y: auto; scrollbar-width: none; transition: width .18s ease; }
+.d2-rail::-webkit-scrollbar { width: 0; }
+.d2-rail.d2-dragging { transition: none; }
+.d2-rail-tab { width: 36px; height: 36px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary, inherit); position: relative; background: none; border: 0; cursor: pointer; flex-shrink: 0; }
+.d2-rail-tab:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-rail-tab.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-rail-tab.on::before { content: ""; position: absolute; left: -8px; top: 9px; bottom: 9px; width: 3px; border-radius: 3px; background: var(--dsw-alias-state-business-primary, #4176e6); }
+.d2-rail-mini { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--dsw-alias-label-secondary, inherit); background: var(--dsw-alias-bg-layer-2, #f6f6f7); border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); cursor: pointer; flex-shrink: 0; }
+.d2-rail-mini:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-rail-mini.on { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 55%, transparent); color: var(--dsw-alias-label-primary, inherit); box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 25%, transparent); }
+.d2-rail-sep { width: 20px; height: 1px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.18)); margin: 5px 0; flex-shrink: 0; }
+.d2-rail.d2-expanded { align-items: stretch; padding: 10px 8px; gap: 2px; }
+.d2-rail-sec { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption, #888); }
+.d2-sec-add { display: flex; align-items: center; padding: 2px 4px; border-radius: 5px; color: var(--dsw-alias-label-caption, #888); background: none; border: 0; cursor: pointer; }
+.d2-sec-add:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-rail-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border-radius: 8px; color: var(--dsw-alias-label-secondary, inherit); font-size: 12.5px; text-align: left; background: none; border: 0; cursor: pointer; }
+.d2-rail-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-rail-row.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); color: var(--dsw-alias-label-primary, inherit); font-weight: 500; }
+.d2-rail-row .d2-lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d2-rail-row .d2-cnt { margin-left: auto; font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); border-radius: 999px; padding: 0 6px; }
+.d2-rail-row .d2-x { display: none; padding: 2px; border-radius: 4px; color: var(--dsw-alias-label-caption, #888); background: none; border: 0; cursor: pointer; flex-shrink: 0; }
+.d2-rail-row:hover .d2-x { display: inline-flex; }
+.d2-rail-row:hover .d2-cnt { display: none; }
+.d2-rail-row .d2-x:hover { color: var(--dsw-alias-state-error-primary, #d4453a); background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
+.d2-rail-apps { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.d2-rail-app { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 8px; text-align: left; background: none; border: 0; cursor: pointer; }
+.d2-rail-app:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-rail-app.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
+.d2-rail-app .d2-lbl { flex: 1; min-width: 0; font-size: 12px; color: var(--dsw-alias-label-primary, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- 横向拖拽把手（rail 右缘） ---------- */
+.d2-resize-h { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+.d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background .15s; }
+.d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); }
+
+/* ---------- 看板头 ---------- */
+.d2-board-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; flex-shrink: 0; }
+.d2-board-name { font-size: 14px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); cursor: default; user-select: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60%; }
+.d2-board-head .d2-actions { margin-left: auto; display: flex; gap: 2px; align-items: center; }
+.d2-board-rename { background: none; border: 1px solid var(--dsw-alias-state-business-primary, #4176e6); border-radius: 6px; outline: none; font-size: 12px; padding: 3px 6px; color: var(--dsw-alias-label-primary, inherit); font-family: inherit; }
+.d2-rail-rename { margin: 2px 4px; }
+
+/* ---------- tile 别名编辑 + 来源 ID ---------- */
+.d2-tile-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+.d2-alias-mark { font-size: 9px; color: var(--dsw-alias-label-caption, #888); margin-left: 3px; }
+.d2-title-edit { flex: 1; min-width: 40px; background: var(--dsw-alias-bg-layer-2, #f6f6f7); border: 1px solid var(--dsw-alias-state-business-primary, #4176e6); border-radius: 5px; padding: 1px 6px; font-size: 12px; color: var(--dsw-alias-label-primary, inherit); outline: none; font-family: inherit; }
+.d2-tile-src { position: absolute; right: 8px; bottom: 5px; font-size: 10px; color: var(--dsw-alias-label-caption, #888); font-family: ui-monospace, "SF Mono", Menlo, monospace; pointer-events: none; opacity: .85; }
+
+/* ---------- 空态 / 提示 ---------- */
+.d2-empty-note { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 20px; color: var(--dsw-alias-label-caption, #888); text-align: center; font-size: 12px; line-height: 1.7; }
+.d2-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: var(--dsw-alias-tooltip-bg, #43454a); color: var(--dsw-alias-label-primary, #f9fafb); font-size: 12px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 100; pointer-events: none; }
+`;
 		//#endregion
 		//#region src/client/index.tsx
 		const name = "openloop-dock";
@@ -5001,52 +5675,77 @@ window.__ModuleLoader__.load({
 			});
 		}
 		const WIDTH_KEY = "openloop.dock.width.v1";
+		const RAIL_WIDTH_KEY = "openloop.dock.rail-width.v1";
+		const TAB_KEY = "openloop.dock.tab.v1";
 		const DEFAULT_WIDTH = 420;
 		function readStoredWidth() {
 			try {
 				const raw = localStorage.getItem(WIDTH_KEY);
 				const n = raw === null ? NaN : Number(raw);
-				return Number.isFinite(n) ? Math.max(280, Math.min(760, n)) : DEFAULT_WIDTH;
+				return Number.isFinite(n) ? clampDockWidth(n) : DEFAULT_WIDTH;
 			} catch {
 				return DEFAULT_WIDTH;
 			}
 		}
-		/** header ghost 按钮（bsb 工具栏风格：无边框、hover 淡底、可 danger 态） */
-		function HeaderButton({ label, title, onClick, danger = false }) {
-			const [hover, setHover] = (0, react.useState)(false);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				title,
-				onClick,
-				onMouseEnter: () => setHover(true),
-				onMouseLeave: () => setHover(false),
+		function readRailWidth() {
+			try {
+				const raw = localStorage.getItem(RAIL_WIDTH_KEY);
+				const n = raw === null ? NaN : Number(raw);
+				return n === 52 || n === 216 ? n : 52;
+			} catch {
+				return 52;
+			}
+		}
+		function readTab() {
+			try {
+				return localStorage.getItem(TAB_KEY) === "apps" ? "apps" : "board";
+			} catch {
+				return "board";
+			}
+		}
+		/** APP tab 占位（M1：注册表未接，M2 由 AppListPanel + AppDetail 替换） */
+		function AppsPlaceholder() {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
 				style: {
-					fontSize: 11,
-					padding: "3px 8px",
-					borderRadius: 6,
-					border: "none",
-					cursor: "pointer",
-					lineHeight: 1.5,
-					color: danger ? "var(--dsw-alias-danger, #d4453a)" : "inherit",
-					opacity: danger ? 1 : .72,
-					background: hover ? danger ? "rgba(212,69,58,.12)" : "rgba(127,127,127,.14)" : "transparent",
-					transition: "background .12s ease"
+					flex: 1,
+					minWidth: 0,
+					minHeight: 0,
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center"
 				},
-				children: label
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-empty-note",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								fontSize: 22,
+								opacity: .6
+							},
+							children: "🧩"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "APP 体系建设中" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "d2-tcap",
+							children: "组件与 API 注册表接入后，这里可以浏览和固定资源"
+						})
+					]
+				})
 			});
 		}
 		function DockShell() {
-			const [open, setOpen] = (0, react.useState)(() => dockStore.getSnapshot().tiles.length > 0);
+			const [open, setOpen] = (0, react.useState)(() => dockStore.getSnapshot().boards.some((b) => b.tiles.length > 0));
 			const [version, setVersion] = (0, react.useState)(0);
 			const [width, setWidth] = (0, react.useState)(readStoredWidth);
-			const [confirmingClear, setConfirmingClear] = (0, react.useState)(false);
-			(0, react.useEffect)(() => {
-				if (!confirmingClear) return;
-				const timer = setTimeout(() => setConfirmingClear(false), 3e3);
-				return () => clearTimeout(timer);
-			}, [confirmingClear]);
+			const [tab, setTab] = (0, react.useState)(readTab);
+			const [railWidth, setRailWidth] = (0, react.useState)(readRailWidth);
+			const [toast, setToast] = (0, react.useState)(null);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
-			const tiles = dockStore.getSnapshot().tiles;
+			(0, react.useEffect)(() => {
+				if (toast === null) return;
+				const timer = setTimeout(() => setToast(null), 2200);
+				return () => clearTimeout(timer);
+			}, [toast]);
 			const [toggleRight, setToggleRight] = (0, react.useState)(10);
 			(0, react.useEffect)(() => {
 				const update = () => setToggleRight(Math.max(10, window.innerWidth - probeDockRightEdge() + 10));
@@ -5059,6 +5758,13 @@ window.__ModuleLoader__.load({
 				};
 			}, []);
 			(0, react.useEffect)(() => {
+				const el = document.createElement("style");
+				el.setAttribute("data-openloop-dock-v2", "");
+				el.textContent = V2_CSS;
+				document.head.appendChild(el);
+				return () => el.remove();
+			}, []);
+			(0, react.useEffect)(() => {
 				const w = window;
 				w.__openloopDockToggle = () => setOpen((o) => !o);
 				w.__openloopDockOpen = () => setOpen(true);
@@ -5067,110 +5773,86 @@ window.__ModuleLoader__.load({
 					delete w.__openloopDockOpen;
 				};
 			}, []);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockToggle, {
-				open,
-				onToggle: () => setOpen((o) => !o),
-				count: tiles.length,
-				right: toggleRight
-			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockHost, {
-				open,
-				width,
-				onWidthChange: (w) => {
-					setWidth(w);
+			const state = dockStore.getSnapshot();
+			const totalTiles = state.boards.reduce((n, b) => n + b.tiles.length, 0);
+			const persistTab = (next) => {
+				setTab(next);
+				try {
+					localStorage.setItem(TAB_KEY, next);
+				} catch {}
+			};
+			/** rail 松手吸附：持久化 rail 宽；内容区保底 DOCK_MIN_WIDTH（rail 变宽挤压时自动撑开 dock） */
+			const commitRailWidth = (next) => {
+				setRailWidth(next);
+				try {
+					localStorage.setItem(RAIL_WIDTH_KEY, String(next));
+				} catch {}
+				if (width < next + 320) {
+					const widened = clampDockWidth(next + 320);
+					setWidth(widened);
 					try {
-						localStorage.setItem(WIDTH_KEY, String(w));
+						localStorage.setItem(WIDTH_KEY, String(widened));
 					} catch {}
-				},
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						display: "flex",
-						flexDirection: "column",
-						height: "100%"
+				}
+			};
+			const addBoard = () => {
+				const board = dockStore.getSnapshot().boards;
+				dockStore.addBoard();
+				persistTab("board");
+				const created = dockStore.getSnapshot().boards[board.length];
+				if (created !== void 0) setToast(`已新增「${created.name}」（双击页名可重命名）`);
+			};
+			const removeBoard = (id) => {
+				const target = state.boards.find((b) => b.id === id);
+				dockStore.removeBoard(id);
+				if (target !== void 0) setToast(`已删除「${target.name}」`);
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockToggle, {
+					open,
+					onToggle: () => setOpen((o) => !o),
+					count: totalTiles,
+					right: toggleRight
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockHost, {
+					open,
+					width,
+					onWidthChange: (w) => {
+						setWidth(w);
+						try {
+							localStorage.setItem(WIDTH_KEY, String(w));
+						} catch {}
 					},
-					"data-dock-version": version,
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						style: {
 							display: "flex",
-							alignItems: "center",
-							justifyContent: "space-between",
-							padding: "8px 12px",
-							borderBottom: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-							flexShrink: 0
+							height: "100%",
+							minWidth: 0
 						},
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							style: {
-								fontSize: 12,
-								fontWeight: 600,
-								letterSpacing: .2,
-								opacity: .85
-							},
-							children: "OpenLoop Dock"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: {
-								display: "flex",
-								gap: 2
-							},
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(HeaderButton, {
-									label: "整理",
-									title: "重力紧凑：消除空洞，保持相对顺序",
-									onClick: () => dockStore.compact()
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(HeaderButton, {
-									label: "收起",
-									title: "收起 Dock（tile 保留，再点右上角 📌 展开）",
-									onClick: () => setOpen(false)
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(HeaderButton, {
-									label: confirmingClear ? "确认清空？" : "清空",
-									title: confirmingClear ? "再次点击确认移除全部 tile" : "移除画板上的全部 tile",
-									danger: confirmingClear,
-									onClick: () => {
-										if (confirmingClear) {
-											dockStore.clear();
-											setConfirmingClear(false);
-										} else setConfirmingClear(true);
-									}
-								})
-							]
-						})]
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						style: {
-							flex: 1,
-							minHeight: 0,
-							overflow: "auto"
-						},
-						children: tiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: {
-								height: "100%",
-								display: "flex",
-								flexDirection: "column",
-								alignItems: "center",
-								justifyContent: "center",
-								gap: 10,
-								opacity: .45,
-								padding: 24,
-								textAlign: "center",
-								userSelect: "none"
-							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: { fontSize: 24 },
-								children: "📌"
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								style: {
-									fontSize: 12,
-									lineHeight: 1.8
-								},
-								children: [
-									"面板或页面卡片右上角点「📌 固定」",
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
-									"把 widget / artifact 钉到这里自由排布"
-								]
-							})]
-						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, {})
-					})]
-				})
-			})] });
+						"data-dock-version": version,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailNav, {
+							tab,
+							onTabChange: persistTab,
+							apps: [],
+							selectedAppId: null,
+							onOpenApp: () => persistTab("apps"),
+							boards: state.boards,
+							activeBoardId: state.activeBoardId,
+							onSelectBoard: (id) => dockStore.setActiveBoard(id),
+							onAddBoard: addBoard,
+							onRenameBoard: (id, name) => dockStore.renameBoard(id, name),
+							onRemoveBoard: removeBoard,
+							width: railWidth,
+							onWidthChange: setRailWidth,
+							onWidthCommit: commitRailWidth
+						}), tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, { onCollapse: () => setOpen(false) }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppsPlaceholder, {})]
+					})
+				}),
+				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "d2-toast",
+					children: toast
+				}) : null
+			] });
 		}
 		function apply(ctx) {
 			const service = {
