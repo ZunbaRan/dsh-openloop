@@ -17,6 +17,10 @@
   - 倾向：A+B 双轨（兼容性最好）；SSE 作后续优化
 - [ ] **entry 渲染闭环（半条命）**：门面 `register_component` 的 `entry` 严格接 PanelDefinition schema（fail-closed 校验）+ dock AppDetail 对合法 entry 直接 `PanelSurface` 渲染 + pin 解禁。估时半天。前置：门面 entry 现在是自由 JSON，dock 只显示「待生成」
 
+## ✅ 已完成（2026-08-25 下午批）
+
+- [x] **本地后端预设族（7 个预设 + 5 个端点）**：panels 0.4.0（pb-stats / db-browser / storage-usage / api-credentials / sessions-stats / mcp-status / plugin-registry，批 5）+ dsh-app 0.2.0（pb-stats / collections / collections/:name/records 分页筛选 / storage-usage / credentials / sessions-stats 端点）+ dock 0.6.1（PRESET_INFO 7 条目）+ codegen 四件套同步。弱推的日志尾巴/定时任务跳过（无稳定日志位置 / DSH 无定时任务系统，没数据源）
+
 ## 平台里程碑（APP_PLATFORM_DESIGN §9 对应）
 
 - [ ] **内置 APP 注册进后端**：openloop:* 组件（26 预设）与 API 写进 PocketBase registry——北极星载体（「自证 + 目录」双意义）

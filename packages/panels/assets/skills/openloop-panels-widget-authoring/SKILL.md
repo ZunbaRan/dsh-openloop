@@ -1,6 +1,6 @@
 ---
 name: openloop-panels-widget-authoring
-description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选择阶梯、26 个预设组件 kind+props 速查、custom code 契约、数据绑定写法与面板构图硬规则。调用 panel 工具前先读。
+description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选择阶梯、33 个预设组件 kind+props 速查、custom code 契约、数据绑定写法与面板构图硬规则。调用 panel 工具前先读。
 ---
 
 # OpenLoop Panels Agent widget 编写指引
@@ -62,7 +62,7 @@ p.save("panels/data-insights.json")
 
 write `panels/<id>.json`（单层编码无转义问题）→ `panel { "panelFile": "..." }`；修改 = read → 局部改 → write → 重渲染。优先级：panel > panelFile > load。
 
-## 2. 预设组件速查（26 个已实现；未列出的 kind 尚未实现，勿用）
+## 2. 预设组件速查（33 个已实现；未列出的 kind 尚未实现，勿用）
 
 > props 均须过组件 schema（bounds 见各表）；容器 children 为子 widget 数组（每项 `{ id, source: { type: "preset", kind, props } }`，仅一层、不含容器）。
 >
@@ -124,6 +124,21 @@ write `panels/<id>.json`（单层编码无转义问题）→ `panel { "panelFile
 |---|---|---|
 | `callout` | `tone` info/success/warning/error；`title`(≤80)；`description` 必填(≤240) | error 渲染 role="alert" |
 | `accordion` | `title`(≤80)；`defaultOpenIndex`；`items` 必填(1–20，`{label,content}`) | 单开手风琴 |
+
+### 本地后端（7）· 免注入——组件自己同源 fetch /openloop/app/*，无需 data 绑定
+
+| kind | props | 要点 |
+|---|---|---|
+| `pb-stats` | `title`(≤80)；`autoRefreshMs`(10000–3600000) | PocketBase 门面运行状态：uptime / 集合计数 / 数据占用；dsh-app 未装显示占位 |
+| `db-browser` | `collection`(初始表)；`perPage`(5–100 默认 20)；`title` | **交互态**：选库 + 关键词筛选 + 分页浏览门面管理表 |
+| `storage-usage` | `title`；`autoRefreshMs` | DSH_HOME 磁盘占用分解（sessions/attachments/cache/data） |
+| `api-credentials` | `title`；`autoRefreshMs` | 全部 API 资源凭据配置状态（configured 状态点，key 永不回显） |
+| `sessions-stats` | `title`；`autoRefreshMs` | 会话总数/占用/按日柱状/最大占用 Top5 |
+| `mcp-status` | `title`；`autoRefreshMs` | MCP 服务清单与连接状态（读 /openloop/mcp/servers） |
+| `plugin-registry` | `title` | 已加载插件分组清单（OpenLoop/DeepSeek/其他；来自页面 boot 载荷，零请求） |
+
+组合子：`pb_stats(title=..., auto_refresh_ms=...)` / `db_browser(collection=..., per_page=...)` / `storage_usage(...)` / `api_credentials(...)` / `sessions_stats(...)` / `mcp_status(...)` / `plugin_registry(title=...)`。
+适用场景：用户问「后端/数据库/存储/凭据/会话/MCP/插件」的运行状况，或要一个本地系统的自省看板。
 
 ### 图表（4）
 

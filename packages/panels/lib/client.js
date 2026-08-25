@@ -79,6 +79,18 @@ window.__ModuleLoader__.load({
 		function asRecord(value) {
 			return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
 		}
+		/** 本地后端预设族共享 props 校验：title（≤80）+ autoRefreshMs（10000–3600000 整数） */
+		function validateLocalPresetProps(kind, props) {
+			const root = asRecord(props);
+			if (!root) return validationFail([error("$", `${kind} props 必须是 JSON 对象`)]);
+			const errors = [];
+			if (root.title !== void 0 && (typeof root.title !== "string" || root.title.length > 80)) errors.push(error("title", "title 必须是 ≤80 字符的字符串"));
+			if (root.autoRefreshMs !== void 0) {
+				const v = root.autoRefreshMs;
+				if (typeof v !== "number" || !Number.isInteger(v) || v < 1e4 || v > 36e5) errors.push(error("autoRefreshMs", "autoRefreshMs 必须是 10000–3600000 的整数（毫秒）"));
+			}
+			return errors.length > 0 ? validationFail(errors) : validationOk();
+		}
 		function isFiniteNumber(value) {
 			return typeof value === "number" && Number.isFinite(value);
 		}
@@ -430,6 +442,314 @@ window.__ModuleLoader__.load({
 			schema: accordionSchema,
 			validate: validateAccordion,
 			Render: AccordionRender
+		};
+		//#endregion
+		//#region src/presets/api-credentials/schema.ts
+		/**
+		* api-credentials props JSON Schema：title ≤80 / autoRefreshMs（共享规则）。
+		*/
+		const apiCredentialsSchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				title: {
+					type: "string",
+					maxLength: 80,
+					description: "面板标题，≤80 字符，可省略（默认「API 凭据总览」）"
+				},
+				autoRefreshMs: {
+					type: "integer",
+					minimum: 1e4,
+					maximum: 36e5,
+					description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+				}
+			}
+		};
+		//#endregion
+		//#region src/presets/api-credentials/validate.ts
+		/**
+		* api-credentials 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+		*/
+		function validateApiCredentials(props) {
+			return validateLocalPresetProps("api-credentials", props);
+		}
+		//#endregion
+		//#region src/presets/local-backend.ts
+		/**
+		* 本地后端预设族共享基建：
+		* - useAppEndpoint：同源 fetch /openloop/app/*（或既有 MCP admin 路由），带
+		*   content-type 守卫（DSH webServer 对未知路径回落 SPA 200+HTML——非 JSON 应答
+		*   判 unavailable 而非报错）+ 可选自动刷新（≥10s）
+		* - formatBytes / formatDuration / relativeTime：展示格式化纯函数
+		* 颜色纪律：本文件不产出色值（token 由消费方 Render 内联）。
+		*/
+		const MIN_REFRESH_MS = 1e4;
+		function useAppEndpoint(path, autoRefreshMs) {
+			const [state, setState] = (0, react.useState)({
+				loading: path !== null,
+				unavailable: false
+			});
+			(0, react.useEffect)(() => {
+				if (path === null) {
+					setState({
+						loading: false,
+						unavailable: true
+					});
+					return;
+				}
+				let cancelled = false;
+				let timer;
+				const load = async () => {
+					try {
+						const controller = new AbortController();
+						const to = setTimeout(() => controller.abort(), 5e3);
+						try {
+							const res = await fetch(path, { signal: controller.signal });
+							if (!(res.headers.get("content-type") ?? "").includes("application/json")) {
+								if (!cancelled) setState({
+									loading: false,
+									unavailable: true
+								});
+								return;
+							}
+							const body = await res.json();
+							if (!cancelled) {
+								if (!res.ok) setState({
+									loading: false,
+									unavailable: false,
+									error: typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
+								});
+								else setState({
+									loading: false,
+									unavailable: false,
+									data: body
+								});
+							}
+						} finally {
+							clearTimeout(to);
+						}
+					} catch (error) {
+						if (!cancelled) setState({
+							loading: false,
+							unavailable: false,
+							error: error instanceof Error ? error.message : String(error)
+						});
+					}
+				};
+				load();
+				if (typeof autoRefreshMs === "number" && autoRefreshMs >= MIN_REFRESH_MS) timer = setInterval(() => {
+					load();
+				}, autoRefreshMs);
+				return () => {
+					cancelled = true;
+					if (timer !== void 0) clearInterval(timer);
+				};
+			}, [path, autoRefreshMs]);
+			return state;
+		}
+		function formatBytes(bytes) {
+			if (!Number.isFinite(bytes) || bytes < 0) return "—";
+			if (bytes < 1024) return `${Math.round(bytes)} B`;
+			const one = (n) => String(n >= 100 ? Math.round(n) : Math.round(n * 10) / 10);
+			const kb = bytes / 1024;
+			if (kb < 1024) return `${one(kb)} KB`;
+			const mb = kb / 1024;
+			if (mb < 1024) return `${one(mb)} MB`;
+			return `${(Math.round(mb / 1024 * 100) / 100).toString()} GB`;
+		}
+		function formatDuration(ms) {
+			if (!Number.isFinite(ms) || ms < 0) return "—";
+			const s = Math.floor(ms / 1e3);
+			if (s < 60) return `${s}s`;
+			const m = Math.floor(s / 60);
+			if (m < 60) return `${m}m ${s % 60}s`;
+			const h = Math.floor(m / 60);
+			if (h < 24) return `${h}h ${m % 60}m`;
+			return `${Math.floor(h / 24)}d ${h % 24}h`;
+		}
+		/** 相对时间（"3 分钟前"）；空/非法返回 '—' */
+		function relativeTime(iso) {
+			if (typeof iso !== "string" || iso.length === 0) return "—";
+			const t = Date.parse(iso);
+			if (!Number.isFinite(t)) return "—";
+			const diff = Date.now() - t;
+			if (diff < 0) return new Date(t).toLocaleString();
+			const m = Math.floor(diff / 6e4);
+			if (m < 1) return "刚刚";
+			if (m < 60) return `${m} 分钟前`;
+			const h = Math.floor(m / 60);
+			if (h < 24) return `${h} 小时前`;
+			return `${Math.floor(h / 24)} 天前`;
+		}
+		/** 长字符串截断（表格单元格用） */
+		function truncate(text, max = 60) {
+			return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+		}
+		//#endregion
+		//#region src/presets/api-credentials/Render.tsx
+		const headerStyle$10 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const scrollStyle$4 = { overflowX: "auto" };
+		const tableStyle$7 = {
+			width: "100%",
+			borderCollapse: "collapse",
+			fontSize: 12
+		};
+		const thStyle$2 = {
+			padding: "7px 12px",
+			color: "var(--openloop-muted-foreground)",
+			fontWeight: 600,
+			textAlign: "left",
+			whiteSpace: "nowrap",
+			borderBottom: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface-muted)"
+		};
+		const tdStyle$4 = {
+			padding: "7px 12px",
+			color: "var(--openloop-foreground)",
+			borderBottom: "1px solid var(--openloop-border)",
+			verticalAlign: "top",
+			wordBreak: "break-word"
+		};
+		const monoStyle$3 = {
+			fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+			fontSize: 11.5
+		};
+		const dotStyle$1 = {
+			display: "inline-block",
+			width: 8,
+			height: 8,
+			borderRadius: "50%",
+			marginRight: 6,
+			verticalAlign: "baseline"
+		};
+		const placeholderStyle$8 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		function ApiCredentialsRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const state = useAppEndpoint("/openloop/app/credentials", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "API 凭据总览";
+			const apis = (state.data?.apis ?? []).filter((a) => typeof a.rid === "string");
+			const configuredCount = apis.filter((a) => a.configured === true).length;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "api-credentials",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$10,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						children: apis.length > 0 ? `${configuredCount} / ${apis.length} 已配置` : ""
+					})]
+				}), state.unavailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$8,
+					children: [
+						"本地应用后端未启用",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "安装并激活 @openloop/dsh-app 插件后可查看凭据配置"
+						})
+					]
+				}) : state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$8,
+					children: ["凭据信息读取失败：", state.error]
+				}) : apis.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$8,
+					children: [
+						"暂无登记的 API 资源",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "让 Agent 经 app_backend 工具 register_api + set_api_key 登记"
+						})
+					]
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: scrollStyle$4,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
+						style: tableStyle$7,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle$2,
+								children: "资源 ID"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle$2,
+								children: "端点"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle$2,
+								children: "鉴权"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle$2,
+								children: "状态"
+							})
+						] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: apis.map((api) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: {
+									...tdStyle$4,
+									...monoStyle$3
+								},
+								children: truncate(String(api.rid), 48)
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", {
+								style: tdStyle$4,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: monoStyle$3,
+									children: truncate(String(api.domain ?? ""), 30)
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: meta,
+									children: String(api.path ?? "")
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: tdStyle$4,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: {
+										display: "inline-block",
+										padding: "1px 8px",
+										borderRadius: 999,
+										border: "1px solid var(--openloop-border)",
+										color: "var(--openloop-muted-foreground)",
+										fontSize: 11
+									},
+									children: api.authType === "key" ? "key + 域名" : "无鉴权"
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", {
+								style: tdStyle$4,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: dotStyle$1,
+									"data-openloop-tone": api.configured === true ? "success" : "warning"
+								}), api.configured === true ? "已配置" : "未配置"]
+							})
+						] }, String(api.rid))) })]
+					})
+				})]
+			});
+		}
+		//#endregion
+		//#region src/presets/api-credentials/index.ts
+		const apiCredentialsPreset = {
+			kind: "api-credentials",
+			schema: apiCredentialsSchema,
+			validate: validateApiCredentials,
+			Render: ApiCredentialsRender
 		};
 		//#endregion
 		//#region src/presets/avatar/schema.ts
@@ -995,7 +1315,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/presets/widget-view.tsx
-		const placeholderStyle$1 = {
+		const placeholderStyle$7 = {
 			padding: "10px 12px",
 			border: "1px dashed var(--openloop-border)",
 			borderRadius: "var(--openloop-radius-sm)",
@@ -1007,7 +1327,7 @@ window.__ModuleLoader__.load({
 		function WidgetPlaceholder({ kind, message }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				"data-openloop-widget": "invalid",
-				style: placeholderStyle$1,
+				style: placeholderStyle$7,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: { fontWeight: 600 },
 					children: ["子组件不可用", kind ? ` · ${kind}` : ""]
@@ -1861,7 +2181,7 @@ window.__ModuleLoader__.load({
 		* - 聚焦列用 selection/selection-foreground 对比对（8 预设明暗齐备；曾误用
 		*   primary-tint 填充——它是「更亮的 primary」非背景色，暗色下对比崩坏）
 		*/
-		const headerStyle$3 = {
+		const headerStyle$9 = {
 			padding: "10px 12px",
 			borderBottom: "1px solid var(--openloop-border)"
 		};
@@ -1948,7 +2268,7 @@ window.__ModuleLoader__.load({
 					padding: 0
 				},
 				children: [panelTitle !== void 0 || description !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: headerStyle$3,
+					style: headerStyle$9,
 					children: [panelTitle !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: title,
 						children: panelTitle
@@ -2180,8 +2500,8 @@ window.__ModuleLoader__.load({
 			overflow: "hidden",
 			minWidth: 0
 		};
-		const scrollStyle$1 = { overflowX: "auto" };
-		const tableStyle$1 = {
+		const scrollStyle$3 = { overflowX: "auto" };
+		const tableStyle$6 = {
 			width: "100%",
 			minWidth: 480,
 			borderCollapse: "collapse"
@@ -2201,7 +2521,7 @@ window.__ModuleLoader__.load({
 			...numeric,
 			textAlign: "right"
 		};
-		const cellStyle$1 = {
+		const cellStyle$2 = {
 			padding: "9px 12px",
 			fontSize: 12,
 			lineHeight: 1.5,
@@ -2211,7 +2531,7 @@ window.__ModuleLoader__.load({
 			verticalAlign: "top"
 		};
 		const cellNumericStyle = {
-			...cellStyle$1,
+			...cellStyle$2,
 			...numeric,
 			textAlign: "right",
 			whiteSpace: "nowrap"
@@ -2220,7 +2540,7 @@ window.__ModuleLoader__.load({
 			return typeof format === "string" && (format === "number" || format === "percent" || format === "currency-cny");
 		}
 		/** 单元格展示文本：数字列按 format 走 Intl；原始值按基础类型 text 化；对象 JSON 序列化 */
-		function cellText(value, format) {
+		function cellText$1(value, format) {
 			if (value === null || value === void 0) return "";
 			if (isFiniteNumber(value) && isNumericFormat(format)) return formatValue(value, format);
 			if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
@@ -2314,9 +2634,9 @@ window.__ModuleLoader__.load({
 					},
 					children: panelTitle
 				}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: scrollStyle$1,
+					style: scrollStyle$3,
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-						style: tableStyle$1,
+						style: tableStyle$6,
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: effectiveColumns.map((column) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
 							scope: "col",
 							"data-openloop-column": column.key,
@@ -2335,10 +2655,10 @@ window.__ModuleLoader__.load({
 								"data-openloop-row-tone": tone ?? "none",
 								children: effectiveColumns.map((column) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
 									style: {
-										...column.numeric ? cellNumericStyle : cellStyle$1,
+										...column.numeric ? cellNumericStyle : cellStyle$2,
 										...bodyPadding
 									},
-									children: cellText(row[column.key], column.format)
+									children: cellText$1(row[column.key], column.format)
 								}, column.key))
 							}, String(row.id ?? rowIndex));
 						}), rows.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tr", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
@@ -2361,6 +2681,310 @@ window.__ModuleLoader__.load({
 			schema: dataTableSchema,
 			validate: validateDataTable,
 			Render: DataTableRender
+		};
+		//#endregion
+		//#region src/presets/db-browser/schema.ts
+		/**
+		* db-browser props JSON Schema。
+		* collection 初始表（可省略 = 第一个表）；perPage 5–100 默认 20；title ≤80。
+		*/
+		const dbBrowserSchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				title: {
+					type: "string",
+					maxLength: 80,
+					description: "面板标题，≤80 字符，可省略（默认「数据库浏览」）"
+				},
+				collection: {
+					type: "string",
+					maxLength: 40,
+					description: "初始打开的集合名（apps / components / apis / boards / tiles / meta），可省略"
+				},
+				perPage: {
+					type: "integer",
+					minimum: 5,
+					maximum: 100,
+					description: "每页行数 5–100，默认 20"
+				}
+			}
+		};
+		//#endregion
+		//#region src/presets/db-browser/validate.ts
+		/**
+		* db-browser 校验（fail-closed）：共享 title 规则 + collection ≤40 + perPage 5–100。
+		*/
+		function validateDbBrowser(props) {
+			const base = validateLocalPresetProps("db-browser", props);
+			if (!base.ok) return base;
+			const root = asRecord(props);
+			if (root === null) return validationFail([error("$", "db-browser props 必须是 JSON 对象")]);
+			const errors = [];
+			if (root.collection !== void 0 && (typeof root.collection !== "string" || root.collection.length > 40)) errors.push(error("collection", "collection 必须是 ≤40 字符的字符串"));
+			if (root.perPage !== void 0) {
+				const v = root.perPage;
+				if (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 100) errors.push(error("perPage", "perPage 必须是 5–100 的整数"));
+			}
+			return errors.length > 0 ? validationFail(errors) : validationOk();
+		}
+		//#endregion
+		//#region src/presets/db-browser/Render.tsx
+		/**
+		* db-browser 渲染器：本地后端数据库浏览（筛选 + 选库 + 分页）。
+		* - 数据通道：GET /openloop/app/collections（下拉）/ GET /openloop/app/collections/:name/records
+		* - 交互态：集合下拉（含记录数）、关键词输入（Enter 提交）、上一页/下一页
+		* - 列 = 首行键序（≤8 列，id 恒显；超长单元格截断，对象/数组 JSON 摘要）
+		* 样式 100% var(--openloop-*)。
+		*/
+		const headerStyle$8 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const controlsStyle = {
+			display: "flex",
+			alignItems: "center",
+			gap: 8,
+			flexWrap: "wrap",
+			padding: "10px 14px"
+		};
+		const selectStyle = {
+			padding: "4px 8px",
+			fontSize: 12,
+			borderRadius: "var(--openloop-radius-md)",
+			border: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface)",
+			color: "var(--openloop-foreground)",
+			fontFamily: "inherit"
+		};
+		const inputStyle = {
+			...selectStyle,
+			flex: 1,
+			minWidth: 120
+		};
+		const buttonStyle = {
+			padding: "4px 10px",
+			fontSize: 12,
+			borderRadius: "var(--openloop-radius-md)",
+			border: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface-muted)",
+			color: "var(--openloop-foreground)",
+			cursor: "pointer",
+			fontFamily: "inherit"
+		};
+		const scrollStyle$2 = { overflowX: "auto" };
+		const tableStyle$5 = {
+			width: "100%",
+			borderCollapse: "collapse",
+			fontSize: 11.5
+		};
+		const thStyle$1 = {
+			padding: "7px 10px",
+			color: "var(--openloop-muted-foreground)",
+			fontWeight: 600,
+			textAlign: "left",
+			whiteSpace: "nowrap",
+			borderBottom: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface-muted)"
+		};
+		const tdStyle$3 = {
+			padding: "6px 10px",
+			color: "var(--openloop-foreground)",
+			borderBottom: "1px solid var(--openloop-border)",
+			verticalAlign: "top",
+			wordBreak: "break-word",
+			maxWidth: 260,
+			fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)"
+		};
+		const footerStyle = {
+			display: "flex",
+			alignItems: "center",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "8px 14px"
+		};
+		const placeholderStyle$6 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		function cellText(value) {
+			if (value === null || value === void 0) return "—";
+			if (typeof value === "string") return truncate(value, 80);
+			if (typeof value === "number" || typeof value === "boolean") return String(value);
+			return truncate(JSON.stringify(value), 80);
+		}
+		function DbBrowserRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const perPageProp = typeof record.perPage === "number" ? Math.min(100, Math.max(5, Math.round(record.perPage))) : 20;
+			const collectionProp = typeof record.collection === "string" && record.collection.length > 0 ? record.collection : null;
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "数据库浏览";
+			const collectionsState = useAppEndpoint("/openloop/app/collections");
+			const collections = (collectionsState.data?.collections ?? []).filter((c) => typeof c.name === "string" && typeof c.count === "number");
+			const [collection, setCollection] = (0, react.useState)(collectionProp);
+			const [queryInput, setQueryInput] = (0, react.useState)("");
+			const [query, setQuery] = (0, react.useState)("");
+			const [page, setPage] = (0, react.useState)(1);
+			(0, react.useEffect)(() => {
+				if (collection === null && collections.length > 0) setCollection(collections[0]?.name ?? null);
+			}, [collection, collections]);
+			(0, react.useEffect)(() => {
+				setPage(1);
+			}, [collection, query]);
+			const recordsState = useAppEndpoint(collection !== null ? `/openloop/app/collections/${encodeURIComponent(collection)}/records?page=${page}&perPage=${perPageProp}${query !== "" ? `&q=${encodeURIComponent(query)}` : ""}` : null);
+			const items = Array.isArray(recordsState.data?.items) ? recordsState.data.items : [];
+			const columnKeys = items.length > 0 ? Object.keys(items[0] ?? {}).filter((k) => k !== "id").slice(0, 7) : [];
+			const totalItems = typeof recordsState.data?.totalItems === "number" ? recordsState.data.totalItems : 0;
+			const totalPages = typeof recordsState.data?.totalPages === "number" ? recordsState.data.totalPages : 1;
+			const currentPage = typeof recordsState.data?.page === "number" ? recordsState.data.page : page;
+			const onSearchKeyDown = (e) => {
+				if (e.key === "Enter") setQuery(e.currentTarget.value.trim());
+			};
+			const unavailable = collectionsState.unavailable;
+			const error = collectionsState.error ?? recordsState.error;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "db-browser",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$8,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						children: totalItems > 0 ? `${totalItems.toLocaleString()} 条记录` : ""
+					})]
+				}), unavailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$6,
+					children: [
+						"本地应用后端未启用",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "安装并激活 @openloop/dsh-app 插件后可浏览数据库"
+						})
+					]
+				}) : error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$6,
+					children: ["数据读取失败：", error]
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: controlsStyle,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("select", {
+								style: selectStyle,
+								value: collection ?? "",
+								"aria-label": "选择集合",
+								onChange: (e) => setCollection(e.target.value),
+								children: collections.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
+									value: c.name,
+									children: [
+										c.name,
+										"（",
+										c.count,
+										"）"
+									]
+								}, c.name))
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								style: inputStyle,
+								placeholder: "关键词筛选（Enter 应用）",
+								"aria-label": "关键词筛选",
+								value: queryInput,
+								onChange: (e) => setQueryInput(e.target.value),
+								onKeyDown: onSearchKeyDown
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: buttonStyle,
+								onClick: () => setQuery(queryInput.trim()),
+								children: "查询"
+							}),
+							query !== "" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: buttonStyle,
+								title: "清除关键词",
+								onClick: () => {
+									setQueryInput("");
+									setQuery("");
+								},
+								children: "✕"
+							}) : null
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: scrollStyle$2,
+						children: items.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: placeholderStyle$6,
+							children: recordsState.loading ? "读取中…" : "无匹配记录"
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
+							style: tableStyle$5,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle$1,
+								children: "id"
+							}), columnKeys.map((key) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle$1,
+								children: key
+							}, key))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: items.map((row, index) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: {
+									...tdStyle$3,
+									color: "var(--openloop-muted-foreground)"
+								},
+								children: truncate(String(row.id ?? ""), 14)
+							}), columnKeys.map((key) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: tdStyle$3,
+								children: cellText(row[key])
+							}, key))] }, String(row.id ?? index))) })]
+						})
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: footerStyle,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: meta,
+							children: [
+								"第 ",
+								currentPage,
+								" / ",
+								Math.max(1, totalPages),
+								" 页"
+							]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								display: "flex",
+								gap: 6
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: buttonStyle,
+								disabled: currentPage <= 1,
+								onClick: () => setPage(currentPage - 1),
+								children: "上一页"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								style: buttonStyle,
+								disabled: currentPage >= totalPages,
+								onClick: () => setPage(currentPage + 1),
+								children: "下一页"
+							})]
+						})]
+					})
+				] })]
+			});
+		}
+		//#endregion
+		//#region src/presets/db-browser/index.ts
+		const dbBrowserPreset = {
+			kind: "db-browser",
+			schema: dbBrowserSchema,
+			validate: validateDbBrowser,
+			Render: DbBrowserRender
 		};
 		//#endregion
 		//#region src/presets/divider/schema.ts
@@ -2406,7 +3030,7 @@ window.__ModuleLoader__.load({
 			height: 1,
 			background: "var(--openloop-border)"
 		};
-		const labelStyle$3 = {
+		const labelStyle$4 = {
 			fontSize: "var(--openloop-type-micro, 11px)",
 			fontWeight: 600,
 			color: "var(--openloop-muted-foreground)",
@@ -2424,7 +3048,7 @@ window.__ModuleLoader__.load({
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: rule }),
 					label !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						style: labelStyle$3,
+						style: labelStyle$4,
 						children: label
 					}) : null,
 					label !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: rule }) : null
@@ -2605,7 +3229,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/presets/flow/Render.tsx
-		const headerStyle$2 = {
+		const headerStyle$7 = {
 			padding: "10px 12px",
 			borderBottom: "1px solid var(--openloop-border)"
 		};
@@ -2694,7 +3318,7 @@ window.__ModuleLoader__.load({
 					padding: 0
 				},
 				children: [panelTitle !== void 0 || description !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: headerStyle$2,
+					style: headerStyle$7,
 					children: [panelTitle !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: title,
 						children: panelTitle
@@ -2851,13 +3475,13 @@ window.__ModuleLoader__.load({
 			...title,
 			marginBottom: 10
 		};
-		const rowStyle = {
+		const rowStyle$1 = {
 			display: "flex",
 			alignItems: "center",
 			gap: 8,
 			minWidth: 0
 		};
-		const labelStyle$2 = {
+		const labelStyle$3 = {
 			...meta,
 			flexShrink: 0,
 			width: 120,
@@ -2927,10 +3551,10 @@ window.__ModuleLoader__.load({
 						const width = Math.max(10, ratio * 100);
 						const fill = `var(--openloop-chart-seq-${seqStep$1(ratio)})`;
 						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: rowStyle,
+							style: rowStyle$1,
 							children: [
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									style: labelStyle$2,
+									style: labelStyle$3,
 									children: stage.label
 								}),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -3053,7 +3677,7 @@ window.__ModuleLoader__.load({
 			...title,
 			marginBottom: 10
 		};
-		const labelStyle$1 = {
+		const labelStyle$2 = {
 			...title,
 			fontSize: 13,
 			marginTop: 10,
@@ -3159,7 +3783,7 @@ window.__ModuleLoader__.load({
 						},
 						children: [
 							label !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: labelStyle$1,
+								style: labelStyle$2,
 								children: label
 							}) : null,
 							detail !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -3460,8 +4084,8 @@ window.__ModuleLoader__.load({
 			...title,
 			marginBottom: 10
 		};
-		const scrollStyle = { overflowX: "auto" };
-		const tableStyle = {
+		const scrollStyle$1 = { overflowX: "auto" };
+		const tableStyle$4 = {
 			width: "100%",
 			minWidth: 320,
 			borderCollapse: "separate",
@@ -3483,7 +4107,7 @@ window.__ModuleLoader__.load({
 			textOverflow: "ellipsis",
 			maxWidth: 88
 		};
-		const cellStyle = {
+		const cellStyle$1 = {
 			minWidth: 40,
 			height: 30,
 			padding: "4px 6px",
@@ -3533,9 +4157,9 @@ window.__ModuleLoader__.load({
 					style: titleStyle$1,
 					children: panelTitle
 				}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: scrollStyle,
+					style: scrollStyle$1,
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-						style: tableStyle,
+						style: tableStyle$4,
 						children: [colLabels.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
 							style: cornerStyle,
 							"aria-hidden": "true"
@@ -3555,7 +4179,7 @@ window.__ModuleLoader__.load({
 							const colLabel = colLabels.length > 0 ? colLabels[colIndex] ?? "" : `C${colIndex + 1}`;
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
 								style: {
-									...cellStyle,
+									...cellStyle$1,
 									background,
 									color
 								},
@@ -3739,6 +4363,197 @@ window.__ModuleLoader__.load({
 			Render: MarkdownRender
 		};
 		//#endregion
+		//#region src/presets/mcp-status/schema.ts
+		/**
+		* mcp-status props JSON Schema：title ≤80 / autoRefreshMs（共享规则）。
+		*/
+		const mcpStatusSchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				title: {
+					type: "string",
+					maxLength: 80,
+					description: "面板标题，≤80 字符，可省略（默认「MCP 服务状态」）"
+				},
+				autoRefreshMs: {
+					type: "integer",
+					minimum: 1e4,
+					maximum: 36e5,
+					description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+				}
+			}
+		};
+		//#endregion
+		//#region src/presets/mcp-status/validate.ts
+		/**
+		* mcp-status 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+		*/
+		function validateMcpStatus(props) {
+			return validateLocalPresetProps("mcp-status", props);
+		}
+		//#endregion
+		//#region src/presets/mcp-status/Render.tsx
+		const headerStyle$6 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const scrollStyle = { overflowX: "auto" };
+		const tableStyle$3 = {
+			width: "100%",
+			borderCollapse: "collapse",
+			fontSize: 12
+		};
+		const thStyle = {
+			padding: "7px 12px",
+			color: "var(--openloop-muted-foreground)",
+			fontWeight: 600,
+			textAlign: "left",
+			whiteSpace: "nowrap",
+			borderBottom: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface-muted)"
+		};
+		const tdStyle$2 = {
+			padding: "7px 12px",
+			color: "var(--openloop-foreground)",
+			borderBottom: "1px solid var(--openloop-border)",
+			verticalAlign: "top",
+			wordBreak: "break-all"
+		};
+		const monoStyle$2 = {
+			fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+			fontSize: 11.5
+		};
+		const placeholderStyle$5 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		const STATE_TONE = {
+			running: "var(--openloop-success)",
+			connecting: "var(--openloop-warning)",
+			error: "var(--openloop-error)"
+		};
+		function McpStatusRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const state = useAppEndpoint("/openloop/mcp/servers", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "MCP 服务状态";
+			const servers = (state.data?.servers ?? []).filter((s) => typeof s.id === "string");
+			const runningCount = servers.filter((s) => s.state === "running").length;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "mcp-status",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$6,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						children: servers.length > 0 ? `${runningCount} / ${servers.length} 运行中` : ""
+					})]
+				}), state.unavailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$5,
+					children: [
+						"MCP 插件未启用",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "安装并激活 @openloop/dsh-mcp 后可查看服务清单"
+						})
+					]
+				}) : state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$5,
+					children: ["服务清单读取失败：", state.error]
+				}) : servers.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$5,
+					children: [
+						"mcp.json 中没有配置服务",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "在 DSH_HOME/mcp.json 或项目 .dsh/mcp.json 登记 MCP server"
+						})
+					]
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: scrollStyle,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
+						style: tableStyle$3,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle,
+								children: "服务"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle,
+								children: "来源"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle,
+								children: "端点"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: thStyle,
+								children: "状态"
+							})
+						] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: servers.map((s) => {
+							const stateStr = typeof s.state === "string" ? s.state : "unknown";
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+									style: {
+										...tdStyle$2,
+										...monoStyle$2
+									},
+									children: truncate(String(s.id), 36)
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+									style: tdStyle$2,
+									children: String(s.source ?? "")
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", {
+									style: {
+										...tdStyle$2,
+										...monoStyle$2
+									},
+									title: String(s.endpoint ?? ""),
+									children: [truncate(String(s.endpoint ?? ""), 40), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										style: meta,
+										children: [" · ", String(s.kind ?? "")]
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("td", {
+									style: tdStyle$2,
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: {
+										display: "inline-block",
+										width: 8,
+										height: 8,
+										borderRadius: "50%",
+										marginRight: 6,
+										background: STATE_TONE[stateStr] ?? "var(--openloop-muted-foreground)"
+									} }), stateStr]
+								})
+							] }, String(s.id));
+						}) })]
+					})
+				})]
+			});
+		}
+		//#endregion
+		//#region src/presets/mcp-status/index.ts
+		const mcpStatusPreset = {
+			kind: "mcp-status",
+			schema: mcpStatusSchema,
+			validate: validateMcpStatus,
+			Render: McpStatusRender
+		};
+		//#endregion
 		//#region src/presets/metric-grid/schema.ts
 		/**
 		* metric-grid props JSON Schema（§6.4 示例实现）。
@@ -3903,7 +4718,7 @@ window.__ModuleLoader__.load({
 			gap: 8,
 			gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))"
 		};
-		const labelStyle = {
+		const labelStyle$1 = {
 			...meta,
 			overflow: "hidden",
 			textOverflow: "ellipsis",
@@ -3971,7 +4786,7 @@ window.__ModuleLoader__.load({
 							"data-openloop-emphasis": isHero ? "hero" : "standard",
 							children: [
 								item.label !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: labelStyle,
+									style: labelStyle$1,
 									children: item.label
 								}) : null,
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -4005,6 +4820,355 @@ window.__ModuleLoader__.load({
 			schema: metricGridSchema,
 			validate: validateMetricGrid,
 			Render: MetricGridRender
+		};
+		//#endregion
+		//#region src/presets/pb-stats/schema.ts
+		/**
+		* pb-stats props JSON Schema。
+		* title 可选（≤80）；autoRefreshMs 可选（≥10s，上限 1h，缺省不自动刷新）。
+		*/
+		const pbStatsSchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				title: {
+					type: "string",
+					maxLength: 80,
+					description: "面板标题，≤80 字符，可省略（默认「后端运行状态」）"
+				},
+				autoRefreshMs: {
+					type: "integer",
+					minimum: 1e4,
+					maximum: 36e5,
+					description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+				}
+			}
+		};
+		//#endregion
+		//#region src/presets/pb-stats/validate.ts
+		/**
+		* pb-stats 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs 10000–3600000）。
+		*/
+		function validatePbStats(props) {
+			return validateLocalPresetProps("pb-stats", props);
+		}
+		//#endregion
+		//#region src/presets/pb-stats/Render.tsx
+		const headerStyle$5 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const metricsStyle$1 = {
+			display: "grid",
+			gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+			gap: 8,
+			padding: "12px 14px"
+		};
+		const metricStyle$1 = {
+			padding: "8px 10px",
+			borderRadius: "var(--openloop-radius-md)",
+			border: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface-muted)"
+		};
+		const metricValueStyle$1 = {
+			fontSize: 15,
+			fontWeight: 650,
+			lineHeight: 1.3,
+			color: "var(--openloop-foreground)",
+			fontVariantNumeric: "tabular-nums"
+		};
+		const tableStyle$2 = {
+			width: "100%",
+			borderCollapse: "collapse",
+			fontSize: 12
+		};
+		const cellStyle = {
+			padding: "7px 14px",
+			color: "var(--openloop-foreground)",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const placeholderStyle$4 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		function PbStatsRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const state = useAppEndpoint("/openloop/app/pb-stats", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "后端运行状态";
+			const collections = Array.isArray(state.data?.collections) ? state.data.collections.filter((c) => typeof c?.name === "string" && typeof c?.count === "number") : [];
+			const totalRecords = collections.reduce((n, c) => n + c.count, 0);
+			const version = typeof state.data?.version === "string" ? state.data.version : "";
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "pb-stats",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$5,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						children: version !== "" ? `PocketBase ${version}` : ""
+					})]
+				}), state.unavailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$4,
+					children: [
+						"本地应用后端未启用",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "安装并激活 @openloop/dsh-app 插件后可查看运行状态"
+						})
+					]
+				}) : state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$4,
+					children: ["后端状态读取失败：", state.error]
+				}) : state.loading || state.data === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: placeholderStyle$4,
+					children: "读取中…"
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: metricsStyle$1,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: metricStyle$1,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: meta,
+								children: "运行时长"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: metricValueStyle$1,
+								children: formatDuration(typeof state.data.uptimeMs === "number" ? state.data.uptimeMs : 0)
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: metricStyle$1,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: meta,
+								children: "管理表"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: metricValueStyle$1,
+								children: collections.length
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: metricStyle$1,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: meta,
+								children: "总记录数"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: metricValueStyle$1,
+								children: totalRecords.toLocaleString()
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: metricStyle$1,
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: meta,
+								children: "数据占用"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: metricValueStyle$1,
+								children: formatBytes(typeof state.data.dataDirBytes === "number" ? state.data.dataDirBytes : 0)
+							})]
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
+					style: tableStyle$2,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+						style: {
+							...cellStyle,
+							color: "var(--openloop-muted-foreground)",
+							fontWeight: 600,
+							textAlign: "left"
+						},
+						children: "集合"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+						style: {
+							...cellStyle,
+							color: "var(--openloop-muted-foreground)",
+							fontWeight: 600,
+							textAlign: "right"
+						},
+						children: "记录数"
+					})] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: collections.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+						style: {
+							...cellStyle,
+							fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+							fontSize: 11.5
+						},
+						children: c.name
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+						style: {
+							...cellStyle,
+							textAlign: "right",
+							fontVariantNumeric: "tabular-nums"
+						},
+						children: c.count.toLocaleString()
+					})] }, c.name)) })]
+				})] })]
+			});
+		}
+		//#endregion
+		//#region src/presets/pb-stats/index.ts
+		const pbStatsPreset = {
+			kind: "pb-stats",
+			schema: pbStatsSchema,
+			validate: validatePbStats,
+			Render: PbStatsRender
+		};
+		//#endregion
+		//#region src/presets/plugin-registry/schema.ts
+		/**
+		* plugin-registry props JSON Schema：title ≤80（无 autoRefresh——数据来自页面 boot 载荷，静态）。
+		*/
+		const pluginRegistrySchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: { title: {
+				type: "string",
+				maxLength: 80,
+				description: "面板标题，≤80 字符，可省略（默认「插件清单」）"
+			} }
+		};
+		//#endregion
+		//#region src/presets/plugin-registry/validate.ts
+		/**
+		* plugin-registry 校验（fail-closed）：title ≤80。
+		*/
+		function validatePluginRegistry(props) {
+			return validateLocalPresetProps("plugin-registry", props);
+		}
+		//#endregion
+		//#region src/presets/plugin-registry/Render.tsx
+		const headerStyle$4 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const groupLabelStyle = {
+			padding: "8px 14px 2px",
+			fontSize: 11,
+			fontWeight: 600,
+			letterSpacing: "0.04em",
+			color: "var(--openloop-muted-foreground)"
+		};
+		const tableStyle$1 = {
+			width: "100%",
+			borderCollapse: "collapse",
+			fontSize: 11.5
+		};
+		const tdStyle$1 = {
+			padding: "5px 14px",
+			color: "var(--openloop-foreground)",
+			verticalAlign: "top",
+			wordBreak: "break-all"
+		};
+		const monoStyle$1 = { fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)" };
+		const placeholderStyle$3 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		function readBootEntries() {
+			const boot = globalThis.__DSH_BOOT__;
+			if (typeof boot !== "object" || boot === null || !Array.isArray(boot.entries)) return [];
+			return boot.entries;
+		}
+		function groupOf(id) {
+			if (id.startsWith("@openloop/")) return "openloop";
+			if (id.startsWith("@deepseek-ai/")) return "deepseek";
+			return "other";
+		}
+		const GROUP_LABELS = {
+			openloop: "OpenLoop 插件",
+			deepseek: "DeepSeek 官方",
+			other: "其他"
+		};
+		function PluginRegistryRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "插件清单";
+			const entries = readBootEntries().filter((e) => typeof e.id === "string").map((e) => ({
+				id: String(e.id),
+				inject: Array.isArray(e.inject) ? e.inject.length : 0
+			})).sort((a, b) => a.id.localeCompare(b.id));
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "plugin-registry",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$4,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						children: entries.length > 0 ? `${entries.length} 个已加载` : ""
+					})]
+				}), entries.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$3,
+					children: [
+						"页面启动载荷不可读",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "__DSH_BOOT__.entries 在当前环境不可用"
+						})
+					]
+				}) : [
+					"openloop",
+					"deepseek",
+					"other"
+				].map((group) => {
+					const rows = entries.filter((e) => groupOf(e.id) === group);
+					if (rows.length === 0) return null;
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: groupLabelStyle,
+						children: [
+							GROUP_LABELS[group],
+							"（",
+							rows.length,
+							"）"
+						]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("table", {
+						style: tableStyle$1,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: rows.map((e) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+							style: {
+								...tdStyle$1,
+								...monoStyle$1
+							},
+							children: truncate(e.id, 52)
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+							style: {
+								...tdStyle$1,
+								width: 56,
+								textAlign: "right",
+								color: "var(--openloop-muted-foreground)",
+								fontVariantNumeric: "tabular-nums"
+							},
+							children: e.inject > 0 ? `${e.inject} 注入` : "—"
+						})] }, e.id)) })
+					})] }, group);
+				})]
+			});
+		}
+		//#endregion
+		//#region src/presets/plugin-registry/index.ts
+		const pluginRegistryPreset = {
+			kind: "plugin-registry",
+			schema: pluginRegistrySchema,
+			validate: validatePluginRegistry,
+			Render: PluginRegistryRender
 		};
 		//#endregion
 		//#region src/presets/progress/schema.ts
@@ -4319,6 +5483,235 @@ window.__ModuleLoader__.load({
 			schema: sectionSchema,
 			validate: validateSection,
 			Render: SectionRender
+		};
+		//#endregion
+		//#region src/presets/sessions-stats/schema.ts
+		/**
+		* sessions-stats props JSON Schema：title ≤80 / autoRefreshMs（共享规则）。
+		*/
+		const sessionsStatsSchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				title: {
+					type: "string",
+					maxLength: 80,
+					description: "面板标题，≤80 字符，可省略（默认「会话统计」）"
+				},
+				autoRefreshMs: {
+					type: "integer",
+					minimum: 1e4,
+					maximum: 36e5,
+					description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+				}
+			}
+		};
+		//#endregion
+		//#region src/presets/sessions-stats/validate.ts
+		/**
+		* sessions-stats 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+		*/
+		function validateSessionsStats(props) {
+			return validateLocalPresetProps("sessions-stats", props);
+		}
+		//#endregion
+		//#region src/presets/sessions-stats/Render.tsx
+		const headerStyle$3 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)"
+		};
+		const metricsStyle = {
+			display: "grid",
+			gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+			gap: 8,
+			padding: "12px 14px 8px"
+		};
+		const metricStyle = {
+			padding: "8px 10px",
+			borderRadius: "var(--openloop-radius-md)",
+			border: "1px solid var(--openloop-border)",
+			background: "var(--openloop-surface-muted)"
+		};
+		const metricValueStyle = {
+			fontSize: 15,
+			fontWeight: 650,
+			lineHeight: 1.3,
+			color: "var(--openloop-foreground)",
+			fontVariantNumeric: "tabular-nums"
+		};
+		const chartStyle = {
+			display: "flex",
+			alignItems: "flex-end",
+			gap: 4,
+			height: 48,
+			padding: "6px 14px 10px"
+		};
+		const barStyle = {
+			flex: 1,
+			minWidth: 6,
+			borderRadius: "3px 3px 0 0",
+			background: "var(--openloop-chart-2)",
+			minHeight: 2
+		};
+		const tableStyle = {
+			width: "100%",
+			borderCollapse: "collapse",
+			fontSize: 11.5
+		};
+		const tdStyle = {
+			padding: "6px 14px",
+			color: "var(--openloop-foreground)",
+			borderBottom: "1px solid var(--openloop-border)",
+			verticalAlign: "top",
+			wordBreak: "break-all"
+		};
+		const monoStyle = { fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)" };
+		const placeholderStyle$2 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		function SessionsStatsRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const state = useAppEndpoint("/openloop/app/sessions-stats", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "会话统计";
+			const byDay = (state.data?.byDay ?? []).filter((d) => typeof d.count === "number");
+			const maxCount = byDay.reduce((m, d) => Math.max(m, Number(d.count ?? 0)), 0);
+			const largest = (state.data?.largest ?? []).filter((l) => typeof l.bytes === "number");
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "sessions-stats",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$3,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						children: byDay.length > 0 ? `近 ${byDay.length} 天` : ""
+					})]
+				}), state.unavailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$2,
+					children: [
+						"本地应用后端未启用",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "安装并激活 @openloop/dsh-app 插件后可查看会话统计"
+						})
+					]
+				}) : state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$2,
+					children: ["会话统计读取失败：", state.error]
+				}) : state.loading || state.data === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: placeholderStyle$2,
+					children: "统计中…"
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: metricsStyle,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								style: metricStyle,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: meta,
+									children: "会话总数"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: metricValueStyle,
+									children: (typeof state.data.totalSessions === "number" ? state.data.totalSessions : 0).toLocaleString()
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								style: metricStyle,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: meta,
+									children: "总占用"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: metricValueStyle,
+									children: formatBytes(typeof state.data.totalBytes === "number" ? state.data.totalBytes : 0)
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								style: metricStyle,
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: meta,
+									children: "最近活跃"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										...metricValueStyle,
+										fontSize: 13
+									},
+									children: relativeTime(typeof state.data.lastActiveAt === "string" ? state.data.lastActiveAt : null)
+								})]
+							})
+						]
+					}),
+					byDay.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: chartStyle,
+						role: "img",
+						"aria-label": "近 14 天每日会话数",
+						children: byDay.map((d) => {
+							const count = Number(d.count ?? 0);
+							const h = maxCount > 0 ? Math.max(4, count / maxCount * 100) : 0;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									...barStyle,
+									height: `${h}%`
+								},
+								title: `${String(d.date)}：${count} 会话 · ${formatBytes(Number(d.bytes ?? 0))}`
+							}, String(d.date));
+						})
+					}) : null,
+					largest.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
+						style: tableStyle,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+							style: {
+								...tdStyle,
+								color: "var(--openloop-muted-foreground)",
+								fontWeight: 600,
+								background: "var(--openloop-surface-muted)"
+							},
+							children: "最大占用"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+							style: {
+								...tdStyle,
+								color: "var(--openloop-muted-foreground)",
+								fontWeight: 600,
+								textAlign: "right",
+								background: "var(--openloop-surface-muted)"
+							},
+							children: "大小"
+						})] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: largest.map((l) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+							style: {
+								...tdStyle,
+								...monoStyle
+							},
+							children: truncate(String(l.name ?? ""), 56)
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+							style: {
+								...tdStyle,
+								textAlign: "right",
+								fontVariantNumeric: "tabular-nums"
+							},
+							children: formatBytes(Number(l.bytes ?? 0))
+						})] }, String(l.name))) })]
+					}) : null
+				] })]
+			});
+		}
+		//#endregion
+		//#region src/presets/sessions-stats/index.ts
+		const sessionsStatsPreset = {
+			kind: "sessions-stats",
+			schema: sessionsStatsSchema,
+			validate: validateSessionsStats,
+			Render: SessionsStatsRender
 		};
 		//#endregion
 		//#region src/presets/sparkline/schema.ts
@@ -4661,6 +6054,164 @@ window.__ModuleLoader__.load({
 			schema: stackSchema,
 			validate: validateStack,
 			Render: StackRender
+		};
+		//#endregion
+		//#region src/presets/storage-usage/schema.ts
+		/**
+		* storage-usage props JSON Schema：title ≤80 / autoRefreshMs ≥10s（共享规则）。
+		*/
+		const storageUsageSchema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			type: "object",
+			additionalProperties: false,
+			properties: {
+				title: {
+					type: "string",
+					maxLength: 80,
+					description: "面板标题，≤80 字符，可省略（默认「DSH 存储占用」）"
+				},
+				autoRefreshMs: {
+					type: "integer",
+					minimum: 1e4,
+					maximum: 36e5,
+					description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+				}
+			}
+		};
+		//#endregion
+		//#region src/presets/storage-usage/validate.ts
+		/**
+		* storage-usage 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+		*/
+		function validateStorageUsage(props) {
+			return validateLocalPresetProps("storage-usage", props);
+		}
+		//#endregion
+		//#region src/presets/storage-usage/Render.tsx
+		const headerStyle$2 = {
+			display: "flex",
+			alignItems: "baseline",
+			justifyContent: "space-between",
+			gap: 8,
+			padding: "10px 14px",
+			borderBottom: "1px solid var(--openloop-border)",
+			flexWrap: "wrap"
+		};
+		const rowsStyle = {
+			display: "flex",
+			flexDirection: "column",
+			gap: 8,
+			padding: "12px 14px"
+		};
+		const rowStyle = {
+			display: "grid",
+			gridTemplateColumns: "minmax(70px, auto) 1fr minmax(64px, auto)",
+			alignItems: "center",
+			gap: 10,
+			fontSize: 12
+		};
+		const barTrackStyle = {
+			height: 6,
+			borderRadius: 3,
+			background: "var(--openloop-surface-muted)",
+			overflow: "hidden"
+		};
+		const labelStyle = {
+			color: "var(--openloop-foreground)",
+			fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+			fontSize: 11.5,
+			whiteSpace: "nowrap"
+		};
+		const bytesStyle = {
+			color: "var(--openloop-muted-foreground)",
+			textAlign: "right",
+			fontVariantNumeric: "tabular-nums"
+		};
+		const placeholderStyle$1 = {
+			padding: "22px 14px",
+			textAlign: "center",
+			color: "var(--openloop-muted-foreground)",
+			fontSize: 12,
+			lineHeight: 1.7
+		};
+		const ENTRIES_MAX = 12;
+		function StorageUsageRender({ props }) {
+			const record = asRecord(props) ?? {};
+			const state = useAppEndpoint("/openloop/app/storage-usage", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "DSH 存储占用";
+			const entries = (state.data?.entries ?? []).filter((e) => typeof e.bytes === "number").slice(0, ENTRIES_MAX);
+			const maxBytes = entries.reduce((m, e) => Math.max(m, Number(e.bytes ?? 0)), 0);
+			const totalBytes = typeof state.data?.totalBytes === "number" ? state.data.totalBytes : 0;
+			const home = typeof state.data?.home === "string" ? state.data.home : "";
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: panel,
+				"data-openloop-preset": "storage-usage",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: headerStyle$2,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: title,
+						children: headerTitle
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: meta,
+						title: home,
+						children: totalBytes > 0 ? `${formatBytes(totalBytes)} · ${truncate(home, 48)}` : ""
+					})]
+				}), state.unavailable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$1,
+					children: [
+						"本地应用后端未启用",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: meta,
+							children: "安装并激活 @openloop/dsh-app 插件后可查看存储占用"
+						})
+					]
+				}) : state.error !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle$1,
+					children: ["存储统计读取失败：", state.error]
+				}) : state.loading || state.data === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: placeholderStyle$1,
+					children: "统计中…"
+				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: rowsStyle,
+					children: entries.map((e) => {
+						const bytes = Number(e.bytes ?? 0);
+						const pct = maxBytes > 0 ? Math.max(1.5, bytes / maxBytes * 100) : 0;
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: rowStyle,
+							title: String(e.path ?? ""),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: labelStyle,
+									children: truncate(String(e.label ?? ""), 18)
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: barTrackStyle,
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { style: {
+										display: "block",
+										width: `${pct}%`,
+										height: "100%",
+										background: "var(--openloop-chart-1)",
+										borderRadius: 3
+									} })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: bytesStyle,
+									children: formatBytes(bytes)
+								})
+							]
+						}, `${String(e.label)}`);
+					})
+				})]
+			});
+		}
+		//#endregion
+		//#region src/presets/storage-usage/index.ts
+		const storageUsagePreset = {
+			kind: "storage-usage",
+			schema: storageUsageSchema,
+			validate: validateStorageUsage,
+			Render: StorageUsageRender
 		};
 		//#endregion
 		//#region src/presets/tag/schema.ts
@@ -5151,7 +6702,14 @@ window.__ModuleLoader__.load({
 				validate: validateTimeline,
 				Render: TimelineRender
 			},
-			comparison: comparisonPreset
+			comparison: comparisonPreset,
+			"pb-stats": pbStatsPreset,
+			"db-browser": dbBrowserPreset,
+			"storage-usage": storageUsagePreset,
+			"api-credentials": apiCredentialsPreset,
+			"sessions-stats": sessionsStatsPreset,
+			"mcp-status": mcpStatusPreset,
+			"plugin-registry": pluginRegistryPreset
 		};
 		/** 取预设模块；未实现/未知 kind 返回 undefined */
 		function getPreset(kind) {

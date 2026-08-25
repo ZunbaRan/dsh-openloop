@@ -68,3 +68,13 @@ TITLE_MAX = 80
 
 class PanelBuildError(Exception):
     """构造期 fail-fast（面向 Agent 可自修正）：消息含合法值/边界。"""
+
+# ---- 本地后端预设族（批 5）----
+LOCAL_BACKEND_KINDS = (
+    'pb-stats', 'db-browser', 'storage-usage', 'api-credentials',
+    'sessions-stats', 'mcp-status', 'plugin-registry',
+)
+LOCAL_AUTO_REFRESH_MIN, LOCAL_AUTO_REFRESH_MAX = 10_000, 3_600_000
+LOCAL_TITLE_MAX = 80
+DB_COLLECTIONS = ('apps', 'components', 'apis', 'boards', 'tiles', 'meta')
+DB_PER_PAGE_MIN, DB_PER_PAGE_MAX, DB_PER_PAGE_DEFAULT = 5, 100, 20

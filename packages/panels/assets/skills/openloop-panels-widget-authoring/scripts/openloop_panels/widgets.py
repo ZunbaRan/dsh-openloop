@@ -310,3 +310,64 @@ def stack(children: dict | Sequence[dict], *, direction: str = 'vertical', gap: 
     if direction not in ('vertical', 'horizontal'):
         raise C.PanelBuildError(f'stack direction 必须是 vertical / horizontal，收到 {direction!r}')
     return _widget('stack', {'children': kids, 'direction': direction, 'gap': gap}, id)
+
+# ---------------------------------------------------------------------------
+# 本地后端预设族（批 5）：数据经 /openloop/app/* 同源 fetch，免注入——
+# props 只承载标题/刷新间隔/初始视图，children 不适用（叶子组件）。
+# ---------------------------------------------------------------------------
+
+def _local_props(kind: str, *, title: str | None, auto_refresh_ms: int | None) -> dict[str, Any]:
+    props: dict[str, Any] = {}
+    if title is not None:
+        _check_len(title, C.LOCAL_TITLE_MAX, f'{kind} title')
+        props['title'] = title
+    if auto_refresh_ms is not None:
+        if not (C.LOCAL_AUTO_REFRESH_MIN <= auto_refresh_ms <= C.LOCAL_AUTO_REFRESH_MAX):
+            raise C.PanelBuildError(
+                f'{kind} auto_refresh_ms 必须 {C.LOCAL_AUTO_REFRESH_MIN}–{C.LOCAL_AUTO_REFRESH_MAX}，收到 {auto_refresh_ms}')
+        props['autoRefreshMs'] = auto_refresh_ms
+    return props
+
+
+def pb_stats(*, title: str | None = None, auto_refresh_ms: int | None = None, id: str | None = None) -> dict:
+    """本地后端（PocketBase 门面）运行状态：uptime / 集合计数 / 数据占用。"""
+    return _widget('pb-stats', _local_props('pb-stats', title=title, auto_refresh_ms=auto_refresh_ms), id)
+
+
+def db_browser(*, collection: str | None = None, per_page: int = C.DB_PER_PAGE_DEFAULT,
+               title: str | None = None, id: str | None = None) -> dict:
+    """数据库浏览：选库 + 关键词筛选 + 分页（交互在组件内，props 给初始视图）。"""
+    props = _local_props('db-browser', title=title, auto_refresh_ms=None)
+    if collection is not None:
+        if collection not in C.DB_COLLECTIONS:
+            raise C.PanelBuildError(f'db-browser collection 必须是 {" / ".join(C.DB_COLLECTIONS)} 之一，收到 {collection!r}')
+        props['collection'] = collection
+    if not (C.DB_PER_PAGE_MIN <= per_page <= C.DB_PER_PAGE_MAX):
+        raise C.PanelBuildError(f'db-browser per_page 必须 {C.DB_PER_PAGE_MIN}–{C.DB_PER_PAGE_MAX}，收到 {per_page}')
+    props['perPage'] = per_page
+    return _widget('db-browser', props, id)
+
+
+def storage_usage(*, title: str | None = None, auto_refresh_ms: int | None = None, id: str | None = None) -> dict:
+    """DSH_HOME 磁盘占用分解（sessions / attachments / cache / data）。"""
+    return _widget('storage-usage', _local_props('storage-usage', title=title, auto_refresh_ms=auto_refresh_ms), id)
+
+
+def api_credentials(*, title: str | None = None, auto_refresh_ms: int | None = None, id: str | None = None) -> dict:
+    """全部注册 API 资源的凭据配置状态（key 永不回显，只有 configured）。"""
+    return _widget('api-credentials', _local_props('api-credentials', title=title, auto_refresh_ms=auto_refresh_ms), id)
+
+
+def sessions_stats(*, title: str | None = None, auto_refresh_ms: int | None = None, id: str | None = None) -> dict:
+    """会话统计：总数 / 占用 / 按日柱状 / 最大占用 Top5。"""
+    return _widget('sessions-stats', _local_props('sessions-stats', title=title, auto_refresh_ms=auto_refresh_ms), id)
+
+
+def mcp_status(*, title: str | None = None, auto_refresh_ms: int | None = None, id: str | None = None) -> dict:
+    """MCP 服务清单与连接状态（mcp 插件未启用 → 组件显示占位）。"""
+    return _widget('mcp-status', _local_props('mcp-status', title=title, auto_refresh_ms=auto_refresh_ms), id)
+
+
+def plugin_registry(*, title: str | None = None, id: str | None = None) -> dict:
+    """当前客户端已加载插件清单（数据来自页面 boot 载荷，无网络请求）。"""
+    return _widget('plugin-registry', _local_props('plugin-registry', title=title, auto_refresh_ms=None), id)

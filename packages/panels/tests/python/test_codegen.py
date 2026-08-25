@@ -11,8 +11,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'assets/skills/openloop-panels-widget-authoring/scripts'))
 
 from openloop_panels import (  # noqa: E402
-    Panel, PanelBuildError, badge, callout, card, divider, donut, funnel,
-    gauge, grid, heading, heatmap, line, metrics, stack, table, text,
+    Panel, PanelBuildError, api_credentials, badge, callout, card, db_browser,
+    divider, donut, funnel, gauge, grid, heading, heatmap, line, mcp_status,
+    metrics, pb_stats, plugin_registry, sessions_stats, stack, storage_usage,
+    table, text,
 )
 
 
@@ -134,3 +136,37 @@ class TestGoldenParity(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestLocalBackendPresets(unittest.TestCase):
+    """批 5 本地后端预设族组合子。"""
+
+    def test_pb_stats_build(self):
+        w = pb_stats(title='后端状态', auto_refresh_ms=30000)
+        self.assertEqual(w['source']['kind'], 'pb-stats')
+        self.assertEqual(w['source']['props'], {'title': '后端状态', 'autoRefreshMs': 30000})
+
+    def test_db_browser_props_and_bounds(self):
+        w = db_browser(collection='tiles', per_page=50)
+        self.assertEqual(w['source']['props'], {'collection': 'tiles', 'perPage': 50})
+        with self.assertRaises(PanelBuildError):
+            db_browser(collection='nope')
+        with self.assertRaises(PanelBuildError):
+            db_browser(per_page=3)
+        with self.assertRaises(PanelBuildError):
+            db_browser(per_page=101)
+
+    def test_plain_presets_no_props_by_default(self):
+        for build in (storage_usage, api_credentials, sessions_stats, mcp_status, plugin_registry):
+            w = build()
+            self.assertEqual(w['source']['props'], {})
+
+    def test_auto_refresh_bounds(self):
+        with self.assertRaises(PanelBuildError):
+            pb_stats(auto_refresh_ms=9999)
+        with self.assertRaises(PanelBuildError):
+            sessions_stats(auto_refresh_ms=3_600_001)
+
+    def test_title_bound(self):
+        with self.assertRaises(PanelBuildError):
+            plugin_registry(title='x' * 81)

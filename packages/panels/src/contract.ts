@@ -15,6 +15,7 @@ export type PresetKind =
   | 'flow' | 'comparison' | 'steps' | 'tree'
   | 'callout' | 'status' | 'progress' | 'skeleton'
   | 'tabs' | 'accordion' | 'pagination' | 'tooltip'
+  | 'pb-stats' | 'db-browser' | 'storage-usage' | 'api-credentials' | 'sessions-stats' | 'mcp-status' | 'plugin-registry'
 
 export type WidgetSource =
   | { type: 'preset'; kind: PresetKind; props: JsonObject }

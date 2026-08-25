@@ -6,8 +6,10 @@
 """
 from .contracts import PanelBuildError
 from .widgets import (
-    badge, bar, callout, card, divider, donut, funnel, gauge, grid,
-    heading, heatmap, line, metric_grid, metric_item, metrics, stack, table, text,
+    api_credentials, badge, bar, callout, card, db_browser, divider, donut,
+    funnel, gauge, grid, heading, heatmap, line, mcp_status, metric_grid,
+    metric_item, metrics, pb_stats, plugin_registry, sessions_stats, stack,
+    storage_usage, table, text,
 )
 from .builder import Panel
 
@@ -18,4 +20,6 @@ __all__ = [
     'donut', 'bar', 'line', 'gauge', 'funnel', 'heatmap',
     'table', 'callout',
     'card', 'grid', 'stack',
+    'pb_stats', 'db_browser', 'storage_usage', 'api_credentials',
+    'sessions_stats', 'mcp_status', 'plugin_registry',
 ]

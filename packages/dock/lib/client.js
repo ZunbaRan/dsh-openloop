@@ -6124,6 +6124,44 @@ window.__ModuleLoader__.load({
 					max: 100
 				}
 			},
+			"pb-stats": {
+				title: "后端状态",
+				desc: "本地后端运行统计",
+				props: { autoRefreshMs: 3e4 }
+			},
+			"db-browser": {
+				title: "数据库浏览",
+				desc: "筛选 + 选库 + 分页查数据",
+				props: {
+					collection: "apps",
+					perPage: 20
+				}
+			},
+			"storage-usage": {
+				title: "存储占用",
+				desc: "DSH_HOME 磁盘分解",
+				props: {}
+			},
+			"api-credentials": {
+				title: "凭据总览",
+				desc: "API 凭据配置状态",
+				props: {}
+			},
+			"sessions-stats": {
+				title: "会话统计",
+				desc: "会话数/占用/活跃度",
+				props: {}
+			},
+			"mcp-status": {
+				title: "MCP 状态",
+				desc: "MCP 服务清单与连接",
+				props: {}
+			},
+			"plugin-registry": {
+				title: "插件清单",
+				desc: "已加载插件分组",
+				props: {}
+			},
 			row: {
 				title: "横向行",
 				desc: "水平排列子组件",

@@ -1,9 +1,15 @@
 /**
- * webServer 受控路由 /openloop/app/*（client UI 数据面；MVP 为 M3 dock 预留）：
+ * webServer 受控路由 /openloop/app/*（client UI 数据面）：
  * - GET  /openloop/app/status    进程状态（state/version/baseUrl）
- * - GET  /openloop/app/registry  全量注册表（apps + components + apis 含 configured）——M3 dock AppRegistry 数据源
+ * - GET  /openloop/app/registry  全量注册表（apps + components + apis 含 configured）
  * - GET  /openloop/app/boards    读 dock v2 state（无数据 null）
- * - PUT  /openloop/app/boards    全量保存 dock v2 state（body = state；M3 dock 持久化通道）
+ * - PUT  /openloop/app/boards    全量保存 dock v2 state（body = state）
+ * - GET  /openloop/app/pb-stats          PB 运行统计（版本/uptime/collections 计数/磁盘）
+ * - GET  /openloop/app/collections       管理表清单 + 记录数（db-browser 下拉）
+ * - GET  /openloop/app/collections/:name/records?page=&perPage=&q=  受控记录查询（分页+关键词）
+ * - GET  /openloop/app/storage-usage     DSH_HOME 占用分解
+ * - GET  /openloop/app/credentials       全部 API 资源凭据配置状态（不回显 key）
+ * - GET  /openloop/app/sessions-stats    会话目录统计
  *
  * headless profile 无 webServer：路由不注册（tools 通道照常可用）。
  */
@@ -11,6 +17,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import type { AppBackend } from './backend.ts'
+import { PB_VERSION } from './pb-process.ts'
+import { collectionCounts, clampPaging, isManagedCollection, listRecordsPaged } from './records.ts'
+import { dirStats, sessionsStats, storageUsage } from './stats.ts'
 
 export const APP_ROUTE = '/openloop/app'
 
@@ -72,6 +81,74 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBac
     const body = JSON.parse(await readBody(req)) as unknown
     const saved = await facade.saveDockState(body)
     json(res, 200, { saved })
+    return
+  }
+
+  // ---- M3+ 本地后端预设族数据端点（panels 预设经浏览器同源 fetch 消费） ----
+
+  if (sub === 'pb-stats' && method === 'GET') {
+    const pb = backend.pbClient()
+    if (pb === undefined) { json(res, 503, { error: 'app backend is not running' }); return }
+    const collections = await collectionCounts(pb)
+    const dataDir = backend.pbDataDir()
+    const dataDirBytes = dataDir !== undefined ? (await dirStats(dataDir)).bytes : 0
+    const startedAt = backend.startedAt()
+    json(res, 200, {
+      version: PB_VERSION,
+      state: 'running',
+      uptimeMs: startedAt !== undefined ? Date.now() - startedAt : null,
+      collections,
+      dataDirBytes,
+    })
+    return
+  }
+
+  if (sub === 'collections' && method === 'GET') {
+    const pb = backend.pbClient()
+    if (pb === undefined) { json(res, 503, { error: 'app backend is not running' }); return }
+    json(res, 200, { collections: await collectionCounts(pb) })
+    return
+  }
+
+  if (sub.startsWith('collections/') && sub.endsWith('/records') && method === 'GET') {
+    const pb = backend.pbClient()
+    if (pb === undefined) { json(res, 503, { error: 'app backend is not running' }); return }
+    const name = sub.slice('collections/'.length, -'/records'.length)
+    if (!isManagedCollection(name)) {
+      json(res, 404, { error: `unknown collection "${name}"; managed: apps, components, apis, boards, tiles, meta` })
+      return
+    }
+    const { page, perPage } = clampPaging(url.searchParams.get('page'), url.searchParams.get('perPage'))
+    const q = url.searchParams.get('q') ?? undefined
+    json(res, 200, await listRecordsPaged(pb, name, page, perPage, q))
+    return
+  }
+
+  if (sub === 'storage-usage' && method === 'GET') {
+    json(res, 200, await storageUsage(backend.dshHome()))
+    return
+  }
+
+  if (sub === 'credentials' && method === 'GET') {
+    // 直接查 apis 表（跨 APP 汇总）；keySecret 剥离，configured 只报布尔
+    const pb = backend.pbClient()
+    if (pb === undefined) { json(res, 503, { error: 'app backend is not running' }); return }
+    const params = new URLSearchParams({ page: '1', perPage: '200' })
+    const res2 = await pb.request<{ items?: Array<Record<string, unknown>> }>('GET', `/api/collections/apis/records?${params.toString()}`)
+    const rows = (res2?.items ?? []).map(row => ({
+      rid: String(row.rid ?? ''),
+      appName: String(row.appName ?? ''),
+      domain: String(row.domain ?? ''),
+      path: String(row.path ?? ''),
+      authType: row.authType === 'key' ? 'key' : 'none',
+      configured: typeof row.keySecret === 'string' && row.keySecret.length > 0,
+    })).filter(row => row.rid.length > 0).sort((a, b) => a.rid.localeCompare(b.rid))
+    json(res, 200, { apis: rows })
+    return
+  }
+
+  if (sub === 'sessions-stats' && method === 'GET') {
+    json(res, 200, await sessionsStats(backend.dshHome()))
     return
   }
 

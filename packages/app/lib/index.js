@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:net";
 import { Context, Service } from "@deepseek-ai/cordis";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 //#region ../../node_modules/.pnpm/@deepseek-ai+cosmokit@1.8.2/node_modules/@deepseek-ai/cosmokit/lib/index.js
 /** Return true when a value is `null` or `undefined`. */
@@ -1632,6 +1632,8 @@ function createAppBackend(options = {}) {
 	let running;
 	let facade;
 	let readyPromise;
+	let startedAt;
+	const dshHome = resolveDshHome(options.dshHome);
 	const doStart = async () => {
 		status = {
 			state: "starting",
@@ -1642,6 +1644,7 @@ function createAppBackend(options = {}) {
 		const pb = createPbClient(process.baseUrl, process.credentials);
 		await initCollections(pb);
 		facade = createAppFacade(pb);
+		startedAt = Date.now();
 		status = {
 			state: "running",
 			version: PB_VERSION,
@@ -1675,9 +1678,23 @@ function createAppBackend(options = {}) {
 		status() {
 			return { ...status };
 		},
+		pbClient() {
+			if (status.state !== "running" || running === void 0) return void 0;
+			return createPbClient(running.baseUrl, running.credentials);
+		},
+		pbDataDir() {
+			return status.state === "running" && running !== void 0 ? running.dataDir : void 0;
+		},
+		dshHome() {
+			return dshHome;
+		},
+		startedAt() {
+			return startedAt;
+		},
 		async stop() {
 			readyPromise = void 0;
 			facade = void 0;
+			startedAt = void 0;
 			if (running !== void 0) {
 				await running.stop();
 				running = void 0;
@@ -6429,6 +6446,188 @@ function createCandidate() {
 		locator: new URL(`../assets/skills/${SKILL_NAME}/SKILL.md`, import.meta.url)
 	};
 }
+/** 敏感字段剥离（apis.keySecret）——受控查询通道绝不回显凭据 */
+const STRIP_FIELDS = /* @__PURE__ */ new Set(["keySecret"]);
+function isManagedCollection(name) {
+	return COLLECTIONS.some((c) => c.name === name);
+}
+/** 钳制分页参数（非法输入回落默认值，不抛错——查询参数宽松语义） */
+function clampPaging(page, perPage) {
+	const p = typeof page === "string" && /^\d+$/.test(page) ? Number(page) : 1;
+	const pp = typeof perPage === "string" && /^\d+$/.test(perPage) ? Number(perPage) : 20;
+	return {
+		page: Math.max(1, Math.floor(p)),
+		perPage: Math.min(100, Math.max(5, Math.floor(pp)))
+	};
+}
+/** 关键词 → PB 过滤器（text 字段的 OR like 串；空白/无 text 字段返回 null = 不过滤） */
+function buildKeywordFilter(fields, q) {
+	const textFields = fields.map((f) => typeof f.name === "string" ? f.name : "").filter((name) => name.length > 0);
+	if (textFields.length === 0) return null;
+	const escaped = q.trim().replaceAll("\"", "");
+	if (escaped.length === 0) return null;
+	return textFields.map((f) => `${f} ~ "${escaped}"`).join(" || ");
+}
+async function listRecordsPaged(pb, collection, page, perPage, q) {
+	const schema = await pb.request("GET", `/api/collections/${collection}`);
+	const fields = Array.isArray(schema?.fields) ? schema.fields : [];
+	const params = new URLSearchParams({
+		page: String(page),
+		perPage: String(perPage)
+	});
+	const keyword = typeof q === "string" ? q.trim() : "";
+	if (keyword.length > 0) {
+		const filter = buildKeywordFilter(fields, keyword);
+		if (filter !== null) params.set("filter", filter);
+	}
+	const res = await pb.request("GET", `/api/collections/${collection}/records?${params.toString()}`);
+	const items = (Array.isArray(res?.items) ? res.items : []).map((row) => {
+		const clean = {};
+		for (const [key, value] of Object.entries(row)) if (!STRIP_FIELDS.has(key)) clean[key] = value;
+		return clean;
+	});
+	return {
+		collection,
+		items,
+		page: typeof res?.page === "number" ? res.page : page,
+		perPage: typeof res?.perPage === "number" ? res.perPage : perPage,
+		totalItems: typeof res?.totalItems === "number" ? res.totalItems : items.length,
+		totalPages: typeof res?.totalPages === "number" ? res.totalPages : 1
+	};
+}
+/** 全部管理表的记录数（pb-stats / collections 下拉用） */
+async function collectionCounts(pb) {
+	const counts = [];
+	for (const def of COLLECTIONS) {
+		const params = new URLSearchParams({
+			page: "1",
+			perPage: "1"
+		});
+		const res = await pb.request("GET", `/api/collections/${def.name}/records?${params.toString()}`);
+		counts.push({
+			name: def.name,
+			count: typeof res?.totalItems === "number" ? res.totalItems : 0
+		});
+	}
+	return counts.sort((a, b) => a.name.localeCompare(b.name));
+}
+//#endregion
+//#region src/stats.ts
+/**
+* 本地统计聚合（M3+ 本地后端预设族的服务端数据源）：
+* - dirStats：递归 stat 走目录（不读内容）→ { bytes, files }；符号链接跳过（防环）
+* - storageUsage：DSH_HOME 顶层占用分解（sessions/attachments/cache/data + 根文件）
+* - sessionsStats：sessions 目录（slug/session- 前缀子目录）走查——总数/总字节/最近活跃/按日聚合/最大占用
+*
+* 全部只 stat 不 read，万级文件量也在百毫秒级。
+*/
+/** 递归统计目录（符号链接跳过；不存在返回 0） */
+async function dirStats(path) {
+	let bytes = 0;
+	let files = 0;
+	const entries = await readdir(path, { withFileTypes: true }).catch(() => []);
+	for (const entry of entries) {
+		const full = join(path, entry.name);
+		if (entry.isSymbolicLink()) continue;
+		if (entry.isDirectory()) {
+			const sub = await dirStats(full);
+			bytes += sub.bytes;
+			files += sub.files;
+		} else if (entry.isFile()) {
+			const s = await stat(full).catch(() => void 0);
+			if (s !== void 0) {
+				bytes += s.size;
+				files++;
+			}
+		}
+	}
+	return {
+		bytes,
+		files
+	};
+}
+/** DSH_HOME 顶层占用分解（目录 + 根文件）；条目按字节降序 */
+async function storageUsage(dshHome) {
+	const entries = await readdir(dshHome, { withFileTypes: true }).catch(() => []);
+	const result = [];
+	for (const entry of entries) {
+		const full = join(dshHome, entry.name);
+		if (entry.isDirectory()) {
+			const s = await dirStats(full);
+			result.push({
+				label: entry.name,
+				path: full,
+				bytes: s.bytes,
+				files: s.files
+			});
+		} else if (entry.isFile()) {
+			const s = await stat(full).catch(() => void 0);
+			if (s !== void 0) result.push({
+				label: entry.name,
+				path: full,
+				bytes: s.size,
+				files: 1
+			});
+		}
+	}
+	result.sort((a, b) => b.bytes - a.bytes);
+	return {
+		home: dshHome,
+		totalBytes: result.reduce((n, e) => n + e.bytes, 0),
+		entries: result
+	};
+}
+const DAY_MS = 864e5;
+/** sessions 统计：目录结构 = sessions/<slug>/session-<uuid>/（AGENTS.md 既有事实） */
+async function sessionsStats(dshHome, byDayDays = 14, largestN = 5) {
+	const sessionsRoot = join(dshHome, "sessions");
+	const slugs = await readdir(sessionsRoot, { withFileTypes: true }).catch(() => []);
+	let totalSessions = 0;
+	let totalBytes = 0;
+	let lastActive = 0;
+	const largest = [];
+	const dayMap = /* @__PURE__ */ new Map();
+	for (const slug of slugs) {
+		if (!slug.isDirectory()) continue;
+		const slugDir = join(sessionsRoot, slug.name);
+		const sessionDirs = await readdir(slugDir, { withFileTypes: true }).catch(() => []);
+		for (const session of sessionDirs) {
+			if (!session.isDirectory() || !session.name.startsWith("session-")) continue;
+			totalSessions++;
+			const sessionDir = join(slugDir, session.name);
+			const s = await dirStats(sessionDir);
+			totalBytes += s.bytes;
+			const mtime = (await stat(sessionDir).catch(() => void 0))?.mtimeMs ?? 0;
+			if (mtime > lastActive) lastActive = mtime;
+			const date = new Date(mtime).toISOString().slice(0, 10);
+			const day = dayMap.get(date) ?? {
+				count: 0,
+				bytes: 0
+			};
+			day.count++;
+			day.bytes += s.bytes;
+			dayMap.set(date, day);
+			largest.push({
+				name: `${slug.name}/${session.name}`,
+				bytes: s.bytes,
+				modified: new Date(mtime).toISOString()
+			});
+		}
+	}
+	largest.sort((a, b) => b.bytes - a.bytes);
+	const cutoff = Date.now() - byDayDays * DAY_MS;
+	const byDay = [...dayMap.entries()].map(([date, v]) => ({
+		date,
+		...v
+	})).filter((d) => new Date(d.date).getTime() >= new Date(new Date(cutoff).toISOString().slice(0, 10)).getTime()).sort((a, b) => a.date.localeCompare(b.date));
+	return {
+		totalSessions,
+		totalBytes,
+		lastActiveAt: lastActive > 0 ? new Date(lastActive).toISOString() : null,
+		byDay,
+		largest: largest.slice(0, largestN)
+	};
+}
 //#endregion
 //#region src/routes.ts
 const APP_ROUTE = "/openloop/app";
@@ -6461,7 +6660,8 @@ function registerAppRoutes(ctx, webServer, backend) {
 	});
 }
 async function handle(req, res, backend) {
-	const sub = new URL(req.url ?? "/", "http://loopback.invalid").pathname.slice(13).replace(/^\/+|\/+$/g, "");
+	const url = new URL(req.url ?? "/", "http://loopback.invalid");
+	const sub = url.pathname.slice(13).replace(/^\/+|\/+$/g, "");
 	const method = req.method ?? "GET";
 	if (sub === "status" && method === "GET") {
 		json(res, 200, backend.status());
@@ -6480,6 +6680,77 @@ async function handle(req, res, backend) {
 	if (sub === "boards" && method === "PUT") {
 		const body = JSON.parse(await readBody(req));
 		json(res, 200, { saved: await facade.saveDockState(body) });
+		return;
+	}
+	if (sub === "pb-stats" && method === "GET") {
+		const pb = backend.pbClient();
+		if (pb === void 0) {
+			json(res, 503, { error: "app backend is not running" });
+			return;
+		}
+		const collections = await collectionCounts(pb);
+		const dataDir = backend.pbDataDir();
+		const dataDirBytes = dataDir !== void 0 ? (await dirStats(dataDir)).bytes : 0;
+		const startedAt = backend.startedAt();
+		json(res, 200, {
+			version: PB_VERSION,
+			state: "running",
+			uptimeMs: startedAt !== void 0 ? Date.now() - startedAt : null,
+			collections,
+			dataDirBytes
+		});
+		return;
+	}
+	if (sub === "collections" && method === "GET") {
+		const pb = backend.pbClient();
+		if (pb === void 0) {
+			json(res, 503, { error: "app backend is not running" });
+			return;
+		}
+		json(res, 200, { collections: await collectionCounts(pb) });
+		return;
+	}
+	if (sub.startsWith("collections/") && sub.endsWith("/records") && method === "GET") {
+		const pb = backend.pbClient();
+		if (pb === void 0) {
+			json(res, 503, { error: "app backend is not running" });
+			return;
+		}
+		const name = sub.slice(12, -8);
+		if (!isManagedCollection(name)) {
+			json(res, 404, { error: `unknown collection "${name}"; managed: apps, components, apis, boards, tiles, meta` });
+			return;
+		}
+		const { page, perPage } = clampPaging(url.searchParams.get("page"), url.searchParams.get("perPage"));
+		json(res, 200, await listRecordsPaged(pb, name, page, perPage, url.searchParams.get("q") ?? void 0));
+		return;
+	}
+	if (sub === "storage-usage" && method === "GET") {
+		json(res, 200, await storageUsage(backend.dshHome()));
+		return;
+	}
+	if (sub === "credentials" && method === "GET") {
+		const pb = backend.pbClient();
+		if (pb === void 0) {
+			json(res, 503, { error: "app backend is not running" });
+			return;
+		}
+		const params = new URLSearchParams({
+			page: "1",
+			perPage: "200"
+		});
+		json(res, 200, { apis: ((await pb.request("GET", `/api/collections/apis/records?${params.toString()}`))?.items ?? []).map((row) => ({
+			rid: String(row.rid ?? ""),
+			appName: String(row.appName ?? ""),
+			domain: String(row.domain ?? ""),
+			path: String(row.path ?? ""),
+			authType: row.authType === "key" ? "key" : "none",
+			configured: typeof row.keySecret === "string" && row.keySecret.length > 0
+		})).filter((row) => row.rid.length > 0).sort((a, b) => a.rid.localeCompare(b.rid)) });
+		return;
+	}
+	if (sub === "sessions-stats" && method === "GET") {
+		json(res, 200, await sessionsStats(backend.dshHome()));
 		return;
 	}
 	json(res, 404, { error: `unknown app route: ${method} /openloop/app/${sub}` });

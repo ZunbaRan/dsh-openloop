@@ -23,6 +23,14 @@ export interface AppBackend {
   ready(): Promise<AppFacade>
   status(): BackendStatus
   stop(): Promise<void>
+  /** admin PB client（运行中才可用；stats/records 路由用） */
+  pbClient(): PbClient | undefined
+  /** PB 数据目录（运行中才可用） */
+  pbDataDir(): string | undefined
+  /** DSH_HOME 解析结果（路由 stats 用） */
+  dshHome(): string
+  /** 本次运行启动时刻（uptime 计算）；未启动为 undefined */
+  startedAt(): number | undefined
 }
 
 export interface AppBackendOptions extends PbProcessOptions {
@@ -36,6 +44,8 @@ export function createAppBackend(options: AppBackendOptions = {}): AppBackend {
   let running: RunningPb | undefined
   let facade: AppFacade | undefined
   let readyPromise: Promise<AppFacade> | undefined
+  let startedAt: number | undefined
+  const dshHome = resolveDshHome(options.dshHome)
 
   const doStart = async (): Promise<AppFacade> => {
     status = { state: 'starting', version: PB_VERSION }
@@ -44,6 +54,7 @@ export function createAppBackend(options: AppBackendOptions = {}): AppBackend {
     const pb: PbClient = createPbClient(process.baseUrl, process.credentials)
     await initCollections(pb)
     facade = createAppFacade(pb)
+    startedAt = Date.now()
     status = { state: 'running', version: PB_VERSION, baseUrl: process.baseUrl }
     return facade
   }
@@ -84,9 +95,27 @@ export function createAppBackend(options: AppBackendOptions = {}): AppBackend {
       return { ...status }
     },
 
+    pbClient(): PbClient | undefined {
+      if (status.state !== 'running' || running === undefined) return undefined
+      return createPbClient(running.baseUrl, running.credentials)
+    },
+
+    pbDataDir(): string | undefined {
+      return status.state === 'running' && running !== undefined ? running.dataDir : undefined
+    },
+
+    dshHome(): string {
+      return dshHome
+    },
+
+    startedAt(): number | undefined {
+      return startedAt
+    },
+
     async stop(): Promise<void> {
       readyPromise = undefined
       facade = undefined
+      startedAt = undefined
       if (running !== undefined) {
         await running.stop()
         running = undefined

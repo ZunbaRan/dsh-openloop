@@ -22,13 +22,14 @@ describe('preset registry', () => {
     expect(getPreset('metric')).toBeUndefined()
   })
 
-  it('allPresetKinds 覆盖批 1+批 2+批 3+批 4 共 26 个 kind', () => {
+  it('allPresetKinds 覆盖批 1+批 2+批 3+批 4+批 5 共 33 个 kind', () => {
     const kinds = allPresetKinds()
     expect(kinds.sort()).toEqual([
-      'accordion', 'avatar', 'badge', 'callout', 'card', 'chart', 'comparison',
-      'data-table', 'divider', 'flow', 'funnel', 'gauge', 'grid', 'heading',
-      'heatmap', 'markdown', 'metric-grid', 'progress', 'row', 'section',
-      'sparkline', 'split', 'stack', 'tag', 'text', 'timeline',
+      'accordion', 'api-credentials', 'avatar', 'badge', 'callout', 'card', 'chart',
+      'comparison', 'data-table', 'db-browser', 'divider', 'flow', 'funnel', 'gauge',
+      'grid', 'heading', 'heatmap', 'markdown', 'mcp-status', 'metric-grid',
+      'pb-stats', 'plugin-registry', 'progress', 'row', 'section', 'sessions-stats',
+      'sparkline', 'split', 'stack', 'storage-usage', 'tag', 'text', 'timeline',
     ])
     for (const kind of kinds) {
       expect(getPreset(kind)).toBeDefined()
@@ -46,6 +47,7 @@ describe('preset registry', () => {
       'flow', 'comparison', 'steps', 'tree',
       'callout', 'status', 'progress', 'skeleton',
       'tabs', 'accordion', 'pagination', 'tooltip',
+      'pb-stats', 'db-browser', 'storage-usage', 'api-credentials', 'sessions-stats', 'mcp-status', 'plugin-registry',
     ])
     for (const kind of kinds) expect(valid.has(kind)).toBe(true)
   })

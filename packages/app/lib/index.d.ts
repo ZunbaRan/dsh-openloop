@@ -472,6 +472,14 @@ interface AppBackend {
   ready(): Promise<AppFacade>;
   status(): BackendStatus;
   stop(): Promise<void>;
+  /** admin PB client（运行中才可用；stats/records 路由用） */
+  pbClient(): PbClient | undefined;
+  /** PB 数据目录（运行中才可用） */
+  pbDataDir(): string | undefined;
+  /** DSH_HOME 解析结果（路由 stats 用） */
+  dshHome(): string;
+  /** 本次运行启动时刻（uptime 计算）；未启动为 undefined */
+  startedAt(): number | undefined;
 }
 interface AppBackendOptions extends PbProcessOptions {
   /** 就绪等待上限（tool/route 调用侧；默认 45s 覆盖首启下载） */

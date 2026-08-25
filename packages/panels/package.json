@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-panels",
-  "version": "0.3.5",
+  "version": "0.4.0",
   "description": "Widget-system panels for DeepSeek Harness: preset components, live data bindings, and sandboxed custom widgets.",
   "private": true,
   "type": "module",

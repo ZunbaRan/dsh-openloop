@@ -12,7 +12,7 @@ import { Duplex } from "node:stream";
  */
 type JsonObject = Record<string, unknown>;
 /** 预设组件 kind，§6 全清单 */
-type PresetKind = 'text' | 'markdown' | 'heading' | 'badge' | 'tag' | 'divider' | 'avatar' | 'card' | 'section' | 'stack' | 'grid' | 'row' | 'split' | 'scroll-area' | 'metric' | 'metric-grid' | 'data-table' | 'list' | 'key-value' | 'stat' | 'rating' | 'empty-state' | 'timeline' | 'chart' | 'sparkline' | 'gauge' | 'funnel' | 'heatmap' | 'flow' | 'comparison' | 'steps' | 'tree' | 'callout' | 'status' | 'progress' | 'skeleton' | 'tabs' | 'accordion' | 'pagination' | 'tooltip';
+type PresetKind = 'text' | 'markdown' | 'heading' | 'badge' | 'tag' | 'divider' | 'avatar' | 'card' | 'section' | 'stack' | 'grid' | 'row' | 'split' | 'scroll-area' | 'metric' | 'metric-grid' | 'data-table' | 'list' | 'key-value' | 'stat' | 'rating' | 'empty-state' | 'timeline' | 'chart' | 'sparkline' | 'gauge' | 'funnel' | 'heatmap' | 'flow' | 'comparison' | 'steps' | 'tree' | 'callout' | 'status' | 'progress' | 'skeleton' | 'tabs' | 'accordion' | 'pagination' | 'tooltip' | 'pb-stats' | 'db-browser' | 'storage-usage' | 'api-credentials' | 'sessions-stats' | 'mcp-status' | 'plugin-registry';
 type WidgetSource = {
   type: 'preset';
   kind: PresetKind;

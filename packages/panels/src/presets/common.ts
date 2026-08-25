@@ -34,6 +34,23 @@ export function asRecord(value: unknown): JsonObject | null {
     : null
 }
 
+/** 本地后端预设族共享 props 校验：title（≤80）+ autoRefreshMs（10000–3600000 整数） */
+export function validateLocalPresetProps(kind: string, props: unknown): PresetValidation {
+  const root = asRecord(props)
+  if (!root) return validationFail([error('$', `${kind} props 必须是 JSON 对象`)])
+  const errors: PresetError[] = []
+  if (root.title !== undefined && (typeof root.title !== 'string' || root.title.length > 80)) {
+    errors.push(error('title', 'title 必须是 ≤80 字符的字符串'))
+  }
+  if (root.autoRefreshMs !== undefined) {
+    const v = root.autoRefreshMs
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 10000 || v > 3600000) {
+      errors.push(error('autoRefreshMs', 'autoRefreshMs 必须是 10000–3600000 的整数（毫秒）'))
+    }
+  }
+  return errors.length > 0 ? validationFail(errors) : validationOk()
+}
+
 export function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }

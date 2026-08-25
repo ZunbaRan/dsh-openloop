@@ -6,6 +6,7 @@
 import type { ComponentType } from 'react'
 import type { JsonObject, PresetKind } from '../contract.ts'
 import { accordionPreset } from './accordion/index.ts'
+import { apiCredentialsPreset } from './api-credentials/index.ts'
 import { avatarPreset } from './avatar/index.ts'
 import { badgePreset } from './badge/index.ts'
 import { calloutPreset } from './callout/index.ts'
@@ -13,6 +14,7 @@ import { cardPreset } from './card/index.ts'
 import { chartPreset } from './chart/index.ts'
 import { comparisonPreset } from './comparison/index.ts'
 import { dataTablePreset } from './data-table/index.ts'
+import { dbBrowserPreset } from './db-browser/index.ts'
 import { dividerPreset } from './divider/index.ts'
 import { flowPreset } from './flow/index.ts'
 import { funnelPreset } from './funnel/index.ts'
@@ -21,13 +23,18 @@ import { gridPreset } from './grid/index.ts'
 import { headingPreset } from './heading/index.ts'
 import { heatmapPreset } from './heatmap/index.ts'
 import { markdownPreset } from './markdown/index.ts'
+import { mcpStatusPreset } from './mcp-status/index.ts'
 import { metricGridPreset } from './metric-grid/index.ts'
+import { pbStatsPreset } from './pb-stats/index.ts'
+import { pluginRegistryPreset } from './plugin-registry/index.ts'
 import { progressPreset } from './progress/index.ts'
 import { rowPreset } from './row/index.ts'
 import { sectionPreset } from './section/index.ts'
+import { sessionsStatsPreset } from './sessions-stats/index.ts'
 import { sparklinePreset } from './sparkline/index.ts'
 import { splitPreset } from './split/index.ts'
 import { stackPreset } from './stack/index.ts'
+import { storageUsagePreset } from './storage-usage/index.ts'
 import { tagPreset } from './tag/index.ts'
 import { textPreset } from './text/index.ts'
 import { timelinePreset } from './timeline/index.ts'
@@ -82,6 +89,14 @@ const registry: Readonly<Partial<Record<PresetKind, PresetModule>>> = {
   flow: flowPreset,
   timeline: timelinePreset,
   comparison: comparisonPreset,
+  // 批 5：本地后端预设族 7（数据经 /openloop/app/* 同源 fetch 或 boot 载荷）
+  'pb-stats': pbStatsPreset,
+  'db-browser': dbBrowserPreset,
+  'storage-usage': storageUsagePreset,
+  'api-credentials': apiCredentialsPreset,
+  'sessions-stats': sessionsStatsPreset,
+  'mcp-status': mcpStatusPreset,
+  'plugin-registry': pluginRegistryPreset,
 }
 
 /** 取预设模块；未实现/未知 kind 返回 undefined */
