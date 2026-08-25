@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-dsh-app
+      name: '@openloop/dsh-app'

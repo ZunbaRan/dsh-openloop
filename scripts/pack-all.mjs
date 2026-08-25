@@ -13,6 +13,7 @@ const packages = [
   ['packages', 'widget'],
   ['packages', 'artifact'],
   ['packages', 'panels'],
+  ['packages', 'app'],
   ['packages', 'mcp-runtime'],
   ['packages', 'mcp-tools'],
   ['packages', 'mcp-apps'],
