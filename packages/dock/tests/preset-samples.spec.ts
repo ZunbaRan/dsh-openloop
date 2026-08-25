@@ -19,6 +19,7 @@ const comp = (kind: string): AppComponentDescriptor => ({
   type: 'panel',
   desc: '',
   kind,
+  pinnable: true,
 })
 
 describe('内置 APP 示例 props 过 panels validate', () => {
@@ -47,7 +48,9 @@ describe('示例表与 panels registry 同步', () => {
 
 describe('buildPanelMetaForComponent', () => {
   it('构造的 meta 符合 PanelMeta 契约（panel.id = kind → 来源 ID 命名即寻址）', () => {
-    const { kind, meta } = buildPanelMetaForComponent(comp('metric-grid'))
+    const built = buildPanelMetaForComponent(comp('metric-grid'))
+    expect(built).not.toBeNull()
+    const { kind, meta } = built as { kind: 'panel'; meta: unknown }
     expect(kind).toBe('panel')
     const m = meta as {
       kind: string; version: number
@@ -66,5 +69,10 @@ describe('buildPanelMetaForComponent', () => {
     expect(m.panel.widgets[0]?.source.props).toEqual(presetSamples['metric-grid'])
     expect(m.resolved).toEqual({})
     expect(m.resolvedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+  })
+
+  it('无渲染数据的组件（门面组件）返回 null', () => {
+    const foreign: AppComponentDescriptor = { id: 'my-sales:weekly', title: '周度业绩', type: 'panel', desc: '', kind: '', pinnable: false }
+    expect(buildPanelMetaForComponent(foreign)).toBeNull()
   })
 })

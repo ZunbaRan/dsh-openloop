@@ -191,15 +191,19 @@ export function AppDetail({ app, pinnedIds, onPin }: AppDetailProps): ReactNode 
                     <div className="d2-rid">{c.id}</div>
                   </div>
                   <span className="d2-rowdesc">{c.desc}</span>
-                  <button
-                    type="button"
-                    className="d2-ghost-btn d2-pin-btn"
-                    title={pinned ? '已在看板' : '固定到看板'}
-                    onClick={() => onPin(app, c)}
-                  >
-                    {pinned ? <icons.check size={13} /> : <icons.pin size={13} />}
-                    {pinned ? '已固定' : '固定'}
-                  </button>
+                  {c.pinnable ? (
+                    <button
+                      type="button"
+                      className="d2-ghost-btn d2-pin-btn"
+                      title={pinned ? '已在看板' : '固定到看板'}
+                      onClick={() => onPin(app, c)}
+                    >
+                      {pinned ? <icons.check size={13} /> : <icons.pin size={13} />}
+                      {pinned ? '已固定' : '固定'}
+                    </button>
+                  ) : (
+                    <span className="d2-pin-locked" title="该组件尚无渲染数据——让 Agent 经 app_backend 生成内容后可固定">待生成</span>
+                  )}
                 </div>
               )
             })}

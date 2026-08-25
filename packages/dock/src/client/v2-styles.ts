@@ -142,5 +142,9 @@ export const V2_CSS = `
 .d2-resource-row .d2-pin-btn { opacity: 0; transition: opacity .15s; flex-shrink: 0; }
 .d2-resource-row:hover .d2-pin-btn { opacity: 1; }
 .d2-resource-row.pinned .d2-pin-btn { opacity: 1; color: var(--dsw-alias-state-success-primary, #22c55e); }
+.d2-pin-locked { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); border: 1px dashed var(--dsw-alias-border-l2, rgba(127,127,127,.25)); border-radius: 6px; padding: 2px 8px; flex-shrink: 0; opacity: .8; }
 .d2-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+
+/* ---------- M3：后端降级提示条 ---------- */
+.d2-banner { position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 12%, var(--dsw-alias-tooltip-bg, #43454a)); color: var(--dsw-alias-label-primary, #f9fafb); font-size: 12px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 45%, transparent); box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 100; pointer-events: none; max-width: 80vw; }
 `

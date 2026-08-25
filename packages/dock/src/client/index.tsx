@@ -2,11 +2,12 @@
  * OpenLoop Dock client 半（Dock 2.0，2026-08-25）：
  * - DockHost 挂载（margin+width push，与 better-sidebar 共通道；空间探测读 --dsh-sidebar-width，见 DockHost.tsx）
  * - RailNav 两态导航轨（52 图标态 ↔ 216 中枢态）+ 内容区（board | apps）
- * - APP tab（M2）：AppListPanel 侧栏 + AppDetail 详情 + pin 流程；
- *   数据源 AppRegistry（M2 内置实现 = panels 预设清单 + mock API，M3 切 dsh-app 门面）
- * - UI 态独立持久化：rail 宽 / tab+选中 APP / APP 侧栏（不进 dockStore——store 只收看板数据）
+ * - APP tab：AppListPanel 侧栏 + AppDetail 详情 + pin 流程；
+ *   registry = 内置 APP（panels 预设，本地恒有）+ dsh-app 门面 APP（M3 合并）
+ * - 持久化（M3）：localStorage 恒为本地副本；dsh-app 门面（/openloop/app/boards）
+ *   为权威存储——启动 syncBackend（载入/迁移/挂钩推送），不可用降级本地 + 提示条
+ * - UI 态独立持久化：rail 宽 / tab+选中 APP / APP 侧栏（不进 dockStore）
  * - cordis service `openloop-dock/client`：pinPanel / pinArtifact / toggle / open
- *   （panels/artifact 的 PinButton 经可选 inject 消费——dock 未装时按钮自动降级隐藏）
  * - 右上角浮动开关（不依赖 slots，零冲突）
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,7 +17,8 @@ import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
 import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab, type RailAppItem } from './RailNav.tsx'
 import { AppListPanel, AppDetail } from './AppListPanel.tsx'
-import { listBuiltinApps, buildPanelMetaForComponent, type AppDescriptor } from './app-registry.ts'
+import { listBuiltinApps, buildPanelMetaForComponent, fetchRemoteApps, mergeApps, type AppDescriptor } from './app-registry.ts'
+import { syncBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
 
@@ -131,6 +133,10 @@ function DockShell(): ReactNode {
   const [tabState, setTabState] = useState<TabState>(readTabState)
   const [railWidth, setRailWidth] = useState(readRailWidth)
   const [toast, setToast] = useState<string | null>(null)
+  // M3：后端同步模式（degraded → 提示条；remote/local 静默）
+  const [backendMode, setBackendMode] = useState<BackendMode>('local')
+  // 远端 APP 清单（M3：门面 registry；不可用为空数组——APP tab 只剩内置）
+  const [remoteApps, setRemoteApps] = useState<AppDescriptor[]>([])
   useEffect(() => dockStore.subscribe(() => setVersion(v => v + 1)), [])
   // toast 2.2s 自动消隐（原型同款节奏）
   useEffect(() => {
@@ -138,6 +144,16 @@ function DockShell(): ReactNode {
     const timer = setTimeout(() => setToast(null), 2200)
     return () => clearTimeout(timer)
   }, [toast])
+  // M3：启动编排（读门面 boards → 决策 → 载入/迁移/挂钩）+ registry 拉取。
+  // 绝不炸页：syncBackend 内部全捕获，degraded 只出提示条
+  useEffect(() => {
+    let cancelled = false
+    void syncBackend(dockStore, {
+      onRemoteError: message => { if (!cancelled) setToast(message) },
+    }).then(mode => { if (!cancelled) setBackendMode(mode) })
+    void fetchRemoteApps().then(apps => { if (!cancelled) setRemoteApps(apps) })
+    return () => { cancelled = true }
+  }, [])
   // toggle 跟随 bsb 右缘（bsb 开时挪到其左侧 10px，避免与其按钮重叠）
   const [toggleRight, setToggleRight] = useState(10)
   useEffect(() => {
@@ -174,9 +190,9 @@ function DockShell(): ReactNode {
   const state = dockStore.getSnapshot()
   const totalTiles = state.boards.reduce((n, b) => n + b.tiles.length, 0)
 
-  // APP 注册表（M2 内置实现；M3 切 @openloop/dsh-app 门面，此行只换实现）。
-  // 每渲染读一次：panels 桥是懒 require + 缓存，加载完成后下次渲染即拿到
-  const { apps, panelsMissing } = listBuiltinApps()
+  // APP 注册表（M3：内置恒在 + 门面追加合并；panels 桥懒 require 每渲染读一次）
+  const { apps: builtinApps, panelsMissing } = listBuiltinApps()
+  const apps = mergeApps(builtinApps, remoteApps)
   const selectedApp: AppDescriptor | undefined = apps.find(a => a.id === tabState.selectedAppId) ?? apps[0]
   const activeBoard = state.boards.find(b => b.id === state.activeBoardId) ?? state.boards[0]
   // 当前看板页已固定的资源 ID（`openloop:<kind>`）——AppDetail 的 pinned 判定
@@ -221,9 +237,14 @@ function DockShell(): ReactNode {
     persistTabState({ tab: 'apps', selectedAppId: id })
   }
 
-  /** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点） */
+  /** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点）。
+   *  门面组件（无渲染数据）拒绝并提示。 */
   const pinComponent = (_app: AppDescriptor, component: AppDescriptor['components'][number]): void => {
     const source = buildPanelMetaForComponent(component)
+    if (source === null) {
+      setToast(`「${component.title}」暂无渲染数据——让 Agent 经 app_backend 生成内容后再固定`)
+      return
+    }
     dockStore.pin(source, component.title)
     persistTabState({ tab: 'board', selectedAppId: tabState.selectedAppId })
     setToast(`已固定「${component.title}」到当前看板`)
@@ -282,6 +303,11 @@ function DockShell(): ReactNode {
         </div>
       </DockHost>
       {toast !== null ? <div className="d2-toast">{toast}</div> : null}
+      {backendMode === 'degraded' ? (
+        <div className="d2-banner" role="status">
+          应用后端暂不可用——看板已降级为本地存储（数据不丢，恢复后自动同步）
+        </div>
+      ) : null}
     </>
   )
 }

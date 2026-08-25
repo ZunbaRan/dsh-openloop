@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["es2022", "dom", "dom.iterable"] },
-  "include": ["src/client", "tests/preset-samples.spec.ts"],
+  "include": ["src/client", "tests/preset-samples.spec.ts", "tests/backend-sync.spec.ts"],
   "exclude": []
 }

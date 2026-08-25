@@ -4527,12 +4527,13 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/store.ts
 		/**
-		* Dock Board store v2（2026-08-25 Dock 2.0）：多看板 + tile 别名 + localStorage 持久化。
+		* Dock Board store v2（2026-08-25 Dock 2.0）：多看板 + tile 别名。
 		* 手写 useSyncExternalStore 友好 store（无 zustand 依赖——bundle 尺寸考虑）。
 		*
-		* v1 → v2 迁移：读到 version:1（单看板）直接包成 boards:[{id:'b-default',...}]
-		* 写回 v2，不做双版本兼容层（工程原则：废弃路径直接移除）。
-		* STORAGE_KEY 沿用 v1 的 key——迁移在同一 key 原地完成，version 字段区分负载代际。
+		* 持久化（M3 双层）：localStorage 恒为本地副本（v1→v2 迁移也在此完成）；
+		* 远端门面（@openloop/dsh-app 的 /openloop/app/boards）为权威存储——经
+		* setRemotePersist 挂钩后每次 emit 异步推送（fire-and-forget，失败由挂钩方提示）。
+		* 门面不可用时 store 退化为纯 localStorage（降级不炸页，DOCK_V2_FRONTEND_IMPL §7 M3）。
 		*/
 		const STORAGE_KEY = "openloop.dock.board.v1";
 		let seq = 0;
@@ -4570,6 +4571,19 @@ window.__ModuleLoader__.load({
 				localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 			} catch {}
 		}
+		/** v2 负载校验：v1 负载（单板 tiles）包成 v2（一次性迁移，无兼容层）；坏数据不进 store */
+		function coerceStateV2(parsed) {
+			if (parsed?.version === 2) return sanitizeStateV2(parsed);
+			if (parsed?.version === 1 && Array.isArray(parsed.tiles)) return {
+				version: 2,
+				boards: [{
+					id: DEFAULT_BOARD_ID,
+					name: DEFAULT_BOARD_NAME,
+					tiles: sanitizeTiles(parsed.tiles)
+				}],
+				activeBoardId: DEFAULT_BOARD_ID
+			};
+		}
 		/** v2 负载校验：boards 逐个规整（名称兜底、tile 容错）；activeBoardId 失效回落首板 */
 		function sanitizeStateV2(parsed) {
 			const boards = (Array.isArray(parsed.boards) ? parsed.boards : []).map((b) => {
@@ -4596,21 +4610,10 @@ window.__ModuleLoader__.load({
 				const raw = localStorage.getItem(STORAGE_KEY);
 				if (raw === null) return emptyState();
 				const parsed = JSON.parse(raw);
-				if (parsed?.version === 2) return sanitizeStateV2(parsed);
-				if (parsed?.version === 1 && Array.isArray(parsed.tiles)) {
-					const migrated = {
-						version: 2,
-						boards: [{
-							id: DEFAULT_BOARD_ID,
-							name: DEFAULT_BOARD_NAME,
-							tiles: sanitizeTiles(parsed.tiles)
-						}],
-						activeBoardId: DEFAULT_BOARD_ID
-					};
-					persistState(migrated);
-					return migrated;
-				}
-				return emptyState();
+				const state = coerceStateV2(parsed);
+				if (state === void 0) return emptyState();
+				if (parsed?.version !== 2) persistState(state);
+				return state;
 			} catch {
 				return emptyState();
 			}
@@ -4619,6 +4622,10 @@ window.__ModuleLoader__.load({
 			state = emptyState();
 			listeners = /* @__PURE__ */ new Set();
 			initialized = false;
+			/** 远端门面写钩子（M3：backend-sync 在门面可用后安装；fire-and-forget） */
+			remotePersist = null;
+			/** 远端钩子安装后抑制一次推送（载入远端数据本身不该回推） */
+			suppressRemoteOnce = false;
 			subscribe(listener) {
 				this.ensureInit();
 				this.listeners.add(listener);
@@ -4637,7 +4644,28 @@ window.__ModuleLoader__.load({
 			emit(next, persist = true) {
 				this.state = next;
 				if (persist) persistState(next);
+				if (this.remotePersist !== null && !this.suppressRemoteOnce) this.remotePersist(next);
+				else this.suppressRemoteOnce = false;
 				for (const listener of this.listeners) listener();
+			}
+			/** M3：安装远端写钩子（门面模式启动后调用；此后每次 emit 推送远端） */
+			setRemotePersist(fn) {
+				this.remotePersist = fn;
+			}
+			/**
+			* M3：载入远端权威数据（sanitize；坏数据不进 store）。
+			* 输入契约 = 门面 loadDockState（恒 v2 或 null）——v1 只在 localStorage 读取时迁移，
+			* 远端出现 v1/垃圾负载一律拒绝（严格，返回 false 保持本地态）。
+			*/
+			importState(remote) {
+				this.ensureInit();
+				const parsed = remote;
+				if (typeof parsed !== "object" || parsed === null || parsed.version !== 2) return false;
+				if (!Array.isArray(parsed.boards) || parsed.boards.length === 0) return false;
+				const state = sanitizeStateV2(parsed);
+				this.suppressRemoteOnce = true;
+				this.emit(state, true);
+				return true;
 			}
 			/** 当前激活板（activeBoardId 失效时回落首板；state 规整后恒有 ≥1 板，undefined 仅理论值） */
 			getActiveBoard() {
@@ -5794,12 +5822,16 @@ window.__ModuleLoader__.load({
 											className: "d2-rowdesc",
 											children: c.desc
 										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										c.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 											type: "button",
 											className: "d2-ghost-btn d2-pin-btn",
 											title: pinned ? "已在看板" : "固定到看板",
 											onClick: () => onPin(app, c),
 											children: [pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.check, { size: 13 }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), pinned ? "已固定" : "固定"]
+										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-pin-locked",
+											title: "该组件尚无渲染数据——让 Agent 经 app_backend 生成内容后可固定",
+											children: "待生成"
 										})
 									]
 								}, c.id);
@@ -6212,7 +6244,8 @@ window.__ModuleLoader__.load({
 							title: info.title,
 							type: "panel",
 							desc: info.desc,
-							kind
+							kind,
+							pinnable: true
 						};
 					}).filter((c) => c !== void 0),
 					apis: BUILTIN_APIS
@@ -6221,13 +6254,82 @@ window.__ModuleLoader__.load({
 			};
 		}
 		Object.fromEntries(Object.entries(PRESET_INFO).map(([kind, info]) => [kind, info.props]));
+		const APP_KINDS_REMOTE = [
+			"builtin",
+			"local",
+			"thirdparty"
+		];
+		function str(value, fallback = "") {
+			return typeof value === "string" ? value : fallback;
+		}
+		/** 门面行 → dock AppDescriptor（组件 pinnable=false：无渲染数据，方向 1 协议定 entry 后开放） */
+		function remoteAppToDescriptor(detail) {
+			const name = str(detail.app?.name);
+			if (name.length === 0) return null;
+			const components = (Array.isArray(detail.components) ? detail.components : []).map((c) => {
+				const rid = str(c?.rid);
+				if (rid.length === 0) return null;
+				return {
+					id: rid,
+					title: str(c?.title, rid),
+					type: c?.kind === "artifact" ? "artifact" : "panel",
+					desc: str(c?.description),
+					kind: "",
+					pinnable: false
+				};
+			}).filter((c) => c !== null);
+			const apis = (Array.isArray(detail.apis) ? detail.apis : []).map((api) => ({
+				id: str(api?.rid),
+				domain: str(api?.domain),
+				path: str(api?.path),
+				auth: api?.authType === "key" ? "key" : "none",
+				status: api?.configured === true ? "ok" : "warn",
+				summary: str(api?.summary)
+			})).filter((api) => api.id.length > 0);
+			return {
+				id: name,
+				name: str(detail.app?.displayName, name) || name,
+				kind: APP_KINDS_REMOTE.includes(str(detail.app?.kind)) ? detail.app?.kind : "local",
+				version: str(detail.app?.version, "0.0.0"),
+				desc: str(detail.app?.description),
+				components,
+				apis
+			};
+		}
+		/** GET /openloop/app/registry —— 门面不可用/未装返回 []（APP tab 只剩内置，静默） */
+		async function fetchRemoteApps() {
+			try {
+				const controller = new AbortController();
+				const timer = setTimeout(() => controller.abort(), 4e3);
+				try {
+					const res = await fetch("/openloop/app/registry", { signal: controller.signal });
+					if (!res.ok) return [];
+					const body = await res.json();
+					return (Array.isArray(body?.apps) ? body.apps : []).map((d) => remoteAppToDescriptor(d)).filter((a) => a !== null);
+				} finally {
+					clearTimeout(timer);
+				}
+			} catch {
+				return [];
+			}
+		}
+		/**
+		* M3 合并：内置 APP（本地，渲染器同源）恒在；门面 APP 追加（同 id 去重——本地优先，
+		* 门面里重复注册的 openloop 不产生第二个条目）。
+		*/
+		function mergeApps(builtin, remote) {
+			const seen = new Set(builtin.map((a) => a.id));
+			return [...builtin, ...remote.filter((a) => !seen.has(a.id))];
+		}
 		/**
 		* pin 一个组件资源 = 以「合法最小示例 props」构造一个可渲染的面板实例。
 		* panel.id = kind → tile 来源 ID 显示 `openloop:<kind>`（与资源 ID 一致，命名即寻址）。
+		* 门面组件（pinnable=false / 无 PRESET_INFO 条目）拒绝——渲染数据不存在。
 		*/
 		function buildPanelMetaForComponent(component) {
 			const info = PRESET_INFO[component.kind];
-			const props = info?.props ?? {};
+			if (info === void 0) return null;
+			const props = info.props;
 			return {
 				kind: "panel",
 				meta: {
@@ -6237,7 +6339,7 @@ window.__ModuleLoader__.load({
 						$schema: "openloop.panel/v1",
 						id: component.kind,
 						title: component.title,
-						description: info?.desc,
+						description: info.desc,
 						widgets: [{
 							id: "w1",
 							source: {
@@ -6251,6 +6353,123 @@ window.__ModuleLoader__.load({
 					resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
 				}
 			};
+		}
+		//#endregion
+		//#region src/client/backend-sync.ts
+		const BOARDS_URL = "/openloop/app/boards";
+		const FETCH_TIMEOUT_MS = 4e3;
+		async function fetchJson(url, init) {
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+			try {
+				const res = await fetch(url, {
+					...init,
+					signal: controller.signal
+				});
+				const contentType = res.headers.get("content-type") ?? "";
+				if (!contentType.includes("application/json")) return null;
+				const text = await res.text();
+				return {
+					status: res.status,
+					contentType,
+					body: text.length === 0 ? void 0 : JSON.parse(text)
+				};
+			} finally {
+				clearTimeout(timer);
+			}
+		}
+		/** GET /openloop/app/boards —— 三态结果 */
+		async function fetchRemoteBoards() {
+			try {
+				const res = await fetchJson(BOARDS_URL);
+				if (res === null) return {
+					kind: "not-installed",
+					state: void 0
+				};
+				if (res.status === 404) return {
+					kind: "not-installed",
+					state: void 0
+				};
+				if (!okStatus(res.status)) return {
+					kind: "degraded",
+					state: void 0
+				};
+				const state = res.body?.state;
+				return {
+					kind: "ok",
+					state: state === null ? null : state
+				};
+			} catch {
+				return {
+					kind: "degraded",
+					state: void 0
+				};
+			}
+		}
+		/** PUT /openloop/app/boards —— 全量推送（失败返回 false） */
+		async function pushRemoteBoards(state) {
+			try {
+				const res = await fetchJson(BOARDS_URL, {
+					method: "PUT",
+					body: JSON.stringify(state)
+				});
+				return res !== null && okStatus(res.status);
+			} catch {
+				return false;
+			}
+		}
+		function okStatus(status) {
+			return status >= 200 && status < 300;
+		}
+		function resolveBackendPlan(input) {
+			const { remote, localState } = input;
+			if (remote.kind === "not-installed") return {
+				mode: "local",
+				importRemote: null,
+				migrate: false
+			};
+			if (remote.kind === "degraded") return {
+				mode: "degraded",
+				importRemote: null,
+				migrate: false
+			};
+			if (remote.state !== null) return {
+				mode: "remote",
+				importRemote: remote.state,
+				migrate: false
+			};
+			return {
+				mode: "remote",
+				importRemote: null,
+				migrate: localState.boards.some((b) => b.tiles.length > 0)
+			};
+		}
+		/**
+		* 启动编排：读门面 → 决策 → 载入/迁移 → 安装写钩子。
+		* 返回最终模式（UI 据此显示降级提示条）。绝不抛错（降级不炸页）。
+		*/
+		async function syncBackend(store, hooks = {}) {
+			const fetchBoards = hooks.fetchBoards ?? fetchRemoteBoards;
+			const pushBoards = hooks.pushBoards ?? pushRemoteBoards;
+			const plan = resolveBackendPlan({
+				remote: await fetchBoards(),
+				localState: store.getSnapshot()
+			});
+			if (plan.mode === "remote") {
+				if (plan.importRemote !== null) store.importState(plan.importRemote);
+				else if (plan.migrate) {
+					if (!await pushBoards(store.getSnapshot())) {
+						hooks.onRemoteError?.("看板数据迁移到后端失败——已保留本地存储，稍后自动重试");
+						return "degraded";
+					}
+				}
+				store.setRemotePersist((state) => {
+					pushBoards(state).then((ok) => {
+						if (!ok) hooks.onRemoteError?.("后端同步失败——已本地保存（localStorage 副本不受影响）");
+					});
+				});
+			}
+			return plan.mode;
 		}
 		//#endregion
 		//#region src/client/v2-styles.ts
@@ -6397,7 +6616,11 @@ window.__ModuleLoader__.load({
 .d2-resource-row .d2-pin-btn { opacity: 0; transition: opacity .15s; flex-shrink: 0; }
 .d2-resource-row:hover .d2-pin-btn { opacity: 1; }
 .d2-resource-row.pinned .d2-pin-btn { opacity: 1; color: var(--dsw-alias-state-success-primary, #22c55e); }
+.d2-pin-locked { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); border: 1px dashed var(--dsw-alias-border-l2, rgba(127,127,127,.25)); border-radius: 6px; padding: 2px 8px; flex-shrink: 0; opacity: .8; }
 .d2-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+
+/* ---------- M3：后端降级提示条 ---------- */
+.d2-banner { position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 12%, var(--dsw-alias-tooltip-bg, #43454a)); color: var(--dsw-alias-label-primary, #f9fafb); font-size: 12px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 45%, transparent); box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 100; pointer-events: none; max-width: 80vw; }
 `;
 		//#endregion
 		//#region src/client/index.tsx
@@ -6493,12 +6716,28 @@ window.__ModuleLoader__.load({
 			const [tabState, setTabState] = (0, react.useState)(readTabState);
 			const [railWidth, setRailWidth] = (0, react.useState)(readRailWidth);
 			const [toast, setToast] = (0, react.useState)(null);
+			const [backendMode, setBackendMode] = (0, react.useState)("local");
+			const [remoteApps, setRemoteApps] = (0, react.useState)([]);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
 			(0, react.useEffect)(() => {
 				if (toast === null) return;
 				const timer = setTimeout(() => setToast(null), 2200);
 				return () => clearTimeout(timer);
 			}, [toast]);
+			(0, react.useEffect)(() => {
+				let cancelled = false;
+				syncBackend(dockStore, { onRemoteError: (message) => {
+					if (!cancelled) setToast(message);
+				} }).then((mode) => {
+					if (!cancelled) setBackendMode(mode);
+				});
+				fetchRemoteApps().then((apps) => {
+					if (!cancelled) setRemoteApps(apps);
+				});
+				return () => {
+					cancelled = true;
+				};
+			}, []);
 			const [toggleRight, setToggleRight] = (0, react.useState)(10);
 			(0, react.useEffect)(() => {
 				const update = () => setToggleRight(Math.max(10, window.innerWidth - probeDockRightEdge() + 10));
@@ -6528,7 +6767,8 @@ window.__ModuleLoader__.load({
 			}, []);
 			const state = dockStore.getSnapshot();
 			const totalTiles = state.boards.reduce((n, b) => n + b.tiles.length, 0);
-			const { apps, panelsMissing } = listBuiltinApps();
+			const { apps: builtinApps, panelsMissing } = listBuiltinApps();
+			const apps = mergeApps(builtinApps, remoteApps);
 			const selectedApp = apps.find((a) => a.id === tabState.selectedAppId) ?? apps[0];
 			const activeBoard = state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0];
 			const pinnedIds = new Set((activeBoard?.tiles ?? []).map((t) => sourceIdOf(t.source)).filter((v) => v !== null));
@@ -6577,9 +6817,14 @@ window.__ModuleLoader__.load({
 					selectedAppId: id
 				});
 			};
-			/** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点） */
+			/** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点）。
+			*  门面组件（无渲染数据）拒绝并提示。 */
 			const pinComponent = (_app, component) => {
 				const source = buildPanelMetaForComponent(component);
+				if (source === null) {
+					setToast(`「${component.title}」暂无渲染数据——让 Agent 经 app_backend 生成内容后再固定`);
+					return;
+				}
 				dockStore.pin(source, component.title);
 				persistTabState({
 					tab: "board",
@@ -6676,6 +6921,11 @@ window.__ModuleLoader__.load({
 				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "d2-toast",
 					children: toast
+				}) : null,
+				backendMode === "degraded" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "d2-banner",
+					role: "status",
+					children: "应用后端暂不可用——看板已降级为本地存储（数据不丢，恢复后自动同步）"
 				}) : null
 			] });
 		}

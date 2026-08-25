@@ -1,16 +1,11 @@
 /**
- * AppRegistry（M2：dock 内建实现；M3 将切换到 @openloop/dsh-app 门面，见
- * DOCK_V2_FRONTEND_IMPL §5——registry 只换实现，消费 UI 零改动）。
- *
- * 数据来源两层：
- * - kind 清单运行时读 panels client 的 allPresetKinds()（与渲染器同源——清单里的
- *   kind 必然可渲染，永不漂移；panels 未装/未加载时返回 panelsMissing，UI 降级提示）
- * - 每个 kind 的展示文案（title/desc）与「合法最小示例 props」是本文件的内建表——
- *   pin 即以示例 props 建一个可看的组件实例（tests/preset-samples.spec.ts 用
- *   panels 的 validate 逐一断言全部过检，改预设 schema 时测试会红）
- *
- * 命名即寻址（APP_PLATFORM_DESIGN §2）：组件资源 ID = `openloop:<kind>`，
- * 与 tile 右下角来源 ID（sourceIdOf）同一命名空间。
+ * AppRegistry（M2 内置实现 + M3 门面合并，DOCK_V2_FRONTEND_IMPL §5）：
+ * - 内置 APP `openloop`（本地实现，恒有）：components = panels 预设清单（渲染器同源，
+ *   可 pin）；M3 起第三方/自研 APP 来自 dsh-app 门面（/openloop/app/registry），
+ *   其组件仅浏览（entry 契约待方向 1 协议定义，pinnable=false）
+ * - kind 清单运行时读 panels client 的 allPresetKinds()（panels 未装 → panelsMissing，
+ *   UI 降级提示）；title/desc/示例 props 是 dock 内建表（tests 锁定）
+ * - 命名即寻址：资源 ID = `openloop:<kind>`，与 tile 来源 ID 同命名空间
  */
 import type { AppKind } from './badges.tsx'
 import { getPanelsClient } from './openloop-clients.ts'
@@ -21,10 +16,12 @@ export interface AppComponentDescriptor {
   /** `包名:组件名`（= openloop:<kind>），与 tile 来源 ID 同命名空间 */
   id: string
   title: string
-  type: 'panel'
+  type: 'panel' | 'artifact'
   desc: string
-  /** panels PresetKind（示例 props 的构造键） */
+  /** panels PresetKind（示例 props 的构造键；门面组件为空串） */
   kind: string
+  /** 内置（有示例 props 可渲染）true；门面组件（无渲染数据）false */
+  pinnable: boolean
 }
 
 export interface AppApiDescriptor {
@@ -192,7 +189,7 @@ export function listBuiltinApps(): BuiltinAppsResult {
     .map((kind): AppComponentDescriptor | undefined => {
       const info = PRESET_INFO[kind]
       if (info === undefined) return undefined
-      return { id: `openloop:${kind}`, title: info.title, type: 'panel', desc: info.desc, kind }
+      return { id: `openloop:${kind}`, title: info.title, type: 'panel', desc: info.desc, kind, pinnable: true }
     })
     .filter((c): c is AppComponentDescriptor => c !== undefined)
   return {
@@ -214,13 +211,100 @@ export const presetSamples: Readonly<Record<string, JsonObject>> = Object.fromEn
   Object.entries(PRESET_INFO).map(([kind, info]) => [kind, info.props]),
 )
 
+// ---- M3：门面 registry 合并（/openloop/app/registry） ----
+
+/** 门面 registry 路由的行形态（@openloop/dsh-app routes.ts 契约） */
+interface RemoteAppDetail {
+  app: { name?: unknown; displayName?: unknown; kind?: unknown; version?: unknown; description?: unknown }
+  components: Array<{ rid?: unknown; kind?: unknown; title?: unknown; description?: unknown }>
+  apis: Array<{ rid?: unknown; domain?: unknown; path?: unknown; authType?: unknown; summary?: unknown; configured?: unknown }>
+}
+
+const APP_KINDS_REMOTE: readonly string[] = ['builtin', 'local', 'thirdparty']
+
+function str(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback
+}
+
+/** 门面行 → dock AppDescriptor（组件 pinnable=false：无渲染数据，方向 1 协议定 entry 后开放） */
+function remoteAppToDescriptor(detail: RemoteAppDetail): AppDescriptor | null {
+  const name = str(detail.app?.name)
+  if (name.length === 0) return null
+  const components = (Array.isArray(detail.components) ? detail.components : [])
+    .map((c): AppComponentDescriptor | null => {
+      const rid = str(c?.rid)
+      if (rid.length === 0) return null
+      return {
+        id: rid,
+        title: str(c?.title, rid),
+        type: c?.kind === 'artifact' ? 'artifact' : 'panel',
+        desc: str(c?.description),
+        kind: '',
+        pinnable: false,
+      }
+    })
+    .filter((c): c is AppComponentDescriptor => c !== null)
+  const apis = (Array.isArray(detail.apis) ? detail.apis : [])
+    .map(api => ({
+      id: str(api?.rid),
+      domain: str(api?.domain),
+      path: str(api?.path),
+      auth: api?.authType === 'key' ? 'key' as const : 'none' as const,
+      // 状态点与配置状态一致：configured=false 显示 warn（M2 验收点的真实化）
+      status: api?.configured === true ? 'ok' as const : 'warn' as const,
+      summary: str(api?.summary),
+    }))
+    .filter(api => api.id.length > 0)
+  return {
+    id: name,
+    name: str(detail.app?.displayName, name) || name,
+    kind: (APP_KINDS_REMOTE.includes(str(detail.app?.kind)) ? detail.app?.kind : 'local') as AppKind,
+    version: str(detail.app?.version, '0.0.0'),
+    desc: str(detail.app?.description),
+    components,
+    apis,
+  }
+}
+
+/** GET /openloop/app/registry —— 门面不可用/未装返回 []（APP tab 只剩内置，静默） */
+export async function fetchRemoteApps(): Promise<AppDescriptor[]> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 4000)
+    try {
+      const res = await fetch('/openloop/app/registry', { signal: controller.signal })
+      if (!res.ok) return []
+      const body = await res.json() as { apps?: unknown }
+      const details = Array.isArray(body?.apps) ? body.apps : []
+      return details
+        .map((d): AppDescriptor | null => remoteAppToDescriptor(d as RemoteAppDetail))
+        .filter((a): a is AppDescriptor => a !== null)
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return []
+  }
+}
+
+/**
+ * M3 合并：内置 APP（本地，渲染器同源）恒在；门面 APP 追加（同 id 去重——本地优先，
+ * 门面里重复注册的 openloop 不产生第二个条目）。
+ */
+export function mergeApps(builtin: AppDescriptor[], remote: AppDescriptor[]): AppDescriptor[] {
+  const seen = new Set(builtin.map(a => a.id))
+  return [...builtin, ...remote.filter(a => !seen.has(a.id))]
+}
+
 /**
  * pin 一个组件资源 = 以「合法最小示例 props」构造一个可渲染的面板实例。
  * panel.id = kind → tile 来源 ID 显示 `openloop:<kind>`（与资源 ID 一致，命名即寻址）。
+ * 门面组件（pinnable=false / 无 PRESET_INFO 条目）拒绝——渲染数据不存在。
  */
-export function buildPanelMetaForComponent(component: AppComponentDescriptor): { kind: 'panel'; meta: unknown } {
+export function buildPanelMetaForComponent(component: AppComponentDescriptor): { kind: 'panel'; meta: unknown } | null {
   const info = PRESET_INFO[component.kind]
-  const props = info?.props ?? {}
+  if (info === undefined) return null
+  const props = info.props
   return {
     kind: 'panel',
     meta: {
@@ -230,7 +314,7 @@ export function buildPanelMetaForComponent(component: AppComponentDescriptor): {
         $schema: 'openloop.panel/v1',
         id: component.kind,
         title: component.title,
-        description: info?.desc,
+        description: info.desc,
         widgets: [{ id: 'w1', source: { type: 'preset', kind: component.kind, props } }],
       },
       resolved: {},

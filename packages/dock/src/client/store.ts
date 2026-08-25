@@ -1,10 +1,11 @@
 /**
- * Dock Board store v2（2026-08-25 Dock 2.0）：多看板 + tile 别名 + localStorage 持久化。
+ * Dock Board store v2（2026-08-25 Dock 2.0）：多看板 + tile 别名。
  * 手写 useSyncExternalStore 友好 store（无 zustand 依赖——bundle 尺寸考虑）。
  *
- * v1 → v2 迁移：读到 version:1（单看板）直接包成 boards:[{id:'b-default',...}]
- * 写回 v2，不做双版本兼容层（工程原则：废弃路径直接移除）。
- * STORAGE_KEY 沿用 v1 的 key——迁移在同一 key 原地完成，version 字段区分负载代际。
+ * 持久化（M3 双层）：localStorage 恒为本地副本（v1→v2 迁移也在此完成）；
+ * 远端门面（@openloop/dsh-app 的 /openloop/app/boards）为权威存储——经
+ * setRemotePersist 挂钩后每次 emit 异步推送（fire-and-forget，失败由挂钩方提示）。
+ * 门面不可用时 store 退化为纯 localStorage（降级不炸页，DOCK_V2_FRONTEND_IMPL §7 M3）。
  */
 import { clampLayout, compactTiles, findNearestSlot, fromRglLayout, type RglItem, type TileLayout } from './layout.ts'
 
@@ -73,6 +74,22 @@ function persistState(state: DockBoardState): void {
   } catch { /* 持久化失败不阻断 */ }
 }
 
+/** v2 负载校验：v1 负载（单板 tiles）包成 v2（一次性迁移，无兼容层）；坏数据不进 store */
+function coerceStateV2(parsed: { version?: unknown; tiles?: unknown; boards?: unknown; activeBoardId?: unknown }): DockBoardState | undefined {
+  if (parsed?.version === 2) {
+    return sanitizeStateV2(parsed as { boards?: unknown; activeBoardId?: unknown })
+  }
+  if (parsed?.version === 1 && Array.isArray(parsed.tiles)) {
+    // v1 → v2 一次性迁移：包成单板状态（写回由调用方决定）
+    return {
+      version: 2,
+      boards: [{ id: DEFAULT_BOARD_ID, name: DEFAULT_BOARD_NAME, tiles: sanitizeTiles(parsed.tiles) }],
+      activeBoardId: DEFAULT_BOARD_ID,
+    }
+  }
+  return undefined
+}
+
 /** v2 负载校验：boards 逐个规整（名称兜底、tile 容错）；activeBoardId 失效回落首板 */
 function sanitizeStateV2(parsed: { boards?: unknown; activeBoardId?: unknown }): DockBoardState {
   const rawBoards = Array.isArray(parsed.boards) ? parsed.boards : []
@@ -98,20 +115,11 @@ function readState(): DockBoardState {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw === null) return emptyState()
     const parsed = JSON.parse(raw) as { version?: unknown; tiles?: unknown; boards?: unknown; activeBoardId?: unknown }
-    if (parsed?.version === 2) {
-      return sanitizeStateV2(parsed as { boards?: unknown; activeBoardId?: unknown })
-    }
-    if (parsed?.version === 1 && Array.isArray(parsed.tiles)) {
-      // v1 → v2 一次性迁移：包成单板状态并立即写回（key 不变，负载升代）
-      const migrated: DockBoardState = {
-        version: 2,
-        boards: [{ id: DEFAULT_BOARD_ID, name: DEFAULT_BOARD_NAME, tiles: sanitizeTiles(parsed.tiles) }],
-        activeBoardId: DEFAULT_BOARD_ID,
-      }
-      persistState(migrated)
-      return migrated
-    }
-    return emptyState()
+    const state = coerceStateV2(parsed)
+    if (state === undefined) return emptyState()
+    // v1 迁移的写回（key 不变，负载升代）；v2 无需写回
+    if (parsed?.version !== 2) persistState(state)
+    return state
   } catch {
     return emptyState()
   }
@@ -123,6 +131,10 @@ export class DockStore {
   private state: DockBoardState = emptyState()
   private listeners = new Set<Listener>()
   private initialized = false
+  /** 远端门面写钩子（M3：backend-sync 在门面可用后安装；fire-and-forget） */
+  private remotePersist: ((state: DockBoardState) => void) | null = null
+  /** 远端钩子安装后抑制一次推送（载入远端数据本身不该回推） */
+  private suppressRemoteOnce = false
 
   subscribe(listener: Listener): () => void {
     this.ensureInit()
@@ -145,7 +157,35 @@ export class DockStore {
   private emit(next: DockBoardState, persist = true): void {
     this.state = next
     if (persist) persistState(next)
+    if (this.remotePersist !== null && !this.suppressRemoteOnce) {
+      this.remotePersist(next)
+    } else {
+      this.suppressRemoteOnce = false
+    }
     for (const listener of this.listeners) listener()
+  }
+
+  /** M3：安装远端写钩子（门面模式启动后调用；此后每次 emit 推送远端） */
+  setRemotePersist(fn: ((state: DockBoardState) => void) | null): void {
+    this.remotePersist = fn
+  }
+
+  /**
+   * M3：载入远端权威数据（sanitize；坏数据不进 store）。
+   * 输入契约 = 门面 loadDockState（恒 v2 或 null）——v1 只在 localStorage 读取时迁移，
+   * 远端出现 v1/垃圾负载一律拒绝（严格，返回 false 保持本地态）。
+   */
+  importState(remote: unknown): boolean {
+    this.ensureInit()
+    const parsed = remote as { version?: unknown; boards?: unknown; activeBoardId?: unknown } | null
+    if (typeof parsed !== 'object' || parsed === null || parsed.version !== 2) return false
+    // 空 boards = 畸形负载（门面空时返回 null 而非空数组）——拒绝，防清空本地
+    if (!Array.isArray(parsed.boards) || parsed.boards.length === 0) return false
+    const state = sanitizeStateV2(parsed)
+    // 远端载入不回推（PUT 刚拿到的数据无意义）
+    this.suppressRemoteOnce = true
+    this.emit(state, true)
+    return true
   }
 
   /** 当前激活板（activeBoardId 失效时回落首板；state 规整后恒有 ≥1 板，undefined 仅理论值） */
