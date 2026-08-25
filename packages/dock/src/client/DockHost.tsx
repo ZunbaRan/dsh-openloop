@@ -3,8 +3,10 @@
  *
  * 冲突规避三件套：
  * 1. host div 挂 body（data-openloop-dock），MutationObserver 保活——与 better-sidebar 各挂各的；
- * 2. 挤压用 #root 的 padding-right（better-sidebar 用 margin-right，天然叠加不覆盖）；
- * 3. 空间探测（bsb 的公开布局副作用：#root computed margin-right）+ 500ms poll。
+ * 2. 挤压用 bsb 同款 margin-right + width calc（见 DOCK_DESIGN §1.1 的 2026-08-24 更正：
+ *    padding-right 对固定轨道 grid 的 AppFrame 无挤压效果，已被实测证伪并替换）；
+ * 3. 空间探测读 bsb 的 --dsh-sidebar-width 变量（其设于 <html>，经继承在 #root computed 可见），
+ *    不能再读 computed margin-right——新机制下它包含 dock 自身宽度，会形成反馈回路。
  *
  * 展开交互（2026-08-24 重做，对齐 better-sidebar 体验）：
  * - 面板常驻渲染，宽度过渡（width 0 ↔ W）——从右侧推出的动画效果；
@@ -13,18 +15,22 @@
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { clampDockWidth } from '../shared/dock-width.ts'
+
+export { clampDockWidth, DOCK_MIN_WIDTH, dockMaxWidth } from '../shared/dock-width.ts'
 
 const DOCK_WIDTH_VAR = '--openloop-dock-width'
+const BSB_WIDTH_VAR = '--dsh-sidebar-width'
 const TRANSITION = 'width .22s ease'
 
-/** 右侧空间探测：锚 #root 的 computed margin-right（bsb 的公开布局副作用） */
+/** 右侧空间探测：bsb 占用 = 其 --dsh-sidebar-width（设于 <html>，继承到 #root）。 */
 export function probeDockRightEdge(): number {
   if (typeof window === 'undefined') return 0
   const root = document.getElementById('root')
   if (!root) return window.innerWidth
-  const marginRight = parseFloat(getComputedStyle(root).marginRight) || 0
+  const raw = parseFloat(getComputedStyle(root).getPropertyValue(BSB_WIDTH_VAR)) || 0
   // 防御：异常大值（>70% 视口）视为无效，贴视口右缘
-  const occupied = marginRight > 0 && marginRight < window.innerWidth * 0.7 ? marginRight : 0
+  const occupied = raw > 0 && raw < window.innerWidth * 0.7 ? raw : 0
   return window.innerWidth - occupied
 }
 
@@ -70,12 +76,21 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     }
   }, [])
 
-  // 挤压：#root 的 padding-right（与 better-sidebar 的 margin-right 叠加共存）。
-  // 注入一次全局样式（padding 过渡与面板 width 过渡时长一致，两侧同步推出）
+  // 挤压：bsb 同款 margin-right + width calc（DOCK_DESIGN §1.1）。规则内同时引用 bsb
+  // 变量——本 <style> 运行时注入、在 bsb 样式之后，同优先级后加载胜出，因此 bsb 的开合
+  // 经由这条规则继续生效；bsb 不存在时其变量回落 0。
+  // 注意：不能用 padding-right——AppFrame 是固定轨道 grid，padding 只缩内容盒而
+  // frame 不收缩（2026-08-24 CDP 实测：padding 360 时 frame 右缘纹丝不动，margin+width 正常）。
   useEffect(() => {
     const styleEl = document.createElement('style')
     styleEl.setAttribute('data-openloop-dock-style', '')
-    styleEl.textContent = `#root { padding-right: var(${DOCK_WIDTH_VAR}, 0px); transition: padding-right .22s ease }`
+    styleEl.textContent = [
+      `#root {`,
+      `  margin-right: calc(var(${BSB_WIDTH_VAR}, 0px) + var(${DOCK_WIDTH_VAR}, 0px));`,
+      `  width: calc(100% - var(${BSB_WIDTH_VAR}, 0px) - var(${DOCK_WIDTH_VAR}, 0px));`,
+      `  transition: margin-right .22s ease, width .22s ease;`,
+      `}`,
+    ].join('\n')
     document.head.appendChild(styleEl)
     return () => styleEl.remove()
   }, [])
@@ -96,7 +111,7 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     const startW = widthRef.current
     setResizing(true)
     const move = (e: PointerEvent): void => {
-      const next = Math.round(Math.max(280, Math.min(760, startW + (startX - e.clientX))))
+      const next = clampDockWidth(Math.round(startW + (startX - e.clientX)))
       onWidthChange?.(next)
     }
     const up = (): void => {

@@ -7,10 +7,37 @@
 
 | 冲突点 | 规避手段 |
 |---|---|
-| `#root` 的右侧挤压 | better-sidebar 用 `margin-right`，**我们用 `padding-right`**——天然叠加互不覆盖（本次调研发现的最干净技巧） |
-| 与 better-sidebar 空间错位 | 空间探测（非 API 对接）：`querySelector('[data-dsh-better-sidebar]')` 存在 → dock 定位其左侧（读其 rect 宽度，MutationObserver + resize 跟踪）；不存在 → 贴屏幕右缘。探测失败优雅降级为贴右缘 |
+| `#root` 的右侧挤压 | **margin-right + width calc，与 better-sidebar 共用同一条通道**（见 §1.1 更正——原方案 padding-right 已被实测证伪） |
+| 与 better-sidebar 空间错位 | 空间探测（非 API 对接）：读 bsb 的 `--dsh-sidebar-width` 变量（其设于 `<html>`，继承到 `#root` computed）；不存在 → 贴屏幕右缘。探测失败优雅降级为贴右缘 |
 | DOM 挂载 | host div 挂 body（`data-openloop-dock`），各挂各的 |
 | z-index | dock 用独立高值段（2147483000+），不与其冲突 |
+
+### 1.1 挤压机制更正（2026-08-24，dock 0.3.4）
+
+**原决策（证伪）**：「bsb 用 `margin-right`，我们用 `padding-right`，天然叠加互不覆盖」。
+
+**证伪证据**（对运行中 DSH 实例的 CDP 实测）：
+
+| 注入 | `#root` AppFrame（`.pI_x6G_frame`）右缘 |
+|---|---|
+| `padding-right: 360px`（dock 原方案） | **756 → 756 不动**，frame 溢出到面板下方 → 悬浮感 |
+| `margin-right: 360px` + `width: calc(100% - 360px)`（bsb 方案） | **756 → 396**，center 列重算 = 推出 |
+
+**根因**：AppFrame 是 `display: grid` 且轨道为固定像素（实测 `56px 700px 0px`）。`padding-right` 只缩 `#root` 的内容盒，固定轨道 grid 不随之收缩，frame 原宽溢出到 dock 面板区域——面板即「悬浮在内容上」。bsb 的 margin + width calc 缩的是 `#root` 自身边框盒，width:auto 的 frame 被迫跟随，grid 重算轨道。bsb 源码注释早已记录此考量（`width:100%` 壳下 margin 会溢出视口，须配 calc），dock 初版漏掉了这一层。
+
+**现机制**（与 bsb 完全同款，双变量共存）：
+
+```css
+#root {
+  margin-right: calc(var(--dsh-sidebar-width, 0px) + var(--openloop-dock-width, 0px));
+  width: calc(100% - var(--dsh-sidebar-width, 0px) - var(--openloop-dock-width, 0px));
+  transition: margin-right .22s ease, width .22s ease;
+}
+```
+
+- dock 的 `<style>` 运行时注入、晚于 bsb 样式，同优先级后加载胜出；规则内引用 bsb 变量 → bsb 开合经由本规则继续生效，两者在同一 margin 通道上相加；bsb 不在时其变量回落 0。
+- **连锁修正**：空间探测不能再读 `#root` 的 computed `margin-right`（新机制下含 dock 自身宽度，会形成反馈回路），改读 bsb 的 `--dsh-sidebar-width`（`document.documentElement` 上设置，经继承在 `#root` computed 可见）。
+- **拖宽钳制放宽**：`[280, 760]` → `[320, min(1200px, 70vw)]`（对齐 bsb 可拉宽体验；`clampDockWidth` 统一收口，拖动与持久化共用）。
 
 ## 2. 数据模型（移植 OCIX，简化）
 
