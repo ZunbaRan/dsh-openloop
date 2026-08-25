@@ -6,5 +6,5 @@
     "jsx": "react-jsx", "allowImportingTsExtensions": true, "esModuleInterop": true, "noEmit": true
   },
   "include": ["src", "tests"],
-  "exclude": ["src/client", "tests/client.spec.tsx"]
+  "exclude": ["src/client", "tests/client.spec.tsx", "tests/preset-samples.spec.ts"]
 }

@@ -8,7 +8,7 @@
  * - 空态：引导去 APP 页固定 / 让 Agent 生成
  * - 数据流不变：dockStore（v2 多板）→ 激活板 tiles ↔ RGL 双向映射
  */
-import { Component, useEffect, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Component, useEffect, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { GridLayout, useContainerWidth } from 'react-grid-layout'
 import { GRID_COLUMNS, MAX_ROWS, toRglLayout } from './layout.ts'
 import { dockStore, type DockTile, type DockTileSource } from './store.ts'
@@ -83,8 +83,9 @@ function GridStyles(): null {
   return null
 }
 
-/** 来源 ID（包名:组件名）：panel meta.panel.id / artifact meta.path 文件名；拿不到则不显示 */
-function sourceIdOf(source: DockTileSource): string | null {
+/** 来源 ID（包名:组件名）：panel meta.panel.id / artifact meta.path 文件名；拿不到则不显示。
+ *  APP tab 的 pinned 判定也走这里（AppDetail 的组件资源 ID 与之同命名空间）。 */
+export function sourceIdOf(source: DockTileSource): string | null {
   if (source.kind === 'panel') {
     const panel = (source.meta as { panel?: { id?: unknown } } | null)?.panel
     return typeof panel?.id === 'string' && panel.id.length > 0 ? `openloop:${panel.id}` : null
@@ -294,7 +295,7 @@ export function DockBoardView({ onCollapse }: { onCollapse: () => void }): React
             <div className="d2-tcap">到 APP 页把组件「固定」到看板，或让 Agent 帮你生成</div>
           </div>
         ) : (
-          <div ref={containerRef} style={{ minHeight: 104 }}>
+          <div ref={containerRef as RefObject<HTMLDivElement>} style={{ minHeight: 104 }}>
             <GridStyles />
             {mounted && width > 0
               ? (

@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-html-artifact",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Replayable static or scripted fullscreen HTML artifacts for DeepSeek Harness.",
   "private": true,
   "type": "module",
@@ -11,7 +11,10 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./client": "./lib/client.js",
+    "./client": {
+      "types": "./src/client/index.tsx",
+      "default": "./lib/client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },

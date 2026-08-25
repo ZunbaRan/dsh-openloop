@@ -5157,6 +5157,10 @@ window.__ModuleLoader__.load({
 		function getPreset(kind) {
 			return registry[kind];
 		}
+		/** 已注册的全部预设 kind（批 1 + 批 2 + 批 3 + 批 4，共 26 个） */
+		function allPresetKinds() {
+			return Object.keys(registry).sort();
+		}
 		//#endregion
 		//#region src/packs/manifest.ts
 		/** pack 资产路由前缀（§9）：绝对路径、无尾部斜杠；panels 独占，撞前缀即 register 抛错（IMPL_NOTES §1.4） */
@@ -6188,6 +6192,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		//#endregion
 		exports.PanelCard = PanelCard;
 		exports.PanelSurface = PanelSurface;
+		exports.allPresetKinds = allPresetKinds;
 		exports.apply = apply;
 		exports.getDockService = getDockService;
 		exports.inject = inject;

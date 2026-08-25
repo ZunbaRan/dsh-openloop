@@ -5045,7 +5045,8 @@ window.__ModuleLoader__.load({
 			}, []);
 			return null;
 		}
-		/** 来源 ID（包名:组件名）：panel meta.panel.id / artifact meta.path 文件名；拿不到则不显示 */
+		/** 来源 ID（包名:组件名）：panel meta.panel.id / artifact meta.path 文件名；拿不到则不显示。
+		*  APP tab 的 pinned 判定也走这里（AppDetail 的组件资源 ID 与之同命名空间）。 */
 		function sourceIdOf(source) {
 			if (source.kind === "panel") {
 				const panel = source.meta?.panel;
@@ -5363,6 +5364,23 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/client/badges.tsx
+		const KIND_LABEL = {
+			builtin: "内置",
+			thirdparty: "第三方",
+			local: "自研"
+		};
+		function KindBadge({ kind, label }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: `d2-badge ${kind}`,
+				children: label ?? KIND_LABEL[kind]
+			});
+		}
+		function TypeBadge({ type }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "d2-badge kind",
+				children: type
+			});
+		}
 		function AppIcon({ app, size = 28 }) {
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 				className: `d2-app-icon ${app.kind}`,
@@ -5543,6 +5561,698 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
+		//#region src/client/AppListPanel.tsx
+		/**
+		* APP tab：左侧 AppListPanel 侧栏 + 右侧 AppDetail 详情（原型 direction-a.jsx
+		* apps 段直搬 + TS 化，类名 d2- 前缀，样式见 v2-styles.ts）。
+		*
+		* - 侧栏三交互（M2 验收点）：拖宽（190–420，连续值）/ 收起（48px 图标条）/ 列表↔卡片视图
+		* - UI 态持久化 openloop.dock.app-panel.v1：{ width, collapsed, view }（不进 dockStore）
+		* - 详情：组件资源（pin 到当前看板页）/ API 资源（状态点 + 鉴权徽章）
+		* - pin = 以示例 props 建一个面板实例（app-registry.buildPanelMetaForComponent），
+		*   pin 后由父层跳回看板 tab（验收点：pin 后 tile 出现）
+		*/
+		const PANEL_UI_KEY = "openloop.dock.app-panel.v1";
+		const DEFAULT_WIDTH$1 = 230;
+		const MIN_WIDTH = 190;
+		const MAX_WIDTH = 420;
+		function readPanelUi() {
+			try {
+				const raw = localStorage.getItem(PANEL_UI_KEY);
+				if (raw === null) return {
+					width: DEFAULT_WIDTH$1,
+					collapsed: false,
+					view: "card"
+				};
+				const p = JSON.parse(raw);
+				return {
+					width: typeof p.width === "number" ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(p.width))) : DEFAULT_WIDTH$1,
+					collapsed: p.collapsed === true,
+					view: p.view === "list" ? "list" : "card"
+				};
+			} catch {
+				return {
+					width: DEFAULT_WIDTH$1,
+					collapsed: false,
+					view: "card"
+				};
+			}
+		}
+		function writePanelUi(state) {
+			try {
+				localStorage.setItem(PANEL_UI_KEY, JSON.stringify(state));
+			} catch {}
+		}
+		function AppListPanel({ apps, selectedAppId, onSelect }) {
+			const [ui, setUi] = (0, react.useState)(readPanelUi);
+			const [query, setQuery] = (0, react.useState)("");
+			const [dragging, setDragging] = (0, react.useState)(false);
+			const update = (patch) => {
+				const next = {
+					...ui,
+					...patch
+				};
+				setUi(next);
+				writePanelUi(next);
+			};
+			const filtered = query.trim() === "" ? apps : apps.filter((a) => a.name.toLowerCase().includes(query.trim().toLowerCase()));
+			const onHandleDown = (e) => {
+				setDragging(true);
+				dragResize(e, ui.width, MIN_WIDTH, MAX_WIDTH, (w) => setUi((u) => ({
+					...u,
+					width: w
+				})), (w) => {
+					setDragging(false);
+					const next = {
+						...ui,
+						width: Math.round(w)
+					};
+					setUi(next);
+					writePanelUi(next);
+				});
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("aside", {
+				className: `d2-app-list${ui.collapsed ? " collapsed" : ""}${dragging ? " d2-dragging" : ""}`,
+				style: ui.collapsed ? void 0 : { width: ui.width },
+				children: ui.collapsed ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "d2-list-head",
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: "d2-collapse-btn",
+						title: "展开 APP 列表",
+						onClick: () => update({ collapsed: false }),
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronR, { size: 14 })
+					})
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "d2-rows",
+					children: apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						className: `d2-app-mini${a.id === selectedAppId ? " on" : ""}`,
+						title: a.name,
+						onClick: () => {
+							onSelect(a.id);
+							update({ collapsed: false });
+						},
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+							app: a,
+							size: 22
+						})
+					}, a.id))
+				})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-list-head",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-search-input",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.search, { size: 13 }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+									placeholder: "搜索 APP",
+									"aria-label": "搜索 APP",
+									value: query,
+									onChange: (e) => setQuery(e.target.value)
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-view-seg",
+								role: "group",
+								"aria-label": "列表视图切换",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: ui.view === "list" ? "on" : "",
+									title: "列表视图",
+									onClick: () => update({ view: "list" }),
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.list, { size: 13 })
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: ui.view === "card" ? "on" : "",
+									title: "卡片视图",
+									onClick: () => update({ view: "card" }),
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.grid, { size: 13 })
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "d2-collapse-btn",
+								title: "收起",
+								onClick: () => update({ collapsed: true }),
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronL, { size: 14 })
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-rows",
+						children: [filtered.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: `d2-app-row${ui.view === "list" ? " compact" : ""}${a.id === selectedAppId ? " on" : ""}`,
+							onClick: () => onSelect(a.id),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "d2-meta",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-name",
+										children: a.name
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "d2-sub",
+										children: [
+											a.components.length,
+											" 组件 · ",
+											a.apis.length,
+											" API"
+										]
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
+							]
+						}, a.id)), filtered.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "d2-app-empty",
+							children: "无匹配 APP"
+						}) : null]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-resize-h",
+						role: "separator",
+						"aria-orientation": "vertical",
+						"aria-label": "调整 APP 列表宽度",
+						title: "拖动调整宽度",
+						onPointerDown: onHandleDown
+					})
+				] })
+			});
+		}
+		function AppDetail({ app, pinnedIds, onPin }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "d2-app-detail",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+					className: "d2-app-detail-head",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+							app,
+							size: 36
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-title-block",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h2", { children: [
+								app.name,
+								" ",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "d2-ver",
+									children: ["v", app.version]
+								})
+							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-desc",
+								children: app.desc
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-resource-groups",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+						className: "d2-resource-group",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-badge kind",
+							children: app.components.length
+						})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "d2-resource-list",
+							children: app.components.map((c) => {
+								const pinned = pinnedIds.has(c.id);
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: `d2-resource-row${pinned ? " pinned" : ""}`,
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "d2-meta",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "d2-name",
+												children: c.title
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "d2-rid",
+												children: c.id
+											})]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-rowdesc",
+											children: c.desc
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+											type: "button",
+											className: "d2-ghost-btn d2-pin-btn",
+											title: pinned ? "已在看板" : "固定到看板",
+											onClick: () => onPin(app, c),
+											children: [pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.check, { size: 13 }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), pinned ? "已固定" : "固定"]
+										})
+									]
+								}, c.id);
+							})
+						})]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+						className: "d2-resource-group",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-badge kind",
+							children: app.apis.length
+						})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "d2-resource-list",
+							children: app.apis.map((api) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-resource-row",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: `d2-dot ${api.status}`,
+										title: api.status === "ok" ? "已配置" : "需要注意"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "d2-meta",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "d2-name",
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "d2-mono",
+												children: api.path
+											})
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "d2-rid",
+											children: [
+												api.domain,
+												" · ",
+												api.id
+											]
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-rowdesc",
+										children: api.summary
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-badge kind",
+										children: api.auth === "key" ? "key + 域名" : "无鉴权"
+									})
+								]
+							}, api.id))
+						})]
+					})]
+				})]
+			});
+		}
+		//#endregion
+		//#region src/client/app-registry.ts
+		const textChild = (id, text) => ({
+			id,
+			source: {
+				type: "preset",
+				kind: "text",
+				props: { text }
+			}
+		});
+		/** 26 个已实现预设的展示文案 + 示例 props（与 panels tests/presets 单测样例同源） */
+		const PRESET_INFO = {
+			accordion: {
+				title: "折叠面板",
+				desc: "可展开收起的条目组",
+				props: {
+					title: "使用说明",
+					items: [{
+						label: "第一步",
+						content: "克隆仓库"
+					}, {
+						label: "第二步",
+						content: "安装依赖"
+					}]
+				}
+			},
+			avatar: {
+				title: "头像",
+				desc: "姓名首字圆形徽标",
+				props: { name: "王小明" }
+			},
+			badge: {
+				title: "徽章",
+				desc: "短状态标签",
+				props: {
+					label: "Beta",
+					tone: "info"
+				}
+			},
+			callout: {
+				title: "提示条",
+				desc: "醒目的信息 / 警告",
+				props: {
+					tone: "info",
+					title: "提示",
+					description: "这是一条提示信息"
+				}
+			},
+			card: {
+				title: "卡片",
+				desc: "带标题的内容分组",
+				props: {
+					title: "卡片标题",
+					description: "卡片描述",
+					children: [textChild("w1", "卡片内容")]
+				}
+			},
+			chart: {
+				title: "图表",
+				desc: "折线 / 柱状 / 环形",
+				props: {
+					variant: "line",
+					xKey: "day",
+					data: [
+						{
+							day: "周一",
+							visits: 3
+						},
+						{
+							day: "周二",
+							visits: 5
+						},
+						{
+							day: "周三",
+							visits: 4
+						}
+					],
+					series: [{ key: "visits" }],
+					area: true
+				}
+			},
+			comparison: {
+				title: "对比表",
+				desc: "多方案逐项对比",
+				props: {
+					title: "方案对比",
+					columns: [{
+						id: "basic",
+						title: "基础版",
+						subtitle: "免费"
+					}, {
+						id: "pro",
+						title: "专业版",
+						subtitle: "¥99/月",
+						recommended: true
+					}],
+					rows: [{
+						label: "存储空间",
+						values: ["5 GB", "100 GB"]
+					}, {
+						label: "团队协作",
+						values: ["不支持", "支持"]
+					}]
+				}
+			},
+			"data-table": {
+				title: "数据表格",
+				desc: "结构化数据表",
+				props: {
+					title: "订单明细",
+					columns: [{
+						key: "name",
+						label: "客户"
+					}, {
+						key: "amount",
+						label: "金额",
+						format: "currency-cny"
+					}],
+					rows: [{
+						id: 1,
+						name: "甲公司",
+						amount: 1234.5
+					}, {
+						id: 2,
+						name: "乙公司",
+						amount: 99
+					}]
+				}
+			},
+			divider: {
+				title: "分隔线",
+				desc: "段落分隔（可带标签）",
+				props: { label: "里程碑" }
+			},
+			flow: {
+				title: "流程图",
+				desc: "节点与连边流程",
+				props: {
+					title: "发布流程",
+					nodes: [
+						{
+							id: "a",
+							label: "提交代码",
+							tone: "info"
+						},
+						{
+							id: "b",
+							label: "CI 构建"
+						},
+						{
+							id: "c",
+							label: "部署上线",
+							tone: "success"
+						}
+					],
+					edges: [{
+						from: "a",
+						to: "b",
+						label: "push"
+					}, {
+						from: "b",
+						to: "c"
+					}]
+				}
+			},
+			funnel: {
+				title: "漏斗",
+				desc: "阶段转化比例",
+				props: {
+					title: "转化漏斗",
+					stages: [{
+						label: "访问",
+						value: 1e3
+					}, {
+						label: "下单",
+						value: 320
+					}]
+				}
+			},
+			gauge: {
+				title: "仪表盘",
+				desc: "单值占比仪表",
+				props: {
+					label: "完成率",
+					value: 45,
+					unit: "%"
+				}
+			},
+			grid: {
+				title: "网格",
+				desc: "等宽格子布局",
+				props: {
+					columns: 2,
+					children: [textChild("w1", "格子 A"), textChild("w2", "格子 B")]
+				}
+			},
+			heading: {
+				title: "标题",
+				desc: "章节标题",
+				props: {
+					text: "标题",
+					level: 2
+				}
+			},
+			heatmap: {
+				title: "热力图",
+				desc: "矩阵强度分布",
+				props: { matrix: [[1, 2], [3, 4]] }
+			},
+			markdown: {
+				title: "Markdown",
+				desc: "富文本渲染",
+				props: { content: "# 摘要\n\n支持 **加粗**、`代码` 与列表" }
+			},
+			"metric-grid": {
+				title: "指标网格",
+				desc: "KPI 大数字卡片",
+				props: { items: [{
+					id: "rev",
+					label: "月营收",
+					value: 48210,
+					format: "currency-cny",
+					delta: "+12.4%",
+					deltaTone: "up"
+				}, {
+					id: "ord",
+					label: "订单数",
+					value: 1208,
+					delta: "-2.1%",
+					deltaTone: "down"
+				}] }
+			},
+			progress: {
+				title: "进度条",
+				desc: "目标完成度",
+				props: {
+					label: "完成度",
+					value: 50,
+					max: 100
+				}
+			},
+			row: {
+				title: "横向行",
+				desc: "水平排列子组件",
+				props: { children: [textChild("w1", "项 A"), textChild("w2", "项 B")] }
+			},
+			section: {
+				title: "分区",
+				desc: "带标题的内容区块",
+				props: { title: "分区标题" }
+			},
+			sparkline: {
+				title: "迷你走势",
+				desc: "数值 + 趋势火花线",
+				props: {
+					label: "近 7 日访问",
+					value: 1280,
+					series: [
+						1,
+						3,
+						2,
+						5,
+						4,
+						8,
+						6
+					]
+				}
+			},
+			split: {
+				title: "分栏",
+				desc: "左右两栏布局",
+				props: { children: [textChild("l", "左栏"), textChild("r", "右栏")] }
+			},
+			stack: {
+				title: "纵向堆叠",
+				desc: "垂直排列子组件",
+				props: { children: [textChild("w1", "条目一"), textChild("w2", "条目二")] }
+			},
+			tag: {
+				title: "标签",
+				desc: "技术 / 分类小标签",
+				props: { label: "React" }
+			},
+			text: {
+				title: "文本",
+				desc: "基础段落文本",
+				props: { text: "一段说明文本" }
+			},
+			timeline: {
+				title: "时间线",
+				desc: "事件先后序列",
+				props: {
+					title: "迭代节奏",
+					items: [{
+						id: "t1",
+						title: "需求评审",
+						status: "past",
+						time: "周一"
+					}, {
+						id: "t2",
+						title: "开发联调",
+						status: "current",
+						time: "周三",
+						detail: "进行中"
+					}]
+				}
+			}
+		};
+		/**
+		* M2 内置 APP 的 API 资源（mock）：演示 API 分组的展示形态（状态点 / 鉴权徽章）。
+		* M3 接 @openloop/dsh-app 门面后由真实 API 配置替换。
+		*/
+		const BUILTIN_APIS = [
+			{
+				id: "openloop:boards",
+				domain: "local.app",
+				path: "/api/boards",
+				auth: "none",
+				status: "ok",
+				summary: "看板集合的 CRUD（本地后端）"
+			},
+			{
+				id: "openloop:tiles",
+				domain: "local.app",
+				path: "/api/tiles",
+				auth: "none",
+				status: "ok",
+				summary: "看板 tile 的排布与快照"
+			},
+			{
+				id: "openloop:components",
+				domain: "local.app",
+				path: "/api/components",
+				auth: "none",
+				status: "ok",
+				summary: "APP 组件资源注册表"
+			}
+		];
+		/** 内置 APP（openloop）：组件 = panels 已实现预设清单，API = mock */
+		function listBuiltinApps() {
+			const panels = getPanelsClient();
+			const kinds = panels?.allPresetKinds();
+			if (panels === void 0 || kinds === void 0) return {
+				apps: [],
+				panelsMissing: true
+			};
+			return {
+				apps: [{
+					id: "openloop",
+					name: "OpenLoop",
+					kind: "builtin",
+					version: "1.0.0",
+					desc: "系统内置 APP：预置 panels 组件与本地后端 API，开箱即用。",
+					components: kinds.map((kind) => {
+						const info = PRESET_INFO[kind];
+						if (info === void 0) return void 0;
+						return {
+							id: `openloop:${kind}`,
+							title: info.title,
+							type: "panel",
+							desc: info.desc,
+							kind
+						};
+					}).filter((c) => c !== void 0),
+					apis: BUILTIN_APIS
+				}],
+				panelsMissing: false
+			};
+		}
+		Object.fromEntries(Object.entries(PRESET_INFO).map(([kind, info]) => [kind, info.props]));
+		/**
+		* pin 一个组件资源 = 以「合法最小示例 props」构造一个可渲染的面板实例。
+		* panel.id = kind → tile 来源 ID 显示 `openloop:<kind>`（与资源 ID 一致，命名即寻址）。
+		*/
+		function buildPanelMetaForComponent(component) {
+			const info = PRESET_INFO[component.kind];
+			const props = info?.props ?? {};
+			return {
+				kind: "panel",
+				meta: {
+					kind: "openloop.panel",
+					version: 1,
+					panel: {
+						$schema: "openloop.panel/v1",
+						id: component.kind,
+						title: component.title,
+						description: info?.desc,
+						widgets: [{
+							id: "w1",
+							source: {
+								type: "preset",
+								kind: component.kind,
+								props
+							}
+						}]
+					},
+					resolved: {},
+					resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+				}
+			};
+		}
+		//#endregion
 		//#region src/client/v2-styles.ts
 		/**
 		* Dock 2.0 组件样式（原型 <style> 直搬 + 类名 d2- 前缀化 + token 零映射）。
@@ -5631,6 +6341,63 @@ window.__ModuleLoader__.load({
 /* ---------- 空态 / 提示 ---------- */
 .d2-empty-note { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 20px; color: var(--dsw-alias-label-caption, #888); text-align: center; font-size: 12px; line-height: 1.7; }
 .d2-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: var(--dsw-alias-tooltip-bg, #43454a); color: var(--dsw-alias-label-primary, #f9fafb); font-size: 12px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 100; pointer-events: none; }
+
+/* ---------- APP tab（M2：侧栏 + 详情，原型 .app-list/.app-detail 段直搬） ---------- */
+.d2-apps { flex: 1; min-width: 0; min-height: 0; display: flex; }
+
+.d2-app-list { width: 230px; flex-shrink: 0; position: relative; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); }
+.d2-app-list.d2-dragging { transition: none; }
+.d2-app-list .d2-list-head { padding: 10px 10px 8px; display: flex; align-items: center; gap: 6px; }
+.d2-app-list .d2-list-head .d2-search-input { flex: 1; min-width: 0; }
+.d2-app-list .d2-rows { flex: 1; overflow-y: auto; padding: 0 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+
+.d2-search-input { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, inherit); font-size: 12px; }
+.d2-search-input input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: inherit; font-size: 12px; font-family: inherit; }
+.d2-search-input:focus-within { border-color: var(--dsw-alias-state-business-primary, #4176e6); }
+
+.d2-view-seg { display: flex; border-radius: 7px; background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); padding: 2px; gap: 2px; flex-shrink: 0; }
+.d2-view-seg button { display: flex; align-items: center; padding: 3px 7px; border-radius: 5px; color: var(--dsw-alias-label-tertiary, inherit); background: none; border: 0; cursor: pointer; }
+.d2-view-seg button.on { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, inherit); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+.d2-collapse-btn { display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 7px; color: var(--dsw-alias-label-tertiary, inherit); flex-shrink: 0; background: none; border: 0; cursor: pointer; }
+.d2-collapse-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
+
+.d2-app-row { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 8px; text-align: left; background: none; border: 0; cursor: pointer; }
+.d2-app-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-app-row.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
+.d2-app-row .d2-meta { min-width: 0; flex: 1; }
+.d2-app-row .d2-name { display: block; font-size: 12.5px; color: var(--dsw-alias-label-primary, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d2-app-row .d2-sub { display: block; font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); margin-top: 1px; }
+.d2-app-row.compact .d2-sub { display: none; }
+.d2-app-empty { padding: 14px 10px; font-size: 11.5px; color: var(--dsw-alias-label-caption, #888); text-align: center; }
+
+.d2-app-list.collapsed { width: 48px; }
+.d2-app-list.collapsed .d2-list-head { padding: 10px 0 4px; justify-content: center; }
+.d2-app-list.collapsed .d2-rows { align-items: center; gap: 4px; padding: 4px 0 10px; }
+.d2-app-mini { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary, inherit); background: none; border: 0; cursor: pointer; }
+.d2-app-mini:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-app-mini.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
+
+.d2-app-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; }
+.d2-app-detail-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); }
+.d2-app-detail-head .d2-title-block { min-width: 0; flex: 1; }
+.d2-app-detail-head h2 { font-size: 16px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); margin: 0; }
+.d2-app-detail-head .d2-ver { font-size: 11px; font-weight: 400; color: var(--dsw-alias-label-tertiary, inherit); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.d2-app-detail-head .d2-desc { font-size: 12px; color: var(--dsw-alias-label-tertiary, inherit); margin-top: 3px; }
+.d2-resource-groups { padding: 12px 18px 20px; display: flex; flex-direction: column; gap: 18px; }
+.d2-resource-group > h3 { font-size: 11px; font-weight: 600; letter-spacing: .05em; color: var(--dsw-alias-label-caption, #888); margin: 0 0 8px; display: flex; align-items: center; gap: 8px; }
+.d2-resource-list { display: flex; flex-direction: column; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); border-radius: 10px; overflow: hidden; }
+.d2-resource-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: var(--dsw-alias-bg-layer-1, #fff); }
+.d2-resource-row + .d2-resource-row { border-top: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); }
+.d2-resource-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-resource-row .d2-meta { min-width: 0; flex: 1; }
+.d2-resource-row .d2-name { font-size: 12.5px; color: var(--dsw-alias-label-primary, inherit); display: flex; align-items: center; gap: 7px; }
+.d2-resource-row .d2-rid { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); font-family: ui-monospace, "SF Mono", Menlo, monospace; margin-top: 1px; }
+.d2-resource-row .d2-rowdesc { font-size: 11px; color: var(--dsw-alias-label-tertiary, inherit); flex-shrink: 0; }
+.d2-resource-row .d2-pin-btn { opacity: 0; transition: opacity .15s; flex-shrink: 0; }
+.d2-resource-row:hover .d2-pin-btn { opacity: 1; }
+.d2-resource-row.pinned .d2-pin-btn { opacity: 1; color: var(--dsw-alias-state-success-primary, #22c55e); }
+.d2-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
 `;
 		//#endregion
 		//#region src/client/index.tsx
@@ -5696,48 +6463,34 @@ window.__ModuleLoader__.load({
 				return 52;
 			}
 		}
-		function readTab() {
+		function readTabState() {
 			try {
-				return localStorage.getItem(TAB_KEY) === "apps" ? "apps" : "board";
+				const raw = localStorage.getItem(TAB_KEY);
+				if (raw === null) return {
+					tab: "board",
+					selectedAppId: null
+				};
+				if (raw === "apps" || raw === "board") return {
+					tab: raw,
+					selectedAppId: null
+				};
+				const p = JSON.parse(raw);
+				return {
+					tab: p.tab === "apps" ? "apps" : "board",
+					selectedAppId: typeof p.selectedAppId === "string" ? p.selectedAppId : null
+				};
 			} catch {
-				return "board";
+				return {
+					tab: "board",
+					selectedAppId: null
+				};
 			}
-		}
-		/** APP tab 占位（M1：注册表未接，M2 由 AppListPanel + AppDetail 替换） */
-		function AppsPlaceholder() {
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
-				style: {
-					flex: 1,
-					minWidth: 0,
-					minHeight: 0,
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "center"
-				},
-				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d2-empty-note",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: {
-								fontSize: 22,
-								opacity: .6
-							},
-							children: "🧩"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "APP 体系建设中" }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "d2-tcap",
-							children: "组件与 API 注册表接入后，这里可以浏览和固定资源"
-						})
-					]
-				})
-			});
 		}
 		function DockShell() {
 			const [open, setOpen] = (0, react.useState)(() => dockStore.getSnapshot().boards.some((b) => b.tiles.length > 0));
 			const [version, setVersion] = (0, react.useState)(0);
 			const [width, setWidth] = (0, react.useState)(readStoredWidth);
-			const [tab, setTab] = (0, react.useState)(readTab);
+			const [tabState, setTabState] = (0, react.useState)(readTabState);
 			const [railWidth, setRailWidth] = (0, react.useState)(readRailWidth);
 			const [toast, setToast] = (0, react.useState)(null);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
@@ -5775,11 +6528,21 @@ window.__ModuleLoader__.load({
 			}, []);
 			const state = dockStore.getSnapshot();
 			const totalTiles = state.boards.reduce((n, b) => n + b.tiles.length, 0);
-			const persistTab = (next) => {
-				setTab(next);
+			const { apps, panelsMissing } = listBuiltinApps();
+			const selectedApp = apps.find((a) => a.id === tabState.selectedAppId) ?? apps[0];
+			const activeBoard = state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0];
+			const pinnedIds = new Set((activeBoard?.tiles ?? []).map((t) => sourceIdOf(t.source)).filter((v) => v !== null));
+			const persistTabState = (next) => {
+				setTabState(next);
 				try {
-					localStorage.setItem(TAB_KEY, next);
+					localStorage.setItem(TAB_KEY, JSON.stringify(next));
 				} catch {}
+			};
+			const persistTab = (tab) => {
+				persistTabState({
+					...tabState,
+					tab
+				});
 			};
 			/** rail 松手吸附：持久化 rail 宽；内容区保底 DOCK_MIN_WIDTH（rail 变宽挤压时自动撑开 dock） */
 			const commitRailWidth = (next) => {
@@ -5807,6 +6570,30 @@ window.__ModuleLoader__.load({
 				dockStore.removeBoard(id);
 				if (target !== void 0) setToast(`已删除「${target.name}」`);
 			};
+			/** APP tab 选中（rail mini icon / 侧栏行共用） */
+			const openApp = (id) => {
+				persistTabState({
+					tab: "apps",
+					selectedAppId: id
+				});
+			};
+			/** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点） */
+			const pinComponent = (_app, component) => {
+				const source = buildPanelMetaForComponent(component);
+				dockStore.pin(source, component.title);
+				persistTabState({
+					tab: "board",
+					selectedAppId: tabState.selectedAppId
+				});
+				setToast(`已固定「${component.title}」到当前看板`);
+			};
+			const railApps = apps.map((a) => ({
+				id: a.id,
+				name: a.name,
+				kind: a.kind,
+				apiTone: a.apis.some((x) => x.status === "warn") ? "warn" : "ok",
+				hint: `${a.components.length} 组件 · ${a.apis.length} API`
+			}));
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockToggle, {
 					open,
@@ -5831,11 +6618,11 @@ window.__ModuleLoader__.load({
 						},
 						"data-dock-version": version,
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailNav, {
-							tab,
+							tab: tabState.tab,
 							onTabChange: persistTab,
-							apps: [],
-							selectedAppId: null,
-							onOpenApp: () => persistTab("apps"),
+							apps: railApps,
+							selectedAppId: selectedApp?.id ?? null,
+							onOpenApp: openApp,
 							boards: state.boards,
 							activeBoardId: state.activeBoardId,
 							onSelectBoard: (id) => dockStore.setActiveBoard(id),
@@ -5845,7 +6632,45 @@ window.__ModuleLoader__.load({
 							width: railWidth,
 							onWidthChange: setRailWidth,
 							onWidthCommit: commitRailWidth
-						}), tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, { onCollapse: () => setOpen(false) }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppsPlaceholder, {})]
+						}), tabState.tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, { onCollapse: () => setOpen(false) }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
+							className: "d2-apps",
+							children: panelsMissing ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-empty-note",
+								style: { margin: "auto" },
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										style: {
+											fontSize: 22,
+											opacity: .6
+										},
+										children: "🧩"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "APP 注册表不可用" }),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "d2-tcap",
+										children: "安装 / 启用 @openloop/dsh-panels 后，这里可以浏览和固定组件"
+									})
+								]
+							}) : selectedApp === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-empty-note",
+								style: { margin: "auto" },
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										fontSize: 22,
+										opacity: .6
+									},
+									children: "🧩"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "暂无 APP" })]
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppListPanel, {
+								apps,
+								selectedAppId: selectedApp.id,
+								onSelect: openApp
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppDetail, {
+								app: selectedApp,
+								pinnedIds,
+								onPin: pinComponent
+							})] })
+						})]
 					})
 				}),
 				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
