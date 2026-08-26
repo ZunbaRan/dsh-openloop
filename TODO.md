@@ -18,13 +18,13 @@
   - skill `openloop-app-doctor`：症状→诊断→修复决策树（未启动→等/重启；下载失败→网络/手动二进制；端口占用/数据目录权限→提示路径）
   - app_backend 增 action：`backend_health`（详细状态）/ `backend_restart`（手动重启）
   - 错误消息面向 Agent 自修正（既有纪律）
-- [ ] **P4 · 存储语义收紧**（写路径 server-first）：
-  - dock store 写操作：先推门面（短超时），失败才写 localStorage 镜像 + toast 提示
-  - localStorage 定位从「兜底」改为「缓存镜像」（门面恢复后自动对齐——下次启动时门面权威载入已覆盖大半，补一个恢复后的主动回拉）
-  - 看板数据读取：启动时门面权威载入逻辑不变
-- [ ] **P5 · 面板持久化迁移评估**（workspace 文件 → PB，服务接管方向的自然延伸）：
-  - 评估 `openloop-panels/*.json` 是否迁入 PB（agent 读写通道改变、panelFile 调试通道保留与否、与 workspace 文件的双写策略）
-  - 结论先写回 TODO 再动手
+- [x] **P4 · 存储语义收紧**（2026-08-26 完成，dock 0.7.0）：写路径 server-first（推送失败 → pendingSync 标记 + localStorage 镜像；连续 2 次失败 → 降级提示条）；启动决策 reconcile 优先于权威载入（镜像含未对齐修改 → 回推门面）；P1 轻探循环兼作恢复探测（门面恢复 → revalidateBackend 对齐 + 撤降级）。localStorage 定位注释全部改为「缓存镜像」
+- [x] **P5 · 面板持久化迁移评估**（2026-08-26 结论：**暂不迁移，保持 workspace 文件**）：
+  - **现状事实**：panel persist 落 `<workspace>/openloop-panels/*.json`（ctx.fs + sandbox seam，按项目隔离）；agent 可用 read/write 工具直接编辑（用户已在 dsh/ 目录实测 5 个面板 JSON）；panelFile 调试通道（read→改→write→重渲染）依赖此布局
+  - **迁移收益**：单一存储（与 boards/tiles 同库）；跨 workspace 可见（「面板库」语义）
+  - **迁移代价**：① agent 读写通道从 fs 工具改为 app_backend action（新增 panel CRUD 四个 action + skill 更新）② panelFile 调试闭环重做或废弃 ③ 现有面板文件的一次性迁移脚本 ④ panels 插件对 dsh-app 的反向依赖（现在是零依赖——panels 不该知道 app 存在；需经可选 inject/window 桥，复杂度实打实）⑤ 失去「git 可 diff 的 JSON 文件」调试性
+  - **裁定**：当前痛点（用户已满意：agent 能读写、能 pin、dock 有快照）不成立；迁移唯一动机是「跨 workspace 面板库」——等真实需求出现（如多项目复用面板）再做，届时按「新增 PB 通道 + 文件通道并行、skill 指导 agent 按需选择」渐进式迁移，不搞一刀切
+  - **重新评估触发条件**：用户提出跨项目共享面板需求 / panels 文件量失控 / 需要面板版本历史
 
 ## 平台里程碑（APP_PLATFORM_DESIGN §9 对应）
 

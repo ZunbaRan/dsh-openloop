@@ -11,14 +11,14 @@
  * - 右上角浮动开关（不依赖 slots，零冲突）
  */
 import type { Context } from '@deepseek-ai/cordis'
-import { createElement, useEffect, useState, type ReactNode } from 'react'
+import { createElement, useEffect, useRef, useState, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './DockHost.tsx'
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
 import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab, type RailAppItem } from './RailNav.tsx'
 import { AppListPanel, AppDetail } from './AppListPanel.tsx'
 import { listBuiltinApps, buildPanelMetaForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, type AppDescriptor } from './app-registry.ts'
-import { syncBackend, type BackendMode } from './backend-sync.ts'
+import { syncBackend, revalidateBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
 
@@ -135,6 +135,9 @@ function DockShell(): ReactNode {
   const [toast, setToast] = useState<string | null>(null)
   // M3：后端同步模式（degraded → 提示条；remote/local 静默）
   const [backendMode, setBackendMode] = useState<BackendMode>('local')
+  // 探测循环闭包读最新模式用（不触发重渲染）
+  const backendModeRef = useRef<BackendMode>('local')
+  useEffect(() => { backendModeRef.current = backendMode }, [backendMode])
   // 远端 APP 清单（M3：门面 registry；不可用为空数组——APP tab 只剩内置）
   const [remoteApps, setRemoteApps] = useState<AppDescriptor[]>([])
   useEffect(() => dockStore.subscribe(() => setVersion(v => v + 1)), [])
@@ -144,21 +147,21 @@ function DockShell(): ReactNode {
     const timer = setTimeout(() => setToast(null), 2200)
     return () => clearTimeout(timer)
   }, [toast])
-  // M3：启动编排（读门面 boards → 决策 → 载入/迁移/挂钩）+ registry 拉取。
+  // M3+P4：启动编排（读门面 boards → 决策 → 载入/迁移/对齐 → 挂钩）+ registry 拉取。
   // 绝不炸页：syncBackend 内部全捕获，degraded 只出提示条
   useEffect(() => {
     let cancelled = false
     void syncBackend(dockStore, {
       onRemoteError: message => { if (!cancelled) setToast(message) },
+      onDegradedChange: degraded => { if (!cancelled) setBackendMode(degraded ? 'degraded' : 'remote') },
     }).then(mode => { if (!cancelled) setBackendMode(mode) })
     void fetchRemoteApps().then(apps => { if (!cancelled) setRemoteApps(apps) })
     return () => { cancelled = true }
   }, [])
 
-  // P1 registry 刷新：轻探轮询——GET /openloop/app/status 拿 registryRev，
-  // 代次变了才拉全量 registry（写操作在 dsh-app tool 内自动 bump；外部直改 PB
-  // 可 POST /openloop/app/invalidate 手动 bump）。正常 15s 一探；探不到（未装/
-  // 降级）拉长到 60s 省请求。
+  // P1 registry 刷新 + P4 恢复对齐（共用一个探测循环）：
+  // - 轻探 GET /openloop/app/status 拿 registryRev，代次变了才拉全量 registry
+  // - 降级态时探测兼作恢复探测：门面可达 → revalidateBackend（pending 镜像回推对齐 + 撤降级）
   useEffect(() => {
     let cancelled = false
     let knownRev: number | null = null
@@ -171,7 +174,17 @@ function DockShell(): ReactNode {
         const apps = await fetchRemoteApps()
         if (!cancelled) setRemoteApps(apps)
       }
-      if (rev !== null) knownRev = rev
+      if (rev !== null) {
+        knownRev = rev
+        // P4：曾处降级 → 门面恢复 → 对齐（pending 回推）+ 撤降级提示条
+        if (backendModeRef.current === 'degraded') {
+          const mode = await revalidateBackend(dockStore, {
+            onRemoteError: message => { if (!cancelled) setToast(message) },
+            onDegradedChange: degraded => { if (!cancelled) setBackendMode(degraded ? 'degraded' : 'remote') },
+          })
+          if (!cancelled) setBackendMode(mode)
+        }
+      }
       timer = setTimeout(() => { void probe() }, rev !== null ? 15_000 : 60_000)
     }
 

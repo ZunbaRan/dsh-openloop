@@ -39,25 +39,25 @@ describe('resolveBackendPlan（纯函数三态）', () => {
   }
 
   it('404（未装 dsh-app）→ local 静默', () => {
-    const plan = resolveBackendPlan({ remote: { kind: 'not-installed', state: undefined }, localState })
-    expect(plan).toEqual({ mode: 'local', importRemote: null, migrate: false })
+    const plan = resolveBackendPlan({ remote: { kind: 'not-installed', state: undefined }, localState, pendingSync: false })
+    expect(plan).toEqual({ mode: 'local', importRemote: null, migrate: false, reconcile: false })
   })
 
   it('网络错/5xx/超时 → degraded（提示条语义）', () => {
-    const plan = resolveBackendPlan({ remote: { kind: 'degraded', state: undefined }, localState })
+    const plan = resolveBackendPlan({ remote: { kind: 'degraded', state: undefined }, localState, pendingSync: false })
     expect(plan.mode).toBe('degraded')
   })
 
   it('门面有数据 → remote 权威载入', () => {
-    const plan = resolveBackendPlan({ remote: { kind: 'ok', state: localState }, localState })
-    expect(plan).toEqual({ mode: 'remote', importRemote: localState, migrate: false })
+    const plan = resolveBackendPlan({ remote: { kind: 'ok', state: localState }, localState, pendingSync: false })
+    expect(plan).toEqual({ mode: 'remote', importRemote: localState, migrate: false, reconcile: false })
   })
 
   it('门面空 + 本地有内容 → remote + 迁移；本地空 → remote 空转', () => {
     const emptyRemote: RemoteBoardsResult = { kind: 'ok', state: null }
-    expect(resolveBackendPlan({ remote: emptyRemote, localState })).toEqual({ mode: 'remote', importRemote: null, migrate: true })
+    expect(resolveBackendPlan({ remote: emptyRemote, localState, pendingSync: false })).toEqual({ mode: 'remote', importRemote: null, migrate: true, reconcile: false })
     const emptyLocal = { version: 2 as const, boards: [{ id: 'b1', name: '一', tiles: [] }], activeBoardId: 'b1' }
-    expect(resolveBackendPlan({ remote: emptyRemote, localState: emptyLocal })).toEqual({ mode: 'remote', importRemote: null, migrate: false })
+    expect(resolveBackendPlan({ remote: emptyRemote, localState: emptyLocal, pendingSync: false })).toEqual({ mode: 'remote', importRemote: null, migrate: false, reconcile: false })
   })
 })
 
@@ -152,7 +152,7 @@ describe('syncBackend 编排（fake 通道注入）', () => {
     expect(JSON.parse(storage.getItem(KEY)!).boards.length).toBe(2)
   })
 
-  it('写推送失败 → onRemoteError 提示（本地副本照写）', async () => {
+  it('写推送失败 → 单次仅落镜像标记；连续失败才 onRemoteError（P4 语义）', async () => {
     const store = new DockStore()
     const errors: string[] = []
     await syncBackend(store, {
@@ -160,10 +160,13 @@ describe('syncBackend 编排（fake 通道注入）', () => {
       pushBoards: async () => false,
       onRemoteError: m => errors.push(m),
     })
-    store.addBoard()
+    store.addBoard() // 失败 #1：仅 pending 标记
+    await new Promise(r => setTimeout(r, 10))
+    expect(errors).toHaveLength(0)
+    store.addBoard() // 失败 #2：降级 + 提示
     await new Promise(r => setTimeout(r, 10))
     expect(errors).toHaveLength(1)
-    expect(JSON.parse(storage.getItem(KEY)!).boards.length).toBe(2)
+    expect(JSON.parse(storage.getItem(KEY)!).boards.length).toBe(3) // 本地镜像照写
   })
 })
 

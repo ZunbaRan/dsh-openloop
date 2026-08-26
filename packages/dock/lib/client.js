@@ -6415,6 +6415,10 @@ window.__ModuleLoader__.load({
 		//#region src/client/backend-sync.ts
 		const BOARDS_URL = "/openloop/app/boards";
 		const FETCH_TIMEOUT_MS = 4e3;
+		/** 推送失败连续多少次判定进入降级（成功即清零） */
+		const PUSH_FAILURES_TO_DEGRADE = 2;
+		/** localStorage 镜像的 pending 标记 key（有值 = 镜像含未对齐到门面的修改） */
+		const PENDING_SYNC_KEY = "openloop.dock.pending-sync.v1";
 		async function fetchJson(url, init) {
 			const controller = new AbortController();
 			const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -6478,55 +6482,139 @@ window.__ModuleLoader__.load({
 		function okStatus(status) {
 			return status >= 200 && status < 300;
 		}
+		function readPendingSync() {
+			try {
+				return localStorage.getItem(PENDING_SYNC_KEY) === "1";
+			} catch {
+				return false;
+			}
+		}
+		function writePendingSync(pending) {
+			try {
+				if (pending) localStorage.setItem(PENDING_SYNC_KEY, "1");
+				else localStorage.removeItem(PENDING_SYNC_KEY);
+			} catch {}
+		}
 		function resolveBackendPlan(input) {
-			const { remote, localState } = input;
+			const { remote, localState, pendingSync } = input;
 			if (remote.kind === "not-installed") return {
 				mode: "local",
 				importRemote: null,
-				migrate: false
+				migrate: false,
+				reconcile: false
 			};
 			if (remote.kind === "degraded") return {
 				mode: "degraded",
 				importRemote: null,
-				migrate: false
+				migrate: false,
+				reconcile: false
 			};
-			if (remote.state !== null) return {
-				mode: "remote",
-				importRemote: remote.state,
-				migrate: false
-			};
+			if (remote.state !== null) {
+				if (pendingSync) return {
+					mode: "remote",
+					importRemote: null,
+					migrate: false,
+					reconcile: true
+				};
+				return {
+					mode: "remote",
+					importRemote: remote.state,
+					migrate: false,
+					reconcile: false
+				};
+			}
 			return {
 				mode: "remote",
 				importRemote: null,
-				migrate: localState.boards.some((b) => b.tiles.length > 0)
+				migrate: localState.boards.some((b) => b.tiles.length > 0),
+				reconcile: false
 			};
 		}
+		/** 装配推送钩子（syncBackend 与 revalidate 共用）：失败计数 → pending 标记 → 降级切换 */
+		function attachPushHandler(store, hooks) {
+			let pushFailures = 0;
+			let degraded = false;
+			hooks.readPending;
+			const writePending = hooks.writePending ?? writePendingSync;
+			const setDegraded = (next) => {
+				if (next === degraded) return;
+				degraded = next;
+				hooks.onDegradedChange?.(next);
+			};
+			store.setRemotePersist((state) => {
+				pushHook(state).catch(() => {});
+			});
+			async function pushHook(state) {
+				if (await (hooks.pushBoards ?? pushRemoteBoards)(state)) {
+					pushFailures = 0;
+					writePending(false);
+					setDegraded(false);
+				} else {
+					pushFailures++;
+					writePending(true);
+					if (pushFailures >= PUSH_FAILURES_TO_DEGRADE) {
+						setDegraded(true);
+						hooks.onRemoteError?.("后端同步失败——已保存本地镜像（恢复后自动对齐）");
+					}
+				}
+			}
+		}
 		/**
-		* 启动编排：读门面 → 决策 → 载入/迁移 → 安装写钩子。
+		* 启动编排：读门面 → 决策 → 载入/迁移/对齐 → 安装写钩子。
 		* 返回最终模式（UI 据此显示降级提示条）。绝不抛错（降级不炸页）。
 		*/
 		async function syncBackend(store, hooks = {}) {
 			const fetchBoards = hooks.fetchBoards ?? fetchRemoteBoards;
 			const pushBoards = hooks.pushBoards ?? pushRemoteBoards;
+			const readPending = hooks.readPending ?? readPendingSync;
+			const writePending = hooks.writePending ?? writePendingSync;
 			const plan = resolveBackendPlan({
 				remote: await fetchBoards(),
-				localState: store.getSnapshot()
+				localState: store.getSnapshot(),
+				pendingSync: readPending()
 			});
 			if (plan.mode === "remote") {
-				if (plan.importRemote !== null) store.importState(plan.importRemote);
-				else if (plan.migrate) {
+				if (plan.reconcile) {
 					if (!await pushBoards(store.getSnapshot())) {
-						hooks.onRemoteError?.("看板数据迁移到后端失败——已保留本地存储，稍后自动重试");
+						hooks.onRemoteError?.("本地修改对齐到后端失败——镜像已保留，稍后自动重试");
 						return "degraded";
 					}
+					writePending(false);
+				} else if (plan.importRemote !== null) store.importState(plan.importRemote);
+				else if (plan.migrate) {
+					if (!await pushBoards(store.getSnapshot())) {
+						hooks.onRemoteError?.("看板数据迁移到后端失败——已保留本地镜像，稍后自动重试");
+						return "degraded";
+					}
+					writePending(false);
 				}
-				store.setRemotePersist((state) => {
-					pushBoards(state).then((ok) => {
-						if (!ok) hooks.onRemoteError?.("后端同步失败——已本地保存（localStorage 副本不受影响）");
-					});
-				});
+				attachPushHandler(store, hooks);
 			}
 			return plan.mode;
+		}
+		/**
+		* P4：恢复探测后的对齐入口（P1 轻探发现门面恢复时调用）。
+		* 门面可达 → 若 pendingSync 则回推镜像（对齐），返回 remote；不可达 → 原样返回。
+		* 供 dock 的轻探循环复用（避免整页 syncBackend 重跑——那会重装钩子造成重复推送）。
+		*/
+		async function revalidateBackend(store, hooks = {}) {
+			const fetchBoards = hooks.fetchBoards ?? fetchRemoteBoards;
+			const pushBoards = hooks.pushBoards ?? pushRemoteBoards;
+			const readPending = hooks.readPending ?? readPendingSync;
+			const writePending = hooks.writePending ?? writePendingSync;
+			const remote = await fetchBoards();
+			if (remote.kind === "not-installed") return "local";
+			if (remote.kind === "degraded") return "degraded";
+			if (readPending()) {
+				if (await pushBoards(store.getSnapshot())) {
+					writePending(false);
+					hooks.onDegradedChange?.(false);
+					return "remote";
+				}
+				return "degraded";
+			}
+			hooks.onDegradedChange?.(false);
+			return "remote";
 		}
 		//#endregion
 		//#region src/client/v2-styles.ts
@@ -6774,6 +6862,10 @@ window.__ModuleLoader__.load({
 			const [railWidth, setRailWidth] = (0, react.useState)(readRailWidth);
 			const [toast, setToast] = (0, react.useState)(null);
 			const [backendMode, setBackendMode] = (0, react.useState)("local");
+			const backendModeRef = (0, react.useRef)("local");
+			(0, react.useEffect)(() => {
+				backendModeRef.current = backendMode;
+			}, [backendMode]);
 			const [remoteApps, setRemoteApps] = (0, react.useState)([]);
 			(0, react.useEffect)(() => dockStore.subscribe(() => setVersion((v) => v + 1)), []);
 			(0, react.useEffect)(() => {
@@ -6783,9 +6875,14 @@ window.__ModuleLoader__.load({
 			}, [toast]);
 			(0, react.useEffect)(() => {
 				let cancelled = false;
-				syncBackend(dockStore, { onRemoteError: (message) => {
-					if (!cancelled) setToast(message);
-				} }).then((mode) => {
+				syncBackend(dockStore, {
+					onRemoteError: (message) => {
+						if (!cancelled) setToast(message);
+					},
+					onDegradedChange: (degraded) => {
+						if (!cancelled) setBackendMode(degraded ? "degraded" : "remote");
+					}
+				}).then((mode) => {
 					if (!cancelled) setBackendMode(mode);
 				});
 				fetchRemoteApps().then((apps) => {
@@ -6806,7 +6903,20 @@ window.__ModuleLoader__.load({
 						const apps = await fetchRemoteApps();
 						if (!cancelled) setRemoteApps(apps);
 					}
-					if (rev !== null) knownRev = rev;
+					if (rev !== null) {
+						knownRev = rev;
+						if (backendModeRef.current === "degraded") {
+							const mode = await revalidateBackend(dockStore, {
+								onRemoteError: (message) => {
+									if (!cancelled) setToast(message);
+								},
+								onDegradedChange: (degraded) => {
+									if (!cancelled) setBackendMode(degraded ? "degraded" : "remote");
+								}
+							});
+							if (!cancelled) setBackendMode(mode);
+						}
+					}
 					timer = setTimeout(() => {
 						probe();
 					}, rev !== null ? 15e3 : 6e4);
