@@ -44,29 +44,30 @@
 
 ## entry 契约（组件的可渲染内容——决定 dock 里「待生成」还是可「固定」）
 
-**`entry: { panel: <完整 PanelDefinition> }`**——内联整个面板定义 JSON：
+**`entry` 直接放 PanelDefinition 即可**（v1.1 放宽——之前要求 `{ panel: ... }` 包装层，实战表明平铺更直觉、agent 一写就过）：
 
 ```jsonc
-// register_component 的 component 参数
+// register_component 的 component 参数（推荐形态）
 {
   "rid": "my-sales:my-sales-weekly",
   "kind": "panel",
   "title": "周度业绩",
   "entry": {
-    "panel": {
-      "$schema": "openloop.panel/v1",
-      "id": "my-sales-weekly",
-      "title": "周度业绩",
-      "widgets": [ /* PanelDefinition 的 widgets，与 panel 工具的 panel 参数同构 */ ]
-    }
+    "$schema": "openloop.panel/v1",
+    "id": "my-sales-weekly",
+    "title": "周度业绩",
+    "widgets": [ /* 与 panel 工具的 panel 参数同构 */ ]
   }
 }
+
+// 兼容形态：entry: { panel: <PanelDefinition> } —— 老的双层包装也能识别
 ```
+
+**识别规则（dock 端 `entryPanelOf`）**：entry 本身**或** entry.panel 含 PanelDefinition 形状（有 id/title/widgets[] 即过）→ 当作面板定义；否则（文件路径 / 字符串 / 缺字段）→ 「待生成」。
 
 **生成 entry 的标准流程**（agent 操作）：
 1. 用 `panel` 工具生成面板（可加 `persist: true` 落盘调试）
-2. 若已 persist：`read` `openloop-panels/<panel-id>.json`，取其 `panel` 字段内容
-3. `register_component` 时把该定义**原样内联**进 `entry.panel`（不要写文件路径！浏览器读不到 workspace 文件——路径字符串的 entry 一律显示「待生成」）
+2. `register_component` 时把 `panel` 工具返回的 widgets/title 等**原样**作为 `entry` 传入——**不要**写文件路径（浏览器读不到 workspace 文件）
 
 要点：
 - `panel.id` 建议 = rid 的组件名段（如 `my-sales-weekly`）——tile 溯源 ID 才能对上资源 ID

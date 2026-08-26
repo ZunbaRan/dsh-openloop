@@ -111,4 +111,16 @@ describe('entry 渲染闭环（v1 契约：entry.panel 内联 PanelDefinition）
     const meta = buildPanelMetaForComponent(comp)!.meta as { panel: { id: string } }
     expect(meta.panel.id).toBe('metric-grid') // 走 PRESET_INFO，不是 entry
   })
+
+  it('宽松形态：裸 PanelDefinition（agent 平铺写法）也接受', () => {
+    const flat: AppComponentDescriptor = { id: 'x:flat', title: 't', type: 'panel', desc: '', kind: '', pinnable: true, entry: { id: 'flat', title: 'f', widgets: [{ id: 'w' }] } }
+    expect(buildPanelMetaForComponent(flat)).not.toBeNull()
+  })
+
+  it('裸形态与 { panel } 形态在 meta 构造上均非空', () => {
+    const flat: AppComponentDescriptor = { id: 'a', title: 't', type: 'panel', desc: '', kind: '', pinnable: true, entry: { id: 'a', title: 't', widgets: [{ id: 'w' }] } }
+    const wrapped: AppComponentDescriptor = { ...flat, entry: { panel: { id: 'a', title: 't', widgets: [{ id: 'w' }] } } }
+    expect(buildPanelMetaForComponent(flat)).not.toBeNull()
+    expect(buildPanelMetaForComponent(wrapped)).not.toBeNull()
+  })
 })
