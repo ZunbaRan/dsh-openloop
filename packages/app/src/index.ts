@@ -16,6 +16,7 @@ import z from '@deepseek-ai/schemastery'
 import { createAppBackend, resolveDshHome, PB_VERSION, type AppBackendOptions } from './backend.ts'
 import { createAppBackendTool } from './tool.ts'
 import { appBackendSkillProvider } from './skill.ts'
+import { appDoctorSkillProvider } from './skill-doctor.ts'
 import { registerAppRoutes } from './routes.ts'
 
 export * from './facade.ts'
@@ -23,6 +24,8 @@ export * from './schema.ts'
 export { createPbClient, PbRequestError } from './pb-client.ts'
 export { createAppBackend, resolveDshHome, PB_VERSION } from './backend.ts'
 export type { AppBackend, AppBackendOptions, BackendStatus } from './backend.ts'
+export { PbWatchdog, WATCHDOG_DEFAULTS } from './watchdog.ts'
+export type { WatchdogState, WatchdogOptions } from './watchdog.ts'
 export { startPocketBase, findFreePort, ensureBinary, pbAssetName, pbDownloadUrl } from './pb-process.ts'
 export type { PbProcessOptions, RunningPb, SuperuserCredentials, PbLogger } from './pb-process.ts'
 export { createAppBackendTool, APP_BACKEND_TOOL, APP_BACKEND_PARAMETERS } from './tool.ts'
@@ -69,6 +72,8 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   ctx.tools.register(createAppBackendTool(backend))
   ctx.skills.registerProvider(() => appBackendSkillProvider)
+  // P3 自愈 skill：门面故障诊断决策树（backend_health / backend_restart 的用法载体）
+  ctx.skills.registerProvider(() => appDoctorSkillProvider)
 
   // webServer 条件注入（panels 同款模式）：web 环境注册 UI 路由；headless 跳过
   ctx.inject(['webServer'], routeCtx => {

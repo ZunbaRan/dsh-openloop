@@ -26,6 +26,7 @@ function cachedBin(): string | undefined {
 }
 
 const bin = cachedBin()
+const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms))
 const describeReal = bin === undefined && process.env.APP_E2E_SKIP_DOWNLOAD === '1'
   ? describe.skip
   : describe
@@ -112,4 +113,45 @@ describeReal('app backend e2e（真 PocketBase 子进程）', () => {
       await restarted.stop()
     }
   })
+
+  it('P2 守护：SIGKILL 杀掉 PB → watchdog 自动重启 → 数据仍在（backend 级）', async () => {
+    const { createAppBackend } = await import('../src/backend.ts')
+    const backend = createAppBackend({
+      dshHome: home,
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+      ...(bin !== undefined ? { binPath: bin } : {}),
+    })
+    await backend.start()
+    const before = backend.status()
+    expect(before.state).toBe('running')
+    expect(before.restarts).toBe(0)
+
+    // 写入数据 → SIGKILL 模拟崩溃（不走 stop()——那是意图性停止）
+    const facade = await backend.ready()
+    await facade.upsertApp({ name: 'crash-test', displayName: '崩溃测试', kind: 'local', version: '0.1.0' })
+    const port = before.baseUrl ? Number(new URL(before.baseUrl).port) : 0
+    expect(port).toBeGreaterThan(0)
+    const { execSync } = await import('node:child_process')
+    let pbPid = ''
+    try {
+      pbPid = execSync(`lsof -ti tcp:${port} -sTCP:LISTEN`, { encoding: 'utf8' }).trim().split('\n')[0] ?? ''
+    } catch { /* lsof 不可用则跳过 */ }
+    if (pbPid.length > 0) {
+      process.kill(Number(pbPid), 'SIGKILL')
+      // watchdog 退避 2s 起步——等自动重启完成
+      const deadline = Date.now() + 15_000
+      while (Date.now() < deadline) {
+        await sleep(300)
+        if (backend.status().state === 'running' && backend.status().restarts === 1) break
+      }
+      const after = backend.status()
+      expect(after.state).toBe('running')
+      expect(after.restarts).toBe(1)
+      // 数据在（同一 dataDir）
+      const healed = await backend.ready()
+      const apps = await healed.listApps()
+      expect(apps.some(a => a.name === 'crash-test')).toBe(true)
+    }
+    await backend.stop()
+  }, 30_000)
 })

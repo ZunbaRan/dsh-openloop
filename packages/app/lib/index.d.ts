@@ -304,6 +304,8 @@ interface PbProcessOptions {
   /** 二进制覆盖路径（测试 / 离线环境用） */
   binPath?: string;
   logger?: PbLogger;
+  /** 进程退出回调（watchdog 接线；正常 stop() 不触发——intentional 语义由调用方持有） */
+  onExit?: (code: number | null) => void;
 }
 interface SuperuserCredentials {
   email: string;
@@ -468,6 +470,12 @@ interface BackendStatus {
   error?: string;
   /** registry 变更代次（invalidate 端点递增；消费方对比检测「有更新要拉」） */
   registryRev?: number;
+  /** P2 守护可观测：累计重启次数 */
+  restarts?: number;
+  /** P2 守护可观测：最近一次故障/重启错误 */
+  lastError?: string | null;
+  /** P2 守护可观测：最近一次成功重启时刻 */
+  lastRestartAt?: number | null;
 }
 interface AppBackend {
   start(): Promise<void>;
@@ -484,12 +492,72 @@ interface AppBackend {
   startedAt(): number | undefined;
   /** registry 变更通知（invalidate 端点调用；返回新代次） */
   invalidateRegistry(): number;
+  /** P2 手动重启（doctor 工具用；正常 stop+start 语义） */
+  restart(): Promise<void>;
 }
 interface AppBackendOptions extends PbProcessOptions {
   /** 就绪等待上限（tool/route 调用侧；默认 45s 覆盖首启下载） */
   readyTimeoutMs?: number;
 }
 declare function createAppBackend(options?: AppBackendOptions): AppBackend;
+//#endregion
+//#region src/watchdog.d.ts
+interface WatchdogState {
+  restarts: number;
+  lastError: string | null;
+  lastRestartAt: number | null;
+  /** 连续重启失败计数（成功运行 >60s 清零——「稳定运行」判定） */
+  consecutiveFailures: number;
+}
+interface WatchdogOptions {
+  /** 健康轮询间隔（默认 15s） */
+  healthIntervalMs?: number;
+  /** 退避基数（默认 2s；第 n 次失败后等 base * 2^n，封顶 60s） */
+  backoffBaseMs?: number;
+  /** 连续失败熔断阈值（默认 3；达到后不再自动重启） */
+  maxConsecutiveFailures?: number;
+  /** 稳定运行判定窗口（默认 60s；超过则清零连续失败计数） */
+  stableAfterMs?: number;
+  /** 重启动作（注入：backend 提供；测试注入 mock） */
+  restart: () => Promise<void>;
+  /** 状态上报（注入：backend 同步 status 用） */
+  onStateChange: (state: WatchdogState) => void;
+  /** 日志（注入） */
+  log?: (level: 'info' | 'warn' | 'error', message: string) => void;
+}
+declare const WATCHDOG_DEFAULTS: {
+  readonly healthIntervalMs: 15000;
+  readonly backoffBaseMs: 2000;
+  readonly maxConsecutiveFailures: 3;
+  readonly stableAfterMs: 60000;
+};
+declare class PbWatchdog {
+  private readonly opts;
+  private readonly restart;
+  private readonly onStateChange;
+  private readonly log;
+  private state;
+  private stopped;
+  private intentionalStop;
+  private restarting;
+  private healthTimer;
+  private backoffTimer;
+  private startedAt;
+  constructor(options: WatchdogOptions);
+  getState(): WatchdogState;
+  /** 手动停止（意图性）：停轮询、不触发重启。可在 stop 后 destroy。 */
+  stop(): void;
+  /** 恢复守护（重启成功后调用） */
+  resume(): void;
+  /** 进程退出通知（RunningPb.onExit 接线） */
+  onProcessExit(code: number | null): void;
+  private startHealthPolling;
+  private checkHealth;
+  private backoffMs;
+  private scheduleRestart;
+  private doRestart;
+  private clearTimers;
+}
 //#endregion
 //#region ../../node_modules/.pnpm/@deepseek-ai+dsh-scope@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-invariants_6f3351786c779449c277f079a737f571/node_modules/@deepseek-ai/dsh-scope/lib/types/index.d.ts
 /** An opaque, identity-compared scope key. */
@@ -4880,7 +4948,7 @@ declare const APP_BACKEND_PARAMETERS: {
   readonly action: {
     readonly type: "string";
     readonly required: true;
-    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate"];
+    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate", "backend_health", "backend_restart"];
     readonly description: "Facade action. Registry: list_apps / upsert_app / delete_app / get_app; components: register_component / remove_component; apis: register_api / remove_api / set_api_key; boards: save_dock_state / load_dock_state.";
   };
   readonly app: {
@@ -5030,4 +5098,4 @@ interface Config {
 declare const Config: Schema<Config>;
 declare function apply(ctx: Context, config?: Config): void;
 //#endregion
-export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, ApiAuthType, ApiRow, ApiStatusRow, type AppBackend, type AppBackendOptions, AppFacade, AppKind, AppRow, type BackendStatus, BoardRow, COLLECTIONS, ComponentKind, ComponentRow, Config, DockStateV2, DockTileV2, PB_VERSION, PbCollectionDef, PbFieldDef, type PbLogger, type PbProcessOptions, PbRequestError, type RunningPb, type SuperuserCredentials, TileRow, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, startPocketBase };
+export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, ApiAuthType, ApiRow, ApiStatusRow, type AppBackend, type AppBackendOptions, AppFacade, AppKind, AppRow, type BackendStatus, BoardRow, COLLECTIONS, ComponentKind, ComponentRow, Config, DockStateV2, DockTileV2, PB_VERSION, PbCollectionDef, PbFieldDef, type PbLogger, type PbProcessOptions, PbRequestError, PbWatchdog, type RunningPb, type SuperuserCredentials, TileRow, WATCHDOG_DEFAULTS, type WatchdogOptions, type WatchdogState, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, startPocketBase };

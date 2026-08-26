@@ -23,6 +23,7 @@ function fakeBackend(): AppBackend {
     dshHome: () => '/tmp/fake',
     startedAt: () => undefined,
     invalidateRegistry: () => { rev += 1; return rev },
+    restart: async () => { lastStarted = true },
   }
 }
 
@@ -51,6 +52,8 @@ describe('tool 写操作自动 bump', () => {
 
     // 非法 action：schema enum 层拦截（不进 execute）
     expect(APP_BACKEND_PARAMETERS.action.enum).toContain('invalidate')
+    expect(APP_BACKEND_PARAMETERS.action.enum).toContain('backend_health')
+    expect(APP_BACKEND_PARAMETERS.action.enum).toContain('backend_restart')
     expect(APP_BACKEND_PARAMETERS.action.enum).not.toContain('nope')
 
     // 显式 invalidate：过 ready 但 runCore 不触 facade，自动 bump
@@ -58,5 +61,26 @@ describe('tool 写操作自动 bump', () => {
     const result = await tool.execute({ action: 'invalidate' }, {} as never) as { invalidated: boolean }
     expect(result.invalidated).toBe(true)
     expect(backend.status().registryRev).toBe(revBefore + 1)
+  })
+})
+
+describe('doctor actions（P3：不依赖 facade 的诊断/运维）', () => {
+  it('backend_health 不走 ready（stopped 状态也能答，含 hint）', async () => {
+    const backend = fakeBackend()
+    const tool = createAppBackendTool(backend)
+    const health = await tool.execute({ action: 'backend_health' }, {} as never) as { state: string; hint: string }
+    expect(health.state).toBe('stopped')
+    expect(health.hint).toContain('backend_restart')
+  })
+
+  it('backend_restart 调 backend.restart 并回报 running', async () => {
+    const backend = fakeBackend()
+    let restarted = false
+    backend.restart = async () => { restarted = true; await backend.start() }
+    const tool = createAppBackendTool(backend)
+    const result = await tool.execute({ action: 'backend_restart' }, {} as never) as { restarted: boolean; state: string }
+    expect(restarted).toBe(true)
+    expect(result.restarted).toBe(true)
+    expect(result.state).toBe('running')
   })
 })

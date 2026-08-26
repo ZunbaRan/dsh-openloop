@@ -33,6 +33,8 @@ export interface PbProcessOptions {
   /** 二进制覆盖路径（测试 / 离线环境用） */
   binPath?: string
   logger?: PbLogger
+  /** 进程退出回调（watchdog 接线；正常 stop() 不触发——intentional 语义由调用方持有） */
+  onExit?: (code: number | null) => void
 }
 
 export interface SuperuserCredentials {
@@ -197,9 +199,19 @@ export async function startPocketBase(options: PbProcessOptions = {}): Promise<R
     stderrTail = (stderrTail + text).slice(-2000)
     logger.warn(`pocketbase: ${text.trim()}`)
   })
-  child.on('exit', code => { logger.info(`pocketbase exited (code ${code ?? 'null'})`) })
+  let exited = false
+  let onExit: ((code: number | null) => void) | undefined = options.onExit
+  child.on('exit', code => {
+    logger.info(`pocketbase exited (code ${code ?? 'null'})`)
+    if (!exited) {
+      exited = true
+      // stop() 主动杀进程时先摘掉回调（意图性停止不触发 watchdog）
+      onExit?.(code ?? null)
+    }
+  })
 
   const stop = async (): Promise<void> => {
+    onExit = undefined
     if (child.exitCode !== null || child.signalCode !== null) return
     await new Promise<void>(resolve => {
       const killTimer = setTimeout(() => { child.kill('SIGKILL') }, 3000)

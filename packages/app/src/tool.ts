@@ -16,6 +16,7 @@ const ACTIONS = [
   'register_api', 'remove_api', 'set_api_key',
   'save_dock_state', 'load_dock_state',
   'invalidate',
+  'backend_health', 'backend_restart',
 ] as const
 
 type Action = (typeof ACTIONS)[number]
@@ -89,15 +90,39 @@ function expectObject(args: Record<string, unknown>, key: string, action: Action
   return value
 }
 
-/** dsh 输出契约：lossless JSON（panels toJsonValue 同款收敛） */
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
-
 async function runAction(action: Action, a: Record<string, unknown>, backend: AppBackend, facade: Awaited<ReturnType<AppBackend['ready']>>): Promise<unknown> {
+  // backend_health / backend_restart 不走 facade（诊断/运维语义——backend 未运行也要能答）
+  if (action === 'backend_health') {
+    const s = backend.status()
+    return {
+      state: s.state,
+      version: s.version,
+      baseUrl: s.baseUrl ?? null,
+      restarts: s.restarts ?? 0,
+      lastError: s.lastError ?? null,
+      lastRestartAt: s.lastRestartAt ?? null,
+      registryRev: s.registryRev ?? 0,
+      hint: s.state === 'running'
+        ? 'backend is healthy'
+        : s.state === 'starting'
+          ? 'backend is starting (first start downloads the binary — wait and re-check)'
+          : `backend is ${s.state}${s.error !== undefined ? `: ${s.error}` : ''} — call backend_restart to recover, or check OPENLOOP_PB_BIN / network`,
+    }
+  }
+  if (action === 'backend_restart') {
+    await backend.restart()
+    const s = backend.status()
+    return { restarted: true, state: s.state, baseUrl: s.baseUrl ?? null }
+  }
+
   const result = await runCore(action, a, facade)
   // 写操作 + 显式 invalidate 都 bump registryRev（本地计数器零成本；dock 轻探即可感知）
   if (WRITE_ACTIONS.has(action) || action === 'invalidate') backend.invalidateRegistry()
   return result
 }
+
+/** dsh 输出契约：lossless JSON（panels toJsonValue 同款收敛） */
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
 async function runCore(action: Action, a: Record<string, unknown>, facade: Awaited<ReturnType<AppBackend['ready']>>): Promise<unknown> {
   switch (action) {
@@ -136,6 +161,10 @@ async function runCore(action: Action, a: Record<string, unknown>, facade: Await
     case 'invalidate':
       // 显式通知（写 action 已自动 bump，这里是给「直接改 PB / 外部脚本」的补丁通道）
       return { invalidated: true }
+    case 'backend_health':
+    case 'backend_restart':
+      // 已在 runAction 前置分支处理（不达此处）；此处兜底满足穷尽性
+      throw new Error(`action "${action}" is handled elsewhere`)
   }
 }
 
@@ -156,6 +185,10 @@ export function createAppBackendTool(backend: AppBackend): ToolDefinition {
       const action = expectString(a, 'action', 'list_apps') as Action
       if (!(ACTIONS as readonly string[]).includes(action)) {
         throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(', ')}.`)
+      }
+      // doctor 动作（backend_health / backend_restart）不经 facade——backend 挂了也要能诊断/恢复
+      if (action === 'backend_health' || action === 'backend_restart') {
+        return await runAction(action, a, backend, undefined as never) as Record<string, JsonValue>
       }
       const facade = await backend.ready()
       return await runAction(action, a, backend, facade) as Record<string, JsonValue>

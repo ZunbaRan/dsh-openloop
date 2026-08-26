@@ -1031,10 +1031,17 @@ async function startPocketBase(options = {}) {
 		stderrTail = (stderrTail + text).slice(-2e3);
 		logger.warn(`pocketbase: ${text.trim()}`);
 	});
+	let exited = false;
+	let onExit = options.onExit;
 	child.on("exit", (code) => {
 		logger.info(`pocketbase exited (code ${code ?? "null"})`);
+		if (!exited) {
+			exited = true;
+			onExit?.(code ?? null);
+		}
 	});
 	const stop = async () => {
+		onExit = void 0;
 		if (child.exitCode !== null || child.signalCode !== null) return;
 		await new Promise((resolve) => {
 			const killTimer = setTimeout(() => {
@@ -1614,6 +1621,140 @@ function createAppFacade(pb) {
 	};
 }
 //#endregion
+//#region src/watchdog.ts
+const WATCHDOG_DEFAULTS = {
+	healthIntervalMs: 15e3,
+	backoffBaseMs: 2e3,
+	maxConsecutiveFailures: 3,
+	stableAfterMs: 6e4
+};
+var PbWatchdog = class {
+	opts;
+	restart;
+	onStateChange;
+	log;
+	state = {
+		restarts: 0,
+		lastError: null,
+		lastRestartAt: null,
+		consecutiveFailures: 0
+	};
+	stopped = false;
+	intentionalStop = false;
+	restarting = false;
+	healthTimer;
+	backoffTimer;
+	startedAt = 0;
+	constructor(options) {
+		this.opts = {
+			healthIntervalMs: options.healthIntervalMs ?? WATCHDOG_DEFAULTS.healthIntervalMs,
+			backoffBaseMs: options.backoffBaseMs ?? WATCHDOG_DEFAULTS.backoffBaseMs,
+			maxConsecutiveFailures: options.maxConsecutiveFailures ?? WATCHDOG_DEFAULTS.maxConsecutiveFailures,
+			stableAfterMs: options.stableAfterMs ?? WATCHDOG_DEFAULTS.stableAfterMs
+		};
+		this.restart = options.restart;
+		this.onStateChange = options.onStateChange;
+		this.log = options.log ?? (() => {});
+	}
+	getState() {
+		return { ...this.state };
+	}
+	/** 手动停止（意图性）：停轮询、不触发重启。可在 stop 后 destroy。 */
+	stop() {
+		this.intentionalStop = true;
+		this.stopped = true;
+		this.clearTimers();
+	}
+	/** 恢复守护（重启成功后调用） */
+	resume() {
+		this.intentionalStop = false;
+		this.stopped = false;
+		this.startHealthPolling();
+	}
+	/** 进程退出通知（RunningPb.onExit 接线） */
+	onProcessExit(code) {
+		if (this.intentionalStop || this.stopped) return;
+		this.log("warn", `pocketbase exited unexpectedly (code ${code ?? "null"}) — scheduling restart`);
+		this.scheduleRestart(`pocketbase exited (code ${code ?? "null"})`);
+	}
+	startHealthPolling() {
+		this.clearTimers();
+		this.healthTimer = setInterval(() => {
+			this.checkHealth();
+		}, this.opts.healthIntervalMs);
+	}
+	async checkHealth() {
+		if (this.stopped || this.restarting) return;
+		if (this.state.consecutiveFailures > 0 && this.startedAt > 0 && Date.now() - this.startedAt > this.opts.stableAfterMs) {
+			this.state = {
+				...this.state,
+				consecutiveFailures: 0
+			};
+			this.onStateChange(this.getState());
+		}
+	}
+	backoffMs() {
+		const n = this.state.consecutiveFailures;
+		return Math.min(6e4, this.opts.backoffBaseMs * 2 ** n);
+	}
+	async scheduleRestart(reason) {
+		if (this.restarting || this.stopped) return;
+		if (this.state.consecutiveFailures >= this.opts.maxConsecutiveFailures) {
+			const giveUp = `${reason}; giving up after ${this.state.consecutiveFailures} consecutive restart failures (agent can diagnose via app_backend backend_health / backend_restart)`;
+			this.state = {
+				...this.state,
+				lastError: giveUp
+			};
+			this.onStateChange(this.getState());
+			this.log("error", giveUp);
+			return;
+		}
+		this.restarting = true;
+		const delay = this.backoffMs();
+		this.log("warn", `restarting pocketbase in ${delay}ms (attempt ${this.state.consecutiveFailures + 1}/${this.opts.maxConsecutiveFailures})`);
+		this.backoffTimer = setTimeout(() => {
+			this.doRestart(reason);
+		}, delay);
+	}
+	async doRestart(reason) {
+		try {
+			await this.restart();
+			this.startedAt = Date.now();
+			this.state = {
+				...this.state,
+				restarts: this.state.restarts + 1,
+				lastRestartAt: Date.now()
+			};
+			this.onStateChange(this.getState());
+			this.log("info", "pocketbase restarted successfully");
+			this.resume();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.state = {
+				...this.state,
+				consecutiveFailures: this.state.consecutiveFailures + 1,
+				lastError: `${reason}; restart failed: ${message}`
+			};
+			this.onStateChange(this.getState());
+			this.log("error", `restart failed (${this.state.consecutiveFailures}/${this.opts.maxConsecutiveFailures}): ${message}`);
+			this.restarting = false;
+			this.scheduleRestart(reason);
+		} finally {
+			this.restarting = false;
+		}
+	}
+	clearTimers() {
+		if (this.healthTimer !== void 0) {
+			clearInterval(this.healthTimer);
+			this.healthTimer = void 0;
+		}
+		if (this.backoffTimer !== void 0) {
+			clearTimeout(this.backoffTimer);
+			this.backoffTimer = void 0;
+		}
+	}
+};
+//#endregion
 //#region src/backend.ts
 /**
 * AppBackend 组装层：PocketBase 进程 + admin client + collections 初始化 + 门面。
@@ -1635,13 +1776,35 @@ function createAppBackend(options = {}) {
 	let startedAt;
 	/** registry 变更代次（0 起步；invalidate 递增——dock 轻探对比用） */
 	let registryRev = 0;
+	/** P2 守护状态（status 扩展字段的数据源） */
+	let watchdogState = {
+		restarts: 0,
+		lastError: null,
+		lastRestartAt: null,
+		consecutiveFailures: 0
+	};
 	const dshHome = resolveDshHome(options.dshHome);
+	/** watchdog（惰性构造——doStart 成功后才有 restart 动作可注入） */
+	let watchdog;
+	const syncStatus = () => {
+		status = {
+			...status,
+			restarts: watchdogState.restarts,
+			lastError: watchdogState.lastError,
+			lastRestartAt: watchdogState.lastRestartAt
+		};
+	};
 	const doStart = async () => {
 		status = {
 			state: "starting",
 			version: PB_VERSION
 		};
-		const process = await startPocketBase(options);
+		const process = await startPocketBase({
+			...options,
+			onExit: (code) => {
+				watchdog?.onProcessExit(code);
+			}
+		});
 		running = process;
 		const pb = createPbClient(process.baseUrl, process.credentials);
 		await initCollections(pb);
@@ -1652,6 +1815,21 @@ function createAppBackend(options = {}) {
 			version: PB_VERSION,
 			baseUrl: process.baseUrl
 		};
+		syncStatus();
+		if (watchdog === void 0) watchdog = new PbWatchdog({
+			restart: async () => {
+				if (running !== void 0) await running.stop().catch(() => {});
+				running = void 0;
+				facade = void 0;
+				readyPromise = void 0;
+				await doStart();
+			},
+			onStateChange: (state) => {
+				watchdogState = state;
+				syncStatus();
+			}
+		});
+		watchdog.resume();
 		return facade;
 	};
 	return {
@@ -1680,12 +1858,23 @@ function createAppBackend(options = {}) {
 		status() {
 			return {
 				...status,
-				registryRev
+				registryRev,
+				restarts: watchdogState.restarts,
+				lastError: watchdogState.lastError,
+				lastRestartAt: watchdogState.lastRestartAt
 			};
 		},
 		invalidateRegistry() {
 			registryRev += 1;
 			return registryRev;
+		},
+		async restart() {
+			if (watchdog !== void 0) watchdog.resume();
+			if (running !== void 0) await running.stop().catch(() => {});
+			running = void 0;
+			facade = void 0;
+			readyPromise = void 0;
+			await this.start();
 		},
 		pbClient() {
 			if (status.state !== "running" || running === void 0) return void 0;
@@ -1701,6 +1890,7 @@ function createAppBackend(options = {}) {
 			return startedAt;
 		},
 		async stop() {
+			watchdog?.stop();
 			readyPromise = void 0;
 			facade = void 0;
 			startedAt = void 0;
@@ -5819,7 +6009,9 @@ const ACTIONS = [
 	"set_api_key",
 	"save_dock_state",
 	"load_dock_state",
-	"invalidate"
+	"invalidate",
+	"backend_health",
+	"backend_restart"
 ];
 const APP_BACKEND_PARAMETERS = {
 	action: {
@@ -5888,6 +6080,28 @@ function expectObject(args, key, action) {
 	return value;
 }
 async function runAction(action, a, backend, facade) {
+	if (action === "backend_health") {
+		const s = backend.status();
+		return {
+			state: s.state,
+			version: s.version,
+			baseUrl: s.baseUrl ?? null,
+			restarts: s.restarts ?? 0,
+			lastError: s.lastError ?? null,
+			lastRestartAt: s.lastRestartAt ?? null,
+			registryRev: s.registryRev ?? 0,
+			hint: s.state === "running" ? "backend is healthy" : s.state === "starting" ? "backend is starting (first start downloads the binary — wait and re-check)" : `backend is ${s.state}${s.error !== void 0 ? `: ${s.error}` : ""} — call backend_restart to recover, or check OPENLOOP_PB_BIN / network`
+		};
+	}
+	if (action === "backend_restart") {
+		await backend.restart();
+		const s = backend.status();
+		return {
+			restarted: true,
+			state: s.state,
+			baseUrl: s.baseUrl ?? null
+		};
+	}
 	const result = await runCore(action, a, facade);
 	if (WRITE_ACTIONS.has(action) || action === "invalidate") backend.invalidateRegistry();
 	return result;
@@ -5925,6 +6139,8 @@ async function runCore(action, a, facade) {
 		case "save_dock_state": return { saved: await facade.saveDockState(expectObject(a, "dockState", action)) };
 		case "load_dock_state": return { state: await facade.loadDockState() };
 		case "invalidate": return { invalidated: true };
+		case "backend_health":
+		case "backend_restart": throw new Error(`action "${action}" is handled elsewhere`);
 	}
 }
 function createAppBackendTool(backend) {
@@ -5946,6 +6162,7 @@ function createAppBackendTool(backend) {
 			const a = args;
 			const action = expectString(a, "action", "list_apps");
 			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
+			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
 			return await runAction(action, a, backend, await backend.ready());
 		}
 	});
@@ -5963,7 +6180,7 @@ function createAppBackendTool(backend) {
 *
 * @module @deepseek-ai/dsh-skill
 */
-const SKILL_NAME$1 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const SKILL_NAME$2 = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DEFAULT_COLLECT_CACHE_ENTRIES = 128;
 const MAX_COLLECT_ATTEMPTS = 2;
 const RUNTIME_PROVIDER = "runtime";
@@ -5974,7 +6191,7 @@ const RUNTIME_RANK = 250;
 * @returns whether the name matches the public skill-name grammar.
 */
 function isSkillName(name) {
-	return SKILL_NAME$1.test(name);
+	return SKILL_NAME$2.test(name);
 }
 /** One scope's complete skill-registry contribution. */
 var SkillLayer = class {
@@ -6325,7 +6542,7 @@ function runtimeCandidate(skill) {
 }
 function validateCandidate(candidate, providerName) {
 	if (typeof candidate.name !== "string") throw new TypeError(`skill provider "${providerName}" returned a non-string skill name`);
-	if (!SKILL_NAME$1.test(candidate.name)) throw new Error(`skill provider "${providerName}" returned invalid skill name "${candidate.name}"`);
+	if (!SKILL_NAME$2.test(candidate.name)) throw new Error(`skill provider "${providerName}" returned invalid skill name "${candidate.name}"`);
 	if (typeof candidate.description !== "string") throw new TypeError(`skill provider "${providerName}" returned skill "${candidate.name}" with a non-string description`);
 	if (candidate.description.length === 0) throw new Error(`skill provider "${providerName}" returned skill "${candidate.name}" without a description`);
 	validateInvocation(candidate.invocation, `skill provider "${providerName}" returned skill "${candidate.name}"`);
@@ -6337,7 +6554,7 @@ function validateCandidate(candidate, providerName) {
 	if (candidate.path !== void 0 && typeof candidate.path !== "string") throw new TypeError(`skill provider "${providerName}" returned skill "${candidate.name}" with a non-string path`);
 }
 function validateRuntimeSkill(skill) {
-	if (!SKILL_NAME$1.test(skill.name)) throw new Error(`invalid skill name "${skill.name}"`);
+	if (!SKILL_NAME$2.test(skill.name)) throw new Error(`invalid skill name "${skill.name}"`);
 	if (skill.description.length === 0) throw new Error(`skill "${skill.name}" requires a description`);
 	validateInvocation(skill.invocation, `runtime skill "${skill.name}"`);
 }
@@ -6352,7 +6569,7 @@ function validateDefinition(skill) {
 	const content = skill.content;
 	const path = skill.path;
 	if (typeof name !== "string") throw new TypeError("loaded skill name must be a string");
-	if (!SKILL_NAME$1.test(name)) throw new Error(`loaded skill has invalid name "${name}"`);
+	if (!SKILL_NAME$2.test(name)) throw new Error(`loaded skill has invalid name "${name}"`);
 	if (typeof description !== "string") throw new TypeError(`loaded skill "${name}" description must be a string`);
 	if (description.length === 0) throw new Error(`loaded skill "${name}" requires a description`);
 	validateInvocation(invocation, `loaded skill "${name}"`);
@@ -6442,26 +6659,52 @@ function errorMessage(error) {
 * content 为 assets/skills/openloop-app-backend/SKILL.md（bundled asset；src 下的
 * .md 不进 lib 的教训见 panels skills 注释）。
 */
-const SKILL_NAME = "openloop-app-backend";
-const resourceBase = {
+const SKILL_NAME$1 = "openloop-app-backend";
+const resourceBase$1 = {
 	kind: "directory",
 	path: fileURLToPath(new URL("../assets/skills/", import.meta.url))
 };
 const appBackendSkillProvider = {
-	name: SKILL_NAME,
-	list: () => Promise.resolve([createCandidate()]),
+	name: SKILL_NAME$1,
+	list: () => Promise.resolve([createCandidate$1()]),
 	async get() {
-		const body = new URL(`../assets/skills/${SKILL_NAME}/SKILL.md`, import.meta.url);
+		const body = new URL(`../assets/skills/${SKILL_NAME$1}/SKILL.md`, import.meta.url);
 		return {
-			...createCandidate(),
+			...createCandidate$1(),
 			content: await readFile(body, "utf8")
 		};
 	}
 };
+function createCandidate$1() {
+	return {
+		name: SKILL_NAME$1,
+		description: "OpenLoop 本地应用后端（PocketBase 门面）：注册 APP/组件/API 资源、配置 API 凭据（只写不读）、存取看板与 tile。用 app_backend 工具前先读——action 清单、rid 命名规则（包名:组件名）与错误自修正指南。",
+		invocation: {
+			modelInvocable: true,
+			userInvocable: true
+		},
+		provider: SKILL_NAME$1,
+		source: "bundled",
+		resourceBase: resourceBase$1,
+		rank: 600,
+		locator: new URL(`../assets/skills/${SKILL_NAME$1}/SKILL.md`, import.meta.url)
+	};
+}
+//#endregion
+//#region src/skill-doctor.ts
+/**
+* openloop-app-doctor skill（P3 自愈）：PB 门面故障的诊断决策树。
+* 与 openloop-app-backend skill 并列注册（后者管 CRUD 用法，本 skill 管健康）。
+*/
+const SKILL_NAME = "openloop-app-doctor";
+const resourceBase = {
+	kind: "directory",
+	path: fileURLToPath(new URL("../assets/skills/", import.meta.url))
+};
 function createCandidate() {
 	return {
 		name: SKILL_NAME,
-		description: "OpenLoop 本地应用后端（PocketBase 门面）：注册 APP/组件/API 资源、配置 API 凭据（只写不读）、存取看板与 tile。用 app_backend 工具前先读——action 清单、rid 命名规则（包名:组件名）与错误自修正指南。",
+		description: "OpenLoop 本地后端自愈：PocketBase 门面故障的诊断与修复（backend_health 查状态、对因修复、backend_restart 恢复）。app_backend 报 backend 未运行/failed、dock 降级提示、APP 页异常时先读——分诊表 + 熔断恢复路径。",
 		invocation: {
 			modelInvocable: true,
 			userInvocable: true
@@ -6473,6 +6716,17 @@ function createCandidate() {
 		locator: new URL(`../assets/skills/${SKILL_NAME}/SKILL.md`, import.meta.url)
 	};
 }
+const appDoctorSkillProvider = {
+	name: SKILL_NAME,
+	list: () => Promise.resolve([createCandidate()]),
+	async get() {
+		const body = new URL(`../assets/skills/${SKILL_NAME}/SKILL.md`, import.meta.url);
+		return {
+			...createCandidate(),
+			content: await readFile(body, "utf8")
+		};
+	}
+};
 /** 敏感字段剥离（apis.keySecret）——受控查询通道绝不回显凭据 */
 const STRIP_FIELDS = /* @__PURE__ */ new Set(["keySecret"]);
 function isManagedCollection(name) {
@@ -6815,6 +7069,7 @@ function apply(ctx, config = {}) {
 	});
 	ctx.tools.register(createAppBackendTool(backend));
 	ctx.skills.registerProvider(() => appBackendSkillProvider);
+	ctx.skills.registerProvider(() => appDoctorSkillProvider);
 	ctx.inject(["webServer"], (routeCtx) => {
 		registerAppRoutes(routeCtx, routeCtx.webServer, backend);
 	});
@@ -6823,4 +7078,4 @@ function apply(ctx, config = {}) {
 	}, "openloop-dsh-app: backend lifecycle");
 }
 //#endregion
-export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, COLLECTIONS, Config, PB_VERSION, PbRequestError, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, startPocketBase };
+export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, COLLECTIONS, Config, PB_VERSION, PbRequestError, PbWatchdog, WATCHDOG_DEFAULTS, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, startPocketBase };
