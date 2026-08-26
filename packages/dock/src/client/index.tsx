@@ -17,7 +17,7 @@ import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
 import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab, type RailAppItem } from './RailNav.tsx'
 import { AppListPanel, AppDetail } from './AppListPanel.tsx'
-import { listBuiltinApps, buildPanelMetaForComponent, fetchRemoteApps, mergeApps, type AppDescriptor } from './app-registry.ts'
+import { listBuiltinApps, buildPanelMetaForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, type AppDescriptor } from './app-registry.ts'
 import { syncBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
@@ -153,6 +153,33 @@ function DockShell(): ReactNode {
     }).then(mode => { if (!cancelled) setBackendMode(mode) })
     void fetchRemoteApps().then(apps => { if (!cancelled) setRemoteApps(apps) })
     return () => { cancelled = true }
+  }, [])
+
+  // P1 registry 刷新：轻探轮询——GET /openloop/app/status 拿 registryRev，
+  // 代次变了才拉全量 registry（写操作在 dsh-app tool 内自动 bump；外部直改 PB
+  // 可 POST /openloop/app/invalidate 手动 bump）。正常 15s 一探；探不到（未装/
+  // 降级）拉长到 60s 省请求。
+  useEffect(() => {
+    let cancelled = false
+    let knownRev: number | null = null
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const probe = async (): Promise<void> => {
+      const rev = await fetchRegistryRev()
+      if (cancelled) return
+      if (rev !== null && knownRev !== null && rev !== knownRev) {
+        const apps = await fetchRemoteApps()
+        if (!cancelled) setRemoteApps(apps)
+      }
+      if (rev !== null) knownRev = rev
+      timer = setTimeout(() => { void probe() }, rev !== null ? 15_000 : 60_000)
+    }
+
+    void probe()
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+    }
   }, [])
   // toggle 跟随 bsb 右缘（bsb 开时挪到其左侧 10px，避免与其按钮重叠）
   const [toggleRight, setToggleRight] = useState(10)

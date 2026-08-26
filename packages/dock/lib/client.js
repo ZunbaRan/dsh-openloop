@@ -6342,6 +6342,7 @@ window.__ModuleLoader__.load({
 				try {
 					const res = await fetch("/openloop/app/registry", { signal: controller.signal });
 					if (!res.ok) return [];
+					if (!(res.headers.get("content-type") ?? "").includes("application/json")) return [];
 					const body = await res.json();
 					return (Array.isArray(body?.apps) ? body.apps : []).map((d) => remoteAppToDescriptor(d)).filter((a) => a !== null);
 				} finally {
@@ -6349,6 +6350,24 @@ window.__ModuleLoader__.load({
 				}
 			} catch {
 				return [];
+			}
+		}
+		/** 轻探：GET /openloop/app/status 只为拿 registryRev（代次变了才拉全量 registry） */
+		async function fetchRegistryRev() {
+			try {
+				const controller = new AbortController();
+				const timer = setTimeout(() => controller.abort(), 3e3);
+				try {
+					const res = await fetch("/openloop/app/status", { signal: controller.signal });
+					if (!res.ok) return null;
+					if (!(res.headers.get("content-type") ?? "").includes("application/json")) return null;
+					const body = await res.json();
+					return typeof body?.registryRev === "number" ? body.registryRev : null;
+				} finally {
+					clearTimeout(timer);
+				}
+			} catch {
+				return null;
 			}
 		}
 		/**
@@ -6774,6 +6793,28 @@ window.__ModuleLoader__.load({
 				});
 				return () => {
 					cancelled = true;
+				};
+			}, []);
+			(0, react.useEffect)(() => {
+				let cancelled = false;
+				let knownRev = null;
+				let timer;
+				const probe = async () => {
+					const rev = await fetchRegistryRev();
+					if (cancelled) return;
+					if (rev !== null && knownRev !== null && rev !== knownRev) {
+						const apps = await fetchRemoteApps();
+						if (!cancelled) setRemoteApps(apps);
+					}
+					if (rev !== null) knownRev = rev;
+					timer = setTimeout(() => {
+						probe();
+					}, rev !== null ? 15e3 : 6e4);
+				};
+				probe();
+				return () => {
+					cancelled = true;
+					if (timer !== void 0) clearTimeout(timer);
 				};
 			}, []);
 			const [toggleRight, setToggleRight] = (0, react.useState)(10);

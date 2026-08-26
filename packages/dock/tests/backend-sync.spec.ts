@@ -8,7 +8,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fetchRemoteBoards, pushRemoteBoards, resolveBackendPlan, syncBackend, type RemoteBoardsResult } from '../src/client/backend-sync.ts'
 import { DockStore } from '../src/client/store.ts'
-import { mergeApps, type AppDescriptor } from '../src/client/app-registry.ts'
+import { fetchRegistryRev, mergeApps, type AppDescriptor } from '../src/client/app-registry.ts'
 
 class MemoryStorage {
   private map = new Map<string, string>()
@@ -197,5 +197,19 @@ describe('mergeApps（内置优先去重）', () => {
   it('门面追加；同 id 去重（本地优先）', () => {
     const merged = mergeApps([app('openloop')], [app('my-sales'), app('openloop')])
     expect(merged.map(a => a.id)).toEqual(['openloop', 'my-sales'])
+  })
+})
+
+describe('fetchRegistryRev（P1 轻探）', () => {
+  it('JSON 应答返回 rev；SPA fallback / 非 JSON 返回 null；网络错 null', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ state: 'running', registryRev: 3 }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    expect(await fetchRegistryRev()).toBe(3)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>', { status: 200, headers: { 'Content-Type': 'text/html' } })))
+    expect(await fetchRegistryRev()).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ state: 'running' }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    expect(await fetchRegistryRev()).toBeNull()
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('down') }))
+    expect(await fetchRegistryRev()).toBeNull()
+    vi.unstubAllGlobals()
   })
 })

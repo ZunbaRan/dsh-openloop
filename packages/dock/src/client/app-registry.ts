@@ -282,6 +282,8 @@ export async function fetchRemoteApps(): Promise<AppDescriptor[]> {
     try {
       const res = await fetch('/openloop/app/registry', { signal: controller.signal })
       if (!res.ok) return []
+      const contentType = res.headers.get('content-type') ?? ''
+      if (!contentType.includes('application/json')) return []
       const body = await res.json() as { apps?: unknown }
       const details = Array.isArray(body?.apps) ? body.apps : []
       return details
@@ -292,6 +294,26 @@ export async function fetchRemoteApps(): Promise<AppDescriptor[]> {
     }
   } catch {
     return []
+  }
+}
+
+/** 轻探：GET /openloop/app/status 只为拿 registryRev（代次变了才拉全量 registry） */
+export async function fetchRegistryRev(): Promise<number | null> {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    try {
+      const res = await fetch('/openloop/app/status', { signal: controller.signal })
+      if (!res.ok) return null
+      const contentType = res.headers.get('content-type') ?? ''
+      if (!contentType.includes('application/json')) return null
+      const body = await res.json() as { registryRev?: unknown }
+      return typeof body?.registryRev === 'number' ? body.registryRev : null
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return null
   }
 }
 

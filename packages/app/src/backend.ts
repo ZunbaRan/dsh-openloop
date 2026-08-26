@@ -16,6 +16,8 @@ export interface BackendStatus {
   version: string
   baseUrl?: string
   error?: string
+  /** registry 变更代次（invalidate 端点递增；消费方对比检测「有更新要拉」） */
+  registryRev?: number
 }
 
 export interface AppBackend {
@@ -31,6 +33,8 @@ export interface AppBackend {
   dshHome(): string
   /** 本次运行启动时刻（uptime 计算）；未启动为 undefined */
   startedAt(): number | undefined
+  /** registry 变更通知（invalidate 端点调用；返回新代次） */
+  invalidateRegistry(): number
 }
 
 export interface AppBackendOptions extends PbProcessOptions {
@@ -45,6 +49,8 @@ export function createAppBackend(options: AppBackendOptions = {}): AppBackend {
   let facade: AppFacade | undefined
   let readyPromise: Promise<AppFacade> | undefined
   let startedAt: number | undefined
+  /** registry 变更代次（0 起步；invalidate 递增——dock 轻探对比用） */
+  let registryRev = 0
   const dshHome = resolveDshHome(options.dshHome)
 
   const doStart = async (): Promise<AppFacade> => {
@@ -92,7 +98,12 @@ export function createAppBackend(options: AppBackendOptions = {}): AppBackend {
     },
 
     status(): BackendStatus {
-      return { ...status }
+      return { ...status, registryRev }
+    },
+
+    invalidateRegistry(): number {
+      registryRev += 1
+      return registryRev
     },
 
     pbClient(): PbClient | undefined {

@@ -30,6 +30,7 @@
 | `set_api_key` | `rid` + `apiKey` | 写入凭据（**只写不读**——之后只能看到 configured: true） |
 | `save_dock_state` | `dockState` = { version: 2, boards, activeBoardId } | 全量保存看板（原子替换） |
 | `load_dock_state` | — | 读取看板（无数据返回 null） |
+| `invalidate` | — | 手动通知 UI 重拉 registry（一般不用——所有写操作已自动通知；仅直改数据后用） |
 
 ## 典型流程
 
@@ -40,6 +41,9 @@
 3. `register_api`：`appName: "my-sales"`, `api: { rid: "my-sales:orders", domain: "api.example.com", path: "/v1/orders", authType: "key" }`
 4. `set_api_key`：`rid: "my-sales:orders"`, `apiKey: "<用户提供的 key>"`
 5. `get_app`：`appName: "my-sales"` 验收（components/apis 各就位，orders configured: true）
+
+> **UI 可见性**：全部写操作（upsert_app / register_* / set_api_key / save_dock_state 等）完成后端会自动通知 dock 工作台刷新（约 15 秒内生效，无需用户刷新页面）。注册完成后可以告诉用户「到 APP 页看一眼」。
+> 仅当你绕过本工具直接改了数据（如外部脚本）才需要显式调用 `invalidate`。
 
 ## 错误自修正
 

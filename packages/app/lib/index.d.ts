@@ -466,6 +466,8 @@ interface BackendStatus {
   version: string;
   baseUrl?: string;
   error?: string;
+  /** registry 变更代次（invalidate 端点递增；消费方对比检测「有更新要拉」） */
+  registryRev?: number;
 }
 interface AppBackend {
   start(): Promise<void>;
@@ -480,6 +482,8 @@ interface AppBackend {
   dshHome(): string;
   /** 本次运行启动时刻（uptime 计算）；未启动为 undefined */
   startedAt(): number | undefined;
+  /** registry 变更通知（invalidate 端点调用；返回新代次） */
+  invalidateRegistry(): number;
 }
 interface AppBackendOptions extends PbProcessOptions {
   /** 就绪等待上限（tool/route 调用侧；默认 45s 覆盖首启下载） */
@@ -4876,7 +4880,7 @@ declare const APP_BACKEND_PARAMETERS: {
   readonly action: {
     readonly type: "string";
     readonly required: true;
-    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state"];
+    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate"];
     readonly description: "Facade action. Registry: list_apps / upsert_app / delete_app / get_app; components: register_component / remove_component; apis: register_api / remove_api / set_api_key; boards: save_dock_state / load_dock_state.";
   };
   readonly app: {

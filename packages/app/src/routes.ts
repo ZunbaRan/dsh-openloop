@@ -61,6 +61,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBac
     return
   }
 
+  // invalidate：agent 写操作后的主动通知（dock 轻探 registryRev 对比，变了才拉全量）
+  if (sub === 'invalidate' && method === 'POST') {
+    const rev = backend.invalidateRegistry()
+    json(res, 200, { ok: true, registryRev: rev })
+    return
+  }
+
   const facade = await backend.ready()
 
   if (sub === 'registry' && method === 'GET') {

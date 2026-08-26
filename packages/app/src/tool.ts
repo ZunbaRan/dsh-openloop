@@ -15,6 +15,7 @@ const ACTIONS = [
   'register_component', 'remove_component',
   'register_api', 'remove_api', 'set_api_key',
   'save_dock_state', 'load_dock_state',
+  'invalidate',
 ] as const
 
 type Action = (typeof ACTIONS)[number]
@@ -60,6 +61,12 @@ export const APP_BACKEND_PARAMETERS = {
   },
 } as const
 
+/** 写操作清单（这些 action 完成后建议 agent 调一次 invalidate 通知 UI 刷新） */
+const WRITE_ACTIONS: ReadonlySet<Action> = new Set([
+  'upsert_app', 'delete_app', 'register_component', 'remove_component',
+  'register_api', 'remove_api', 'set_api_key', 'save_dock_state',
+])
+
 /** 输出契约：各 action 返回形态不同，统一为开放对象（细节由 facade 类型承载） */
 const APP_OUTPUT_SCHEMA = {
   type: 'object',
@@ -85,7 +92,14 @@ function expectObject(args: Record<string, unknown>, key: string, action: Action
 /** dsh 输出契约：lossless JSON（panels toJsonValue 同款收敛） */
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }
 
-async function runAction(action: Action, a: Record<string, unknown>, facade: Awaited<ReturnType<AppBackend['ready']>>): Promise<unknown> {
+async function runAction(action: Action, a: Record<string, unknown>, backend: AppBackend, facade: Awaited<ReturnType<AppBackend['ready']>>): Promise<unknown> {
+  const result = await runCore(action, a, facade)
+  // 写操作 + 显式 invalidate 都 bump registryRev（本地计数器零成本；dock 轻探即可感知）
+  if (WRITE_ACTIONS.has(action) || action === 'invalidate') backend.invalidateRegistry()
+  return result
+}
+
+async function runCore(action: Action, a: Record<string, unknown>, facade: Awaited<ReturnType<AppBackend['ready']>>): Promise<unknown> {
   switch (action) {
     case 'list_apps':
       return { apps: await facade.listApps() }
@@ -119,6 +133,9 @@ async function runAction(action: Action, a: Record<string, unknown>, facade: Awa
       return { saved: await facade.saveDockState(expectObject(a, 'dockState', action)) }
     case 'load_dock_state':
       return { state: await facade.loadDockState() }
+    case 'invalidate':
+      // 显式通知（写 action 已自动 bump，这里是给「直接改 PB / 外部脚本」的补丁通道）
+      return { invalidated: true }
   }
 }
 
@@ -141,7 +158,7 @@ export function createAppBackendTool(backend: AppBackend): ToolDefinition {
         throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(', ')}.`)
       }
       const facade = await backend.ready()
-      return await runAction(action, a, facade) as Record<string, JsonValue>
+      return await runAction(action, a, backend, facade) as Record<string, JsonValue>
     },
   })
 }

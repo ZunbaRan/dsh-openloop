@@ -1633,6 +1633,8 @@ function createAppBackend(options = {}) {
 	let facade;
 	let readyPromise;
 	let startedAt;
+	/** registry 变更代次（0 起步；invalidate 递增——dock 轻探对比用） */
+	let registryRev = 0;
 	const dshHome = resolveDshHome(options.dshHome);
 	const doStart = async () => {
 		status = {
@@ -1676,7 +1678,14 @@ function createAppBackend(options = {}) {
 			})]);
 		},
 		status() {
-			return { ...status };
+			return {
+				...status,
+				registryRev
+			};
+		},
+		invalidateRegistry() {
+			registryRev += 1;
+			return registryRev;
 		},
 		pbClient() {
 			if (status.state !== "running" || running === void 0) return void 0;
@@ -5809,7 +5818,8 @@ const ACTIONS = [
 	"remove_api",
 	"set_api_key",
 	"save_dock_state",
-	"load_dock_state"
+	"load_dock_state",
+	"invalidate"
 ];
 const APP_BACKEND_PARAMETERS = {
 	action: {
@@ -5851,6 +5861,17 @@ const APP_BACKEND_PARAMETERS = {
 		description: "Full dock v2 state for save_dock_state: { version: 2, boards: [{ id, name, tiles }], activeBoardId }. Replaces all boards/tiles atomically."
 	}
 };
+/** 写操作清单（这些 action 完成后建议 agent 调一次 invalidate 通知 UI 刷新） */
+const WRITE_ACTIONS = /* @__PURE__ */ new Set([
+	"upsert_app",
+	"delete_app",
+	"register_component",
+	"remove_component",
+	"register_api",
+	"remove_api",
+	"set_api_key",
+	"save_dock_state"
+]);
 /** 输出契约：各 action 返回形态不同，统一为开放对象（细节由 facade 类型承载） */
 const APP_OUTPUT_SCHEMA = {
 	type: "object",
@@ -5866,7 +5887,12 @@ function expectObject(args, key, action) {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`action "${action}" requires an object parameter "${key}" (a stringified JSON is also fine — pass the object directly, do not stringify).`);
 	return value;
 }
-async function runAction(action, a, facade) {
+async function runAction(action, a, backend, facade) {
+	const result = await runCore(action, a, facade);
+	if (WRITE_ACTIONS.has(action) || action === "invalidate") backend.invalidateRegistry();
+	return result;
+}
+async function runCore(action, a, facade) {
 	switch (action) {
 		case "list_apps": return { apps: await facade.listApps() };
 		case "upsert_app": return { app: await facade.upsertApp(expectObject(a, "app", action)) };
@@ -5898,6 +5924,7 @@ async function runAction(action, a, facade) {
 			};
 		case "save_dock_state": return { saved: await facade.saveDockState(expectObject(a, "dockState", action)) };
 		case "load_dock_state": return { state: await facade.loadDockState() };
+		case "invalidate": return { invalidated: true };
 	}
 }
 function createAppBackendTool(backend) {
@@ -5919,7 +5946,7 @@ function createAppBackendTool(backend) {
 			const a = args;
 			const action = expectString(a, "action", "list_apps");
 			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
-			return await runAction(action, a, await backend.ready());
+			return await runAction(action, a, backend, await backend.ready());
 		}
 	});
 }
@@ -6665,6 +6692,13 @@ async function handle(req, res, backend) {
 	const method = req.method ?? "GET";
 	if (sub === "status" && method === "GET") {
 		json(res, 200, backend.status());
+		return;
+	}
+	if (sub === "invalidate" && method === "POST") {
+		json(res, 200, {
+			ok: true,
+			registryRev: backend.invalidateRegistry()
+		});
 		return;
 	}
 	const facade = await backend.ready();
