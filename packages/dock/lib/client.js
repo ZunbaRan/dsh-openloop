@@ -6381,20 +6381,28 @@ window.__ModuleLoader__.load({
 			return [...builtin, ...remote.filter((a) => !seen.has(a.id))];
 		}
 		/**
-		* entry 面板提取（v1 渲染闭环契约）：
-		* entry = { panel: <完整 PanelDefinition> } → 返回该定义（形状门槛：非空 id/title + ≥1 widget）；
-		* 其他形态（文件路径字符串 / 无 panel / 畸形）返回 null——「待生成」。
-		* 注意：文件路径无效（浏览器读不到 workspace）；agent 必须内联完整定义。
+		* entry 面板提取（v1 渲染闭环契约——宽松形态）：
+		* - 规范形态：`{ panel: <完整 PanelDefinition> }`（v1 文档原写法）
+		* - 宽松形态：直接是 `PanelDefinition`（agent 实际写法——平铺更直觉，免一层套娃）
+		*   通过形状识别：含 `$schema: 'openloop.panel/v1'` 或 ≥1 widget 且有 id/title 即可
+		* - 都不是：文件路径 / 畸形 → null（待生成）
+		* 注意：文件路径无效（浏览器读不到 workspace 文件）
 		*/
 		function entryPanelOf(entry) {
-			if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
-			const panel = entry.panel;
-			if (typeof panel !== "object" || panel === null || Array.isArray(panel)) return null;
-			const record = panel;
-			if (typeof record.id !== "string" || record.id.length === 0) return null;
-			if (typeof record.title !== "string" || record.title.length === 0) return null;
-			if (!Array.isArray(record.widgets) || record.widgets.length === 0) return null;
-			return panel;
+			if (looksLikePanelDefinition(entry)) return entry;
+			if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
+				const panel = entry.panel;
+				if (looksLikePanelDefinition(panel)) return panel;
+			}
+			return null;
+		}
+		function looksLikePanelDefinition(value) {
+			if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+			const record = value;
+			if (typeof record.id !== "string" || record.id.length === 0) return false;
+			if (typeof record.title !== "string" || record.title.length === 0) return false;
+			if (!Array.isArray(record.widgets) || record.widgets.length === 0) return false;
+			return true;
 		}
 		/**
 		* pin 一个组件资源 = 构造可渲染的面板实例：
