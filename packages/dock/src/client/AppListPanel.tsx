@@ -202,7 +202,7 @@ export function AppDetail({ app, pinnedIds, onPin }: AppDetailProps): ReactNode 
                       {pinned ? '已固定' : '固定'}
                     </button>
                   ) : (
-                    <span className="d2-pin-locked" title="该组件尚无渲染数据——让 Agent 经 app_backend 生成内容后可固定">待生成</span>
+                    <span className="d2-pin-locked" title="该组件的 entry 无可渲染面板——让 Agent 经 app_backend 重新注册，entry 内联完整 PanelDefinition（entry: { panel: {...} }），文件路径无效">待生成</span>
                   )}
                 </div>
               )

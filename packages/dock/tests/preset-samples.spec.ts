@@ -72,7 +72,43 @@ describe('buildPanelMetaForComponent', () => {
   })
 
   it('无渲染数据的组件（门面组件）返回 null', () => {
-    const foreign: AppComponentDescriptor = { id: 'my-sales:weekly', title: '周度业绩', type: 'panel', desc: '', kind: '', pinnable: false }
+    const foreign: AppComponentDescriptor = { id: 'my-sales:weekly', title: '周度业绩', type: 'panel', desc: '', kind: '', pinnable: false, entry: 'openloop-panels/my-sales-weekly.json' }
     expect(buildPanelMetaForComponent(foreign)).toBeNull()
+  })
+})
+
+describe('entry 渲染闭环（v1 契约：entry.panel 内联 PanelDefinition）', () => {
+  const panelDef = {
+    $schema: 'openloop.panel/v1',
+    id: 'my-sales-weekly',
+    title: '周度业绩',
+    widgets: [{ id: 'w1', source: { type: 'preset', kind: 'metric-grid', props: { items: [{ id: 'a', label: '订单', value: 42 }] } } }],
+  }
+
+  it('entry.panel 合法 → 构造 PanelMeta（resolved 空，onLoad 刷新兜底）', () => {
+    const comp: AppComponentDescriptor = { id: 'my-sales:my-sales-weekly', title: '周度业绩', type: 'panel', desc: '', kind: '', pinnable: true, entry: { panel: panelDef } }
+    const built = buildPanelMetaForComponent(comp)
+    expect(built).not.toBeNull()
+    const meta = built!.meta as { kind: string; version: number; panel: typeof panelDef; resolved: Record<string, unknown>; resolvedAt: string }
+    expect(meta.kind).toBe('openloop.panel')
+    expect(meta.version).toBe(1)
+    expect(meta.panel).toEqual(panelDef)
+    expect(meta.resolved).toEqual({})
+  })
+
+  it('entry 为文件路径字符串 / 畸形 panel / 无 widgets → null（待生成）', () => {
+    const mk = (entry: unknown): AppComponentDescriptor => ({ id: 'x:y', title: 't', type: 'panel', desc: '', kind: '', pinnable: false, entry })
+    expect(buildPanelMetaForComponent(mk('openloop-panels/foo.json'))).toBeNull()
+    expect(buildPanelMetaForComponent(mk({ panel: 'not-an-object' }))).toBeNull()
+    expect(buildPanelMetaForComponent(mk({ panel: { id: 'p', title: 't', widgets: [] } }))).toBeNull()
+    expect(buildPanelMetaForComponent(mk({ panel: { id: '', title: 't', widgets: [{ id: 'w' }] } }))).toBeNull()
+    expect(buildPanelMetaForComponent(mk(undefined))).toBeNull()
+    expect(buildPanelMetaForComponent(mk({}))).toBeNull()
+  })
+
+  it('内置组件优先于 entry（kind 命中 PRESET_INFO 时走示例 props）', () => {
+    const comp: AppComponentDescriptor = { id: 'openloop:metric-grid', title: '指标', type: 'panel', desc: '', kind: 'metric-grid', pinnable: true, entry: { panel: panelDef } }
+    const meta = buildPanelMetaForComponent(comp)!.meta as { panel: { id: string } }
+    expect(meta.panel.id).toBe('metric-grid') // 走 PRESET_INFO，不是 entry
   })
 })

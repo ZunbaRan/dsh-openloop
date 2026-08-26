@@ -5830,7 +5830,7 @@ window.__ModuleLoader__.load({
 											children: [pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.check, { size: 13 }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), pinned ? "已固定" : "固定"]
 										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "d2-pin-locked",
-											title: "该组件尚无渲染数据——让 Agent 经 app_backend 生成内容后可固定",
+											title: "该组件的 entry 无可渲染面板——让 Agent 经 app_backend 重新注册，entry 内联完整 PanelDefinition（entry: { panel: {...} }），文件路径无效",
 											children: "待生成"
 										})
 									]
@@ -6300,20 +6300,22 @@ window.__ModuleLoader__.load({
 		function str(value, fallback = "") {
 			return typeof value === "string" ? value : fallback;
 		}
-		/** 门面行 → dock AppDescriptor（组件 pinnable=false：无渲染数据，方向 1 协议定 entry 后开放） */
+		/** 门面行 → dock AppDescriptor（组件 pinnable：entry.panel 合法即可 pin——v1 渲染闭环） */
 		function remoteAppToDescriptor(detail) {
 			const name = str(detail.app?.name);
 			if (name.length === 0) return null;
 			const components = (Array.isArray(detail.components) ? detail.components : []).map((c) => {
 				const rid = str(c?.rid);
 				if (rid.length === 0) return null;
+				const entry = c?.entry;
 				return {
 					id: rid,
 					title: str(c?.title, rid),
 					type: c?.kind === "artifact" ? "artifact" : "panel",
 					desc: str(c?.description),
 					kind: "",
-					pinnable: false
+					pinnable: entryPanelOf(entry) !== null,
+					entry
 				};
 			}).filter((c) => c !== null);
 			const apis = (Array.isArray(detail.apis) ? detail.apis : []).map((api) => ({
@@ -6379,37 +6381,68 @@ window.__ModuleLoader__.load({
 			return [...builtin, ...remote.filter((a) => !seen.has(a.id))];
 		}
 		/**
-		* pin 一个组件资源 = 以「合法最小示例 props」构造一个可渲染的面板实例。
-		* panel.id = kind → tile 来源 ID 显示 `openloop:<kind>`（与资源 ID 一致，命名即寻址）。
-		* 门面组件（pinnable=false / 无 PRESET_INFO 条目）拒绝——渲染数据不存在。
+		* entry 面板提取（v1 渲染闭环契约）：
+		* entry = { panel: <完整 PanelDefinition> } → 返回该定义（形状门槛：非空 id/title + ≥1 widget）；
+		* 其他形态（文件路径字符串 / 无 panel / 畸形）返回 null——「待生成」。
+		* 注意：文件路径无效（浏览器读不到 workspace）；agent 必须内联完整定义。
+		*/
+		function entryPanelOf(entry) {
+			if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+			const panel = entry.panel;
+			if (typeof panel !== "object" || panel === null || Array.isArray(panel)) return null;
+			const record = panel;
+			if (typeof record.id !== "string" || record.id.length === 0) return null;
+			if (typeof record.title !== "string" || record.title.length === 0) return null;
+			if (!Array.isArray(record.widgets) || record.widgets.length === 0) return null;
+			return panel;
+		}
+		/**
+		* pin 一个组件资源 = 构造可渲染的面板实例：
+		* - 内置（PRESET_INFO[kind]）→ 合法最小示例 props 实例
+		* - 门面组件（entry.panel 合法）→ 直接用 agent 内联的完整 PanelDefinition
+		*   （resolved 置空——api 绑定 widget 由 panels 的 onLoad 刷新在打开时自动拉取）
+		* 两者皆无 → null（「待生成」态，pin 拒绝）。
 		*/
 		function buildPanelMetaForComponent(component) {
 			const info = PRESET_INFO[component.kind];
-			if (info === void 0) return null;
-			const props = info.props;
-			return {
+			if (info !== void 0) {
+				const props = info.props;
+				return {
+					kind: "panel",
+					meta: {
+						kind: "openloop.panel",
+						version: 1,
+						panel: {
+							$schema: "openloop.panel/v1",
+							id: component.kind,
+							title: component.title,
+							description: info.desc,
+							widgets: [{
+								id: "w1",
+								source: {
+									type: "preset",
+									kind: component.kind,
+									props
+								}
+							}]
+						},
+						resolved: {},
+						resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+					}
+				};
+			}
+			const entryPanel = entryPanelOf(component.entry);
+			if (entryPanel !== null) return {
 				kind: "panel",
 				meta: {
 					kind: "openloop.panel",
 					version: 1,
-					panel: {
-						$schema: "openloop.panel/v1",
-						id: component.kind,
-						title: component.title,
-						description: info.desc,
-						widgets: [{
-							id: "w1",
-							source: {
-								type: "preset",
-								kind: component.kind,
-								props
-							}
-						}]
-					},
+					panel: entryPanel,
 					resolved: {},
 					resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
 				}
 			};
+			return null;
 		}
 		//#endregion
 		//#region src/client/backend-sync.ts

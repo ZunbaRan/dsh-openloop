@@ -23,7 +23,7 @@
 | `upsert_app` | `app` = { name, displayName, kind, version, description?, skill? } | 注册/更新 APP（同名幂等）。kind: `builtin`/`local`/`thirdparty` |
 | `get_app` | `appName` | APP 详情：组件清单 + API 清单（含 configured 状态点） |
 | `delete_app` | `appName` | 删 APP 并级联清其全部组件/API 资源 |
-| `register_component` | `appName` + `component` = { rid, kind, title, entry?, description? } | rid 必须以 `<appName>:` 开头；kind: `panel`/`artifact` |
+| `register_component` | `appName` + `component` = { rid, kind, title, entry?, description? } | rid 必须以 `<appName>:` 开头；kind: `panel`/`artifact`；**entry 契约见下** |
 | `remove_component` | `rid` | 移除组件资源 |
 | `register_api` | `appName` + `api` = { rid, domain, path, authType, summary? } | 登记 API；authType: `none`/`key` |
 | `remove_api` | `rid` | 移除 API 资源 |
@@ -41,6 +41,37 @@
 3. `register_api`：`appName: "my-sales"`, `api: { rid: "my-sales:orders", domain: "api.example.com", path: "/v1/orders", authType: "key" }`
 4. `set_api_key`：`rid: "my-sales:orders"`, `apiKey: "<用户提供的 key>"`
 5. `get_app`：`appName: "my-sales"` 验收（components/apis 各就位，orders configured: true）
+
+## entry 契约（组件的可渲染内容——决定 dock 里「待生成」还是可「固定」）
+
+**`entry: { panel: <完整 PanelDefinition> }`**——内联整个面板定义 JSON：
+
+```jsonc
+// register_component 的 component 参数
+{
+  "rid": "my-sales:my-sales-weekly",
+  "kind": "panel",
+  "title": "周度业绩",
+  "entry": {
+    "panel": {
+      "$schema": "openloop.panel/v1",
+      "id": "my-sales-weekly",
+      "title": "周度业绩",
+      "widgets": [ /* PanelDefinition 的 widgets，与 panel 工具的 panel 参数同构 */ ]
+    }
+  }
+}
+```
+
+**生成 entry 的标准流程**（agent 操作）：
+1. 用 `panel` 工具生成面板（可加 `persist: true` 落盘调试）
+2. 若已 persist：`read` `openloop-panels/<panel-id>.json`，取其 `panel` 字段内容
+3. `register_component` 时把该定义**原样内联**进 `entry.panel`（不要写文件路径！浏览器读不到 workspace 文件——路径字符串的 entry 一律显示「待生成」）
+
+要点：
+- `panel.id` 建议 = rid 的组件名段（如 `my-sales-weekly`）——tile 溯源 ID 才能对上资源 ID
+- api 数据绑定的 widget 可正常工作：pin 后面板打开时 panels 的 onLoad 刷新自动拉数据
+- entry 缺失/畸形 → dock 显示「待生成」（用户看到的提示会引导重新注册）
 
 > **UI 可见性**：全部写操作（upsert_app / register_* / set_api_key / save_dock_state 等）完成后端会自动通知 dock 工作台刷新（约 15 秒内生效，无需用户刷新页面）。注册完成后可以告诉用户「到 APP 页看一眼」。
 > 仅当你绕过本工具直接改了数据（如外部脚本）才需要显式调用 `invalidate`。
