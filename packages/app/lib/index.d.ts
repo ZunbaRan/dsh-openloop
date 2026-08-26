@@ -5086,6 +5086,19 @@ declare class WebServer extends Service {
 declare const APP_ROUTE = "/openloop/app";
 declare function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend): () => void;
 //#endregion
+//#region src/seed.d.ts
+/** 与 panels 0.4.0 allPresetKinds() 对齐（33 个） */
+declare const BUILTIN_KINDS: readonly string[];
+/**
+ * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
+ * 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
+ */
+declare function seedBuiltinApp(facade: AppFacade): Promise<{
+  seeded: boolean;
+  components: number;
+  apis: number;
+}>;
+//#endregion
 //#region src/index.d.ts
 declare const name = "openloop-dsh-app";
 declare const inject: string[];
@@ -5098,4 +5111,4 @@ interface Config {
 declare const Config: Schema<Config>;
 declare function apply(ctx: Context, config?: Config): void;
 //#endregion
-export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, ApiAuthType, ApiRow, ApiStatusRow, type AppBackend, type AppBackendOptions, AppFacade, AppKind, AppRow, type BackendStatus, BoardRow, COLLECTIONS, ComponentKind, ComponentRow, Config, DockStateV2, DockTileV2, PB_VERSION, PbCollectionDef, PbFieldDef, type PbLogger, type PbProcessOptions, PbRequestError, PbWatchdog, type RunningPb, type SuperuserCredentials, TileRow, WATCHDOG_DEFAULTS, type WatchdogOptions, type WatchdogState, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, startPocketBase };
+export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, ApiAuthType, ApiRow, ApiStatusRow, type AppBackend, type AppBackendOptions, AppFacade, AppKind, AppRow, BUILTIN_KINDS, type BackendStatus, BoardRow, COLLECTIONS, ComponentKind, ComponentRow, Config, DockStateV2, DockTileV2, PB_VERSION, PbCollectionDef, PbFieldDef, type PbLogger, type PbProcessOptions, PbRequestError, PbWatchdog, type RunningPb, type SuperuserCredentials, TileRow, WATCHDOG_DEFAULTS, type WatchdogOptions, type WatchdogState, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, seedBuiltinApp, startPocketBase };

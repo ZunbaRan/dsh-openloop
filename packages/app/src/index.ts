@@ -30,6 +30,7 @@ export { startPocketBase, findFreePort, ensureBinary, pbAssetName, pbDownloadUrl
 export type { PbProcessOptions, RunningPb, SuperuserCredentials, PbLogger } from './pb-process.ts'
 export { createAppBackendTool, APP_BACKEND_TOOL, APP_BACKEND_PARAMETERS } from './tool.ts'
 export { registerAppRoutes, APP_ROUTE } from './routes.ts'
+export { seedBuiltinApp, BUILTIN_KINDS } from './seed.ts'
 
 export const name = 'openloop-dsh-app'
 // webServer 条件注入（headless 无 HTTP——tools/skills 通道独立于 web）

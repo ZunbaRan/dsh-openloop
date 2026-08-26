@@ -11,6 +11,7 @@ import { startPocketBase, resolveDshHome, PB_VERSION, type PbProcessOptions, typ
 import { initCollections } from './schema.ts'
 import { createAppFacade, type AppFacade } from './facade.ts'
 import { PbWatchdog, type WatchdogState } from './watchdog.ts'
+import { seedBuiltinApp } from './seed.ts'
 
 export interface BackendStatus {
   state: 'starting' | 'running' | 'failed' | 'stopped'
@@ -87,6 +88,8 @@ export function createAppBackend(options: AppBackendOptions = {}): AppBackend {
     const pb: PbClient = createPbClient(process.baseUrl, process.credentials)
     await initCollections(pb)
     facade = createAppFacade(pb)
+    // 内置 APP 种子（幂等：openloop 已存在即跳过——不覆盖用户/agent 修改）
+    await seedBuiltinApp(facade)
     startedAt = Date.now()
     status = { state: 'running', version: PB_VERSION, baseUrl: process.baseUrl }
     syncStatus()

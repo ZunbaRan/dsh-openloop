@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest'
 import { allPresetKinds, getPreset, type PresetModule } from '../../panels/src/presets/index.ts'
 import { buildPanelMetaForComponent, presetSamples, type AppComponentDescriptor } from '../src/client/app-registry.ts'
+import { BUILTIN_KINDS } from '../../app/src/seed.ts'
 
 const comp = (kind: string): AppComponentDescriptor => ({
   id: `openloop:${kind}`,
@@ -43,6 +44,14 @@ describe('示例表与 panels registry 同步', () => {
     const kinds = new Set(allPresetKinds() as string[])
     const dead = Object.keys(presetSamples).filter(k => !kinds.has(k))
     expect(dead, `PRESET_INFO 条目对应的预设已不存在：${dead.join(', ')}`).toEqual([])
+  })
+
+  it('三方一致：panels kinds = dock PRESET_INFO = app BUILTIN_KINDS（人工同步的漂移告警）', () => {
+    const panels = [...allPresetKinds()].sort()
+    const dockTable = Object.keys(presetSamples).sort()
+    const appSeed = [...BUILTIN_KINDS].sort()
+    expect(dockTable).toEqual(panels)
+    expect(appSeed).toEqual(panels)
   })
 })
 

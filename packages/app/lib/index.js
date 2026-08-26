@@ -1755,6 +1755,159 @@ var PbWatchdog = class {
 	}
 };
 //#endregion
+//#region src/seed.ts
+/** 与 panels 0.4.0 allPresetKinds() 对齐（33 个） */
+const BUILTIN_KINDS = [
+	"accordion",
+	"api-credentials",
+	"avatar",
+	"badge",
+	"callout",
+	"card",
+	"chart",
+	"comparison",
+	"data-table",
+	"db-browser",
+	"divider",
+	"flow",
+	"funnel",
+	"gauge",
+	"grid",
+	"heading",
+	"heatmap",
+	"markdown",
+	"mcp-status",
+	"metric-grid",
+	"pb-stats",
+	"plugin-registry",
+	"progress",
+	"row",
+	"section",
+	"sessions-stats",
+	"sparkline",
+	"split",
+	"stack",
+	"storage-usage",
+	"tag",
+	"text",
+	"timeline"
+];
+const BUILTIN_APIS = [
+	{
+		rid: "openloop:boards",
+		domain: "local.app",
+		path: "/openloop/app/boards",
+		authType: "none",
+		summary: "看板集合的 CRUD（dock v2 state 全量存取）"
+	},
+	{
+		rid: "openloop:components",
+		domain: "local.app",
+		path: "/openloop/app/registry",
+		authType: "none",
+		summary: "APP 组件资源注册表（工作台数据源）"
+	},
+	{
+		rid: "openloop:apis",
+		domain: "local.app",
+		path: "/openloop/app/collections/:name/records",
+		authType: "none",
+		summary: "管理表受控查询（分页 + 关键词筛选）"
+	}
+];
+/** 组件名段 → 中文标题（dock PRESET_INFO 同表；两边人工同步） */
+const KIND_TITLES = {
+	accordion: "折叠面板",
+	"api-credentials": "凭据总览",
+	avatar: "头像",
+	badge: "徽章",
+	callout: "提示条",
+	card: "卡片",
+	chart: "图表",
+	comparison: "对比表",
+	"data-table": "数据表格",
+	"db-browser": "数据库浏览",
+	divider: "分隔线",
+	flow: "流程图",
+	funnel: "漏斗",
+	gauge: "仪表盘",
+	grid: "网格",
+	heading: "标题",
+	heatmap: "热力图",
+	markdown: "Markdown",
+	"mcp-status": "MCP 状态",
+	"metric-grid": "指标网格",
+	"pb-stats": "后端状态",
+	"plugin-registry": "插件清单",
+	progress: "进度条",
+	row: "横向行",
+	section: "分区",
+	"sessions-stats": "会话统计",
+	sparkline: "迷你走势",
+	split: "分栏",
+	stack: "纵向堆叠",
+	"storage-usage": "存储占用",
+	tag: "标签",
+	text: "文本",
+	timeline: "时间线"
+};
+/** 极简合法 PanelDefinition（单 widget 平铺 entry）——保证目录条目「可固定」 */
+function minimalEntry(kind) {
+	return {
+		$schema: "openloop.panel/v1",
+		id: kind,
+		title: KIND_TITLES[kind] ?? kind,
+		widgets: [{
+			id: "w1",
+			source: {
+				type: "preset",
+				kind,
+				props: {}
+			}
+		}]
+	};
+}
+/**
+* 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
+* 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
+*/
+async function seedBuiltinApp(facade) {
+	if ((await facade.listApps()).some((a) => a.name === "openloop")) return {
+		seeded: false,
+		components: 0,
+		apis: 0
+	};
+	await facade.upsertApp({
+		name: "openloop",
+		displayName: "OpenLoop",
+		kind: "builtin",
+		version: "0.4.0",
+		description: "系统内置 APP：panels 预设组件与本地后端 API，开箱即用。",
+		skill: "内置组件目录。用户要「看板/图表/表格/状态」类可视化时直接 pin 这些组件；agent 用 panel 工具生成更复杂的面板。"
+	});
+	let components = 0;
+	for (const kind of BUILTIN_KINDS) {
+		await facade.registerComponent("openloop", {
+			rid: `openloop:${kind}`,
+			kind: "panel",
+			title: KIND_TITLES[kind] ?? kind,
+			description: "panels 预设组件（内置）",
+			entry: minimalEntry(kind)
+		});
+		components++;
+	}
+	let apis = 0;
+	for (const api of BUILTIN_APIS) {
+		await facade.registerApi("openloop", api);
+		apis++;
+	}
+	return {
+		seeded: true,
+		components,
+		apis
+	};
+}
+//#endregion
 //#region src/backend.ts
 /**
 * AppBackend 组装层：PocketBase 进程 + admin client + collections 初始化 + 门面。
@@ -1809,6 +1962,7 @@ function createAppBackend(options = {}) {
 		const pb = createPbClient(process.baseUrl, process.credentials);
 		await initCollections(pb);
 		facade = createAppFacade(pb);
+		await seedBuiltinApp(facade);
 		startedAt = Date.now();
 		status = {
 			state: "running",
@@ -7078,4 +7232,4 @@ function apply(ctx, config = {}) {
 	}, "openloop-dsh-app: backend lifecycle");
 }
 //#endregion
-export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, COLLECTIONS, Config, PB_VERSION, PbRequestError, PbWatchdog, WATCHDOG_DEFAULTS, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, startPocketBase };
+export { APP_BACKEND_PARAMETERS, APP_BACKEND_TOOL, APP_ROUTE, BUILTIN_KINDS, COLLECTIONS, Config, PB_VERSION, PbRequestError, PbWatchdog, WATCHDOG_DEFAULTS, apply, createAppBackend, createAppBackendTool, createAppFacade, createPbClient, ensureBinary, findFreePort, initCollections, inject, name, pbAssetName, pbDownloadUrl, registerAppRoutes, resolveDshHome, seedBuiltinApp, startPocketBase };
