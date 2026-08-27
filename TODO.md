@@ -31,7 +31,7 @@
 - [x] **内置 APP 注册进后端**（2026-08-26 完成，app 0.3.1 `e0dc3af`）：seed 33 组件 + 3 API，幂等（用户修改不覆盖），三方 kind 表一致性测试锁定（panels=dock=app）
 - [x] **北极星 demo 剧本**（2026-08-26，docs/NORTH_STAR_DEMO_SCRIPT.md）：形态 B 三层递进（内置目录 → agent 生成 → 用户组装）+ 自愈彩蛋；双场景节奏（团队完整版 6min / 社区剪辑版 2min）；验收清单 + 风险规避表已备。**正式录制前置**：真机过一遍验收清单（7 项）
 - [ ] **北极星 demo 录制**：按剧本走查 + 录屏（待用户安排）
-- [ ] **方向 1 · 第三方包协议**（双形态：全包 / 纯 API 包）：**等用户说明协议细节**——协议定了 entry 契约才能最终敲定（「待生成」态的解禁依赖它）
+- [ ] **方向 1 · 第三方包协议**：「刚刚好」版设计已完成（docs/DIRECTION1_PACK_PROTOCOL.md，2026-08-27）——**核心洞察：包是安装时概念**（manifest 引用文件 + agent 即安装器 + 安装后组件与 agent 生成物同形态，零新运行时机制）。实施仅 ~2.5h：dock entryArtifactOf（artifact 形态 entry）+ 安装 skill + 示例包；可选 install_manifest action。**待用户拍板后开工**
 
 ## 低优先 / 观察池
 
