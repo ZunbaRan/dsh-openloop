@@ -1,4 +1,4 @@
-import { isRecord } from "@openloop/dsh-mcp-runtime";
+import { McpRuntimeError, isRecord } from "@openloop/dsh-mcp-runtime";
 //#region src/contract.ts
 const MCP_TOOL_PREFIX = "mcp__";
 const MCP_PRESENTATION_KIND = "openloop.dsh-mcp";
@@ -64,6 +64,16 @@ function toPresentation(tool, callName, result) {
 //#region src/index.ts
 const name = "openloop-dsh-mcp-tools";
 const inject = ["mcpRuntime", "tools"];
+/**
+* Server 不可用（连不上 / listTools 探测失败）。可用性对齐 runtime.start() 的既有语义
+* （2026-08-23）：连接失败停在 server 粒度——跳过该 server 的工具注册，不阻断其它
+* server，也不让 apply 失败。runtime 保持 error/disconnected 状态，onToolsChanged
+* 惰性重连后自愈。MCP server 是可选外设，不是宿主的硬依赖。
+*/
+function isServerUnavailable(error) {
+	if (error instanceof McpRuntimeError) return error.code === "CONNECTION";
+	return true;
+}
 function outputSchema() {
 	return {
 		type: "object",
@@ -180,7 +190,13 @@ async function apply(ctx) {
 	let disposed = false;
 	const fingerprint = (tool) => JSON.stringify(tool);
 	const refreshServer = async (serverId) => {
-		const tools = await runtime.listTools(serverId);
+		let tools;
+		try {
+			tools = await runtime.listTools(serverId);
+		} catch (error) {
+			if (isServerUnavailable(error)) return;
+			throw error;
+		}
 		const wanted = /* @__PURE__ */ new Set();
 		for (const tool of tools) {
 			if (tool.modelVisible === false) continue;
@@ -206,7 +222,8 @@ async function apply(ctx) {
 	const MCP_TOOL_PREFIX_FOR_SERVER = (serverId) => `mcp__${serverId}`;
 	const refreshAll = async () => {
 		if (disposed) return;
-		await Promise.all(runtime.serverIds().map((serverId) => refreshServer(serverId)));
+		const results = await Promise.allSettled(runtime.serverIds().map((serverId) => refreshServer(serverId)));
+		for (const result of results) if (result.status === "rejected") throw result.reason;
 	};
 	const disposeResultObserver = ctx.on("tools/result", (exec, result) => {
 		const tool = registered.get(exec.name)?.tool;
@@ -218,7 +235,9 @@ async function apply(ctx) {
 		return block ? [...content, block] : content;
 	});
 	const subscriptions = runtime.serverIds().map((serverId) => runtime.onToolsChanged(serverId, () => {
-		refreshServer(serverId);
+		refreshServer(serverId).catch((error) => {
+			console.warn(`[openloop-dsh-mcp-tools] tool refresh failed for ${serverId}: ${error instanceof Error ? error.message : String(error)}`);
+		});
 	}));
 	ctx.effect(() => () => {
 		disposed = true;

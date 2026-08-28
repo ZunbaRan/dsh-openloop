@@ -1,13 +1,25 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { CodeDispatchLog, JsonSchemaNode, ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { McpRuntimeService, McpToolRecord } from '@openloop/dsh-mcp-runtime'
-import { isRecord } from '@openloop/dsh-mcp-runtime'
+import { isRecord, McpRuntimeError } from '@openloop/dsh-mcp-runtime'
 import { codeDispatchPresentationBlock, mcpToolName, textFallback, toPresentation } from './contract.ts'
 
 export * from './contract.ts'
 
 export const name = 'openloop-dsh-mcp-tools'
 export const inject = ['mcpRuntime', 'tools']
+
+/**
+ * Server 不可用（连不上 / listTools 探测失败）。可用性对齐 runtime.start() 的既有语义
+ * （2026-08-23）：连接失败停在 server 粒度——跳过该 server 的工具注册，不阻断其它
+ * server，也不让 apply 失败。runtime 保持 error/disconnected 状态，onToolsChanged
+ * 惰性重连后自愈。MCP server 是可选外设，不是宿主的硬依赖。
+ */
+function isServerUnavailable(error: unknown): boolean {
+  if (error instanceof McpRuntimeError) return error.code === 'CONNECTION'
+  // connection.listTools 阶段的原始网络/探测错误（SDK 超时、ECONNREFUSED 等）未被 runtime 包装。
+  return true
+}
 
 function outputSchema(): JsonSchemaNode {
   return {
@@ -120,7 +132,13 @@ export async function apply(ctx: Context): Promise<void> {
 
   const fingerprint = (tool: McpToolRecord) => JSON.stringify(tool)
   const refreshServer = async (serverId: string): Promise<void> => {
-    const tools = await runtime.listTools(serverId)
+    let tools: readonly McpToolRecord[]
+    try {
+      tools = await runtime.listTools(serverId)
+    } catch (error) {
+      if (isServerUnavailable(error)) return
+      throw error
+    }
     const wanted = new Set<string>()
     for (const tool of tools) {
       if (tool.modelVisible === false) continue
@@ -145,7 +163,12 @@ export async function apply(ctx: Context): Promise<void> {
   const MCP_TOOL_PREFIX_FOR_SERVER = (serverId: string) => `mcp__${serverId}`
   const refreshAll = async (): Promise<void> => {
     if (disposed) return
-    await Promise.all(runtime.serverIds().map((serverId) => refreshServer(serverId)))
+    // 按 server 隔离：一个 server 的注册异常不阻断其它 server 的工具注册。
+    // 连接类失败已在 refreshServer 内吞掉；剩下的 rejected 是插件自身 bug，仍让 apply 失败。
+    const results = await Promise.allSettled(runtime.serverIds().map((serverId) => refreshServer(serverId)))
+    for (const result of results) {
+      if (result.status === 'rejected') throw result.reason
+    }
   }
 
   const disposeResultObserver = ctx.on('tools/result', (exec, result) => {
@@ -157,7 +180,11 @@ export async function apply(ctx: Context): Promise<void> {
     const content = await next()
     return block ? [...content, block] : content
   })
-  const subscriptions = runtime.serverIds().map((serverId) => runtime.onToolsChanged(serverId, () => { void refreshServer(serverId) }))
+  const subscriptions = runtime.serverIds().map((serverId) => runtime.onToolsChanged(serverId, () => {
+    void refreshServer(serverId).catch((error) => {
+      console.warn(`[openloop-dsh-mcp-tools] tool refresh failed for ${serverId}: ${error instanceof Error ? error.message : String(error)}`)
+    })
+  }))
   ctx.effect(() => () => {
     disposed = true
     disposeResultObserver()
