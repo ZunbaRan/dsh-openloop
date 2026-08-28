@@ -592,6 +592,46 @@ var McpRuntime = class {
 		state.listeners.add(listener);
 		return () => state.listeners.delete(listener);
 	}
+	serverListeners = /* @__PURE__ */ new Set();
+	/**
+	* 热添加 server（方向1 connect 流程，2026-08-28）：mcp.json 落盘后不重启 web
+	* 即时激活。新 server 初始 disconnected，listTools/callTool 的 ensureConnection
+	* 惰性连接（与启动容错同一语义）。通知 onServersChanged 订阅方（mcp-tools
+	* 补工具注册）。
+	*/
+	addServer(config) {
+		if (!config.id || this.servers.has(config.id)) throw new Error(`MCP server ids must be unique: ${config.id}`);
+		this.servers.set(config.id, {
+			config,
+			connection: void 0,
+			connecting: void 0,
+			state: "disconnected",
+			connectionCount: 0,
+			error: void 0,
+			tools: void 0,
+			listeners: /* @__PURE__ */ new Set(),
+			closing: false,
+			closePromise: void 0,
+			closedConnections: /* @__PURE__ */ new WeakSet()
+		});
+		for (const listener of this.serverListeners) listener();
+	}
+	/**
+	* 热移除 server：优雅关闭连接后从运行时摘除，通知订阅方清理该 server 的工具。
+	* server 不存在时静默返回 false。
+	*/
+	async removeServer(serverId) {
+		const state = this.servers.get(serverId);
+		if (!state) return false;
+		await this.closeServer(state);
+		this.servers.delete(serverId);
+		for (const listener of this.serverListeners) listener();
+		return true;
+	}
+	onServersChanged(listener) {
+		this.serverListeners.add(listener);
+		return () => this.serverListeners.delete(listener);
+	}
 	async start() {
 		const failed = (await Promise.allSettled(this.serverIds().map((serverId) => this.ensureConnection(serverId).then(() => void 0)))).filter((r) => r.status === "rejected");
 		if (failed.length > 0) console.warn(`[openloop-dsh-mcp-runtime] ${failed.length} MCP server(s) unreachable at boot (lazy retry on use): ${failed.map((r) => String(r.reason?.message ?? r.reason)).join("; ").slice(0, 300)}`);
@@ -945,6 +985,15 @@ var McpRuntimeService = class extends Service {
 	}
 	onToolsChanged(serverId, listener) {
 		return this.runtime.onToolsChanged(serverId, listener);
+	}
+	onServersChanged(listener) {
+		return this.runtime.onServersChanged(listener);
+	}
+	addServer(config) {
+		this.runtime.addServer(config);
+	}
+	removeServer(serverId) {
+		return this.runtime.removeServer(serverId);
 	}
 	start() {
 		return this.runtime.start();

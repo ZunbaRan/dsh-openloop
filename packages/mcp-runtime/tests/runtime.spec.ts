@@ -161,4 +161,49 @@ describe('McpRuntime', () => {
     expect(closed).toBe(1)
     expect(runtime.status('fixture').state).toBe('closed')
   })
+
+  it('hot-adds a server (lazy connect) and notifies onServersChanged subscribers', async () => {
+    const fake = fakeFactory()
+    const runtime = new McpRuntime({ servers: [], connectionFactory: fake.factory })
+    expect(runtime.serverIds()).toEqual([])
+
+    const events: string[] = []
+    const unsubscribe = runtime.onServersChanged(() => events.push([...runtime.serverIds()].join(',')))
+
+    runtime.addServer({ id: 'late', transport: { kind: 'stdio', command: 'unused' } })
+    expect(events).toEqual(['late'])
+    expect(runtime.status('late').state).toBe('disconnected')
+
+    // 惰性连接：首次使用才建连（与启动容错同一语义）
+    const tools = await runtime.listTools('late')
+    expect(tools[0]?.name).toBe('mcp_app_tool')
+    expect(fake.connectionCount()).toBe(1)
+
+    expect(() => runtime.addServer({ id: 'late', transport: { kind: 'stdio', command: 'unused' } })).toThrow(/unique/)
+    unsubscribe()
+    runtime.addServer({ id: 'other', transport: { kind: 'stdio', command: 'unused' } })
+    expect(events).toEqual(['late'])
+
+    await runtime.close()
+  })
+
+  it('hot-removes a server: closes the connection, drops it, and notifies subscribers', async () => {
+    const fake = fakeFactory()
+    const runtime = new McpRuntime({
+      servers: [{ id: 'fixture', transport: { kind: 'stdio', command: 'unused' } }],
+      connectionFactory: fake.factory,
+    })
+    await runtime.listTools('fixture')
+    expect(fake.connectionCount()).toBe(1)
+
+    const events: string[] = []
+    runtime.onServersChanged(() => events.push([...runtime.serverIds()].join(',')))
+
+    expect(await runtime.removeServer('fixture')).toBe(true)
+    expect(events).toEqual([''])
+    expect(runtime.serverIds()).toEqual([])
+    await expect(runtime.listTools('fixture')).rejects.toMatchObject({ code: 'UNKNOWN_SERVER' })
+    expect(await runtime.removeServer('fixture')).toBe(false)
+    await runtime.close()
+  })
 })

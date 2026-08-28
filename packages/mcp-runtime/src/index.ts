@@ -206,6 +206,52 @@ export class McpRuntime {
     return () => state.listeners.delete(listener)
   }
 
+  private readonly serverListeners = new Set<() => void>()
+
+  /**
+   * 热添加 server（方向1 connect 流程，2026-08-28）：mcp.json 落盘后不重启 web
+   * 即时激活。新 server 初始 disconnected，listTools/callTool 的 ensureConnection
+   * 惰性连接（与启动容错同一语义）。通知 onServersChanged 订阅方（mcp-tools
+   * 补工具注册）。
+   */
+  addServer(config: McpServerConfig): void {
+    if (!config.id || this.servers.has(config.id)) {
+      throw new Error(`MCP server ids must be unique: ${config.id}`)
+    }
+    this.servers.set(config.id, {
+      config,
+      connection: undefined,
+      connecting: undefined,
+      state: 'disconnected',
+      connectionCount: 0,
+      error: undefined,
+      tools: undefined,
+      listeners: new Set(),
+      closing: false,
+      closePromise: undefined,
+      closedConnections: new WeakSet(),
+    })
+    for (const listener of this.serverListeners) listener()
+  }
+
+  /**
+   * 热移除 server：优雅关闭连接后从运行时摘除，通知订阅方清理该 server 的工具。
+   * server 不存在时静默返回 false。
+   */
+  async removeServer(serverId: string): Promise<boolean> {
+    const state = this.servers.get(serverId)
+    if (!state) return false
+    await this.closeServer(state)
+    this.servers.delete(serverId)
+    for (const listener of this.serverListeners) listener()
+    return true
+  }
+
+  onServersChanged(listener: () => void): () => void {
+    this.serverListeners.add(listener)
+    return () => this.serverListeners.delete(listener)
+  }
+
   async start(): Promise<void> {
     // 可用性修复（2026-08-23 真机事故）：外部 MCP server 不可达不应拖死整个插件树
     // （tldraw 本地服务未启动曾导致 dsh web 完全无法启动）。
@@ -629,6 +675,9 @@ export class McpRuntimeService extends Service<McpRuntime> {
   status(serverId: string) { return this.runtime.status(serverId) }
   connectionCount(serverId: string) { return this.runtime.connectionCount(serverId) }
   onToolsChanged(serverId: string, listener: () => void) { return this.runtime.onToolsChanged(serverId, listener) }
+  onServersChanged(listener: () => void) { return this.runtime.onServersChanged(listener) }
+  addServer(config: McpServerConfig) { this.runtime.addServer(config) }
+  removeServer(serverId: string) { return this.runtime.removeServer(serverId) }
   start() { return this.runtime.start() }
   close() { return this.runtime.close() }
   listTools(serverId: string, signal?: AbortSignal) { return this.runtime.listTools(serverId, signal) }

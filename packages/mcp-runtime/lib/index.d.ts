@@ -185,6 +185,20 @@ declare class McpRuntime {
   status(serverId: string): McpRuntimeStatus;
   connectionCount(serverId: string): number;
   onToolsChanged(serverId: string, listener: () => void): () => void;
+  private readonly serverListeners;
+  /**
+   * 热添加 server（方向1 connect 流程，2026-08-28）：mcp.json 落盘后不重启 web
+   * 即时激活。新 server 初始 disconnected，listTools/callTool 的 ensureConnection
+   * 惰性连接（与启动容错同一语义）。通知 onServersChanged 订阅方（mcp-tools
+   * 补工具注册）。
+   */
+  addServer(config: McpServerConfig): void;
+  /**
+   * 热移除 server：优雅关闭连接后从运行时摘除，通知订阅方清理该 server 的工具。
+   * server 不存在时静默返回 false。
+   */
+  removeServer(serverId: string): Promise<boolean>;
+  onServersChanged(listener: () => void): () => void;
   start(): Promise<void>;
   close(): Promise<void>;
   listTools(serverId: string, signal?: AbortSignal): Promise<readonly McpToolRecord[]>;
@@ -212,6 +226,9 @@ declare class McpRuntimeService extends Service<McpRuntime> {
   status(serverId: string): McpRuntimeStatus;
   connectionCount(serverId: string): number;
   onToolsChanged(serverId: string, listener: () => void): () => void;
+  onServersChanged(listener: () => void): () => void;
+  addServer(config: McpServerConfig): void;
+  removeServer(serverId: string): Promise<boolean>;
   start(): Promise<void>;
   close(): Promise<void>;
   listTools(serverId: string, signal?: AbortSignal): Promise<readonly McpToolRecord[]>;

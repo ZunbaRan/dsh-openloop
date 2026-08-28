@@ -37,6 +37,7 @@ describe('MCP Code Mode presentation bridge', () => {
       listTools: async () => [tool],
       callTool: async () => { calls += 1; return callResult },
       onToolsChanged: () => () => undefined,
+      onServersChanged: () => () => undefined,
     }
     const events: Array<{ name: string; data: Record<string, unknown> }> = []
     const agent = { session: { append(name: string, data: Record<string, unknown>) { events.push({ name, data }) } } }
@@ -118,6 +119,7 @@ describe('MCP Code Mode presentation bridge', () => {
       listTools: async () => [tool],
       callTool: async () => callResult,
       onToolsChanged: () => () => undefined,
+      onServersChanged: () => () => undefined,
     }
     const agent = { session: { append() {} } }
     const ctx = new Context()

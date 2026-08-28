@@ -28,6 +28,30 @@ async function startToolsPlugin(runtime: unknown): Promise<Context> {
   return ctx
 }
 
+/** 带热添加/热移除的可变 fake runtime（server 集合动态变化，onServersChanged 通知）。 */
+function mutableRuntime() {
+  const servers = new Map<string, { listTools: () => Promise<unknown[]> }>()
+  const serverListeners = new Set<() => void>()
+  return {
+    serverIds: () => [...servers.keys()],
+    listTools: async (serverId: string) => servers.get(serverId)?.listTools() ?? [],
+    callTool: async (serverId: string) => ({ serverId, toolName: 'draw', content: [{ type: 'text', text: 'ok' }], isError: false }),
+    onToolsChanged: () => () => undefined,
+    onServersChanged(listener: () => void) {
+      serverListeners.add(listener)
+      return () => serverListeners.delete(listener)
+    },
+    add(id: string, listTools: () => Promise<unknown[]>) {
+      servers.set(id, { listTools })
+      for (const listener of serverListeners) listener()
+    },
+    remove(id: string) {
+      servers.delete(id)
+      for (const listener of serverListeners) listener()
+    },
+  }
+}
+
 const agent = { session: { append() {} } }
 
 async function call(ctx: Context, name: string) {
@@ -55,6 +79,7 @@ describe('MCP tools startup tolerance', () => {
         return { serverId: 'excalidraw', toolName: 'draw', content: [{ type: 'text', text: 'ok' }], isError: false }
       },
       onToolsChanged: () => () => undefined,
+      onServersChanged: () => () => undefined,
     }
 
     const ctx = await startToolsPlugin(runtime)
@@ -84,6 +109,7 @@ describe('MCP tools startup tolerance', () => {
         return { serverId: 'excalidraw', toolName: 'draw', content: [], isError: false }
       },
       onToolsChanged: () => () => undefined,
+      onServersChanged: () => () => undefined,
     }
 
     const ctx = await startToolsPlugin(runtime)
@@ -112,6 +138,7 @@ describe('MCP tools startup tolerance', () => {
         notify = listener
         return () => undefined
       },
+      onServersChanged: () => () => undefined,
     }
 
     const ctx = await startToolsPlugin(runtime)
@@ -135,6 +162,7 @@ describe('MCP tools startup tolerance', () => {
       listTools: async () => { throw new McpRuntimeError('UNKNOWN_SERVER', 'Unknown MCP server: tldraw') },
       callTool: async () => ({ serverId: 'tldraw', toolName: 'draw', content: [], isError: false }),
       onToolsChanged: () => () => undefined,
+      onServersChanged: () => () => undefined,
     }
 
     const ctx = new Context()
@@ -142,6 +170,29 @@ describe('MCP tools startup tolerance', () => {
     ctx.plugin({ name: 'mcp-runtime-test', apply(ctx) { ctx.provide('mcpRuntime', runtime) } })
     await ctx.plugin(ToolRuntime)
     await expect(ctx.plugin(toolsPlugin)).rejects.toThrow('Unknown MCP server: tldraw')
+
+    await ctx.fiber.dispose()
+  })
+
+  it('registers tools for a hot-added server and clears them on hot-remove (no restart)', async () => {
+    const runtime = mutableRuntime()
+    const ctx = await startToolsPlugin(runtime)
+
+    // 启动时无 server：工具表空，apply 成功
+    const none = await call(ctx, 'mcp__late__draw')
+    expect(none.isError).toBe(true)
+
+    // 热添加：onServersChanged → 立即注册该 server 的工具
+    runtime.add('late', async () => [toolOf('late', 'draw')])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const ok = await call(ctx, 'mcp__late__draw')
+    expect(ok.isError).toBe(false)
+
+    // 热移除：工具随之清掉
+    runtime.remove('late')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const gone = await call(ctx, 'mcp__late__draw')
+    expect(gone.isError).toBe(true)
 
     await ctx.fiber.dispose()
   })

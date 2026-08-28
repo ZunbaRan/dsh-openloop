@@ -171,6 +171,48 @@ export async function apply(ctx: Context): Promise<void> {
     }
   }
 
+  /**
+   * server 集合动态同步（方向1 connect 热激活，2026-08-28）：新 server 补订
+   * onToolsChanged 并（热添加时）立即 best-effort 注册工具；被移除的 server
+   * 退订并清掉其已注册工具。与启动容错同语义——连接失败停在 server 粒度。
+   * 启动期 refreshNew=false 只建订阅，工具注册由随后的 refreshAll 统一负责。
+   */
+  const toolSubscriptions = new Map<string, () => void>()
+  const dropServerTools = (serverId: string): void => {
+    const prefix = `${MCP_TOOL_PREFIX_FOR_SERVER(serverId)}__`
+    for (const [callName, current] of registered) {
+      if (!callName.startsWith(prefix)) continue
+      codePresentations.dropTool(callName)
+      current.dispose()
+      registered.delete(callName)
+    }
+  }
+  const syncServerSubscriptions = (refreshNew: boolean): void => {
+    if (disposed) return
+    const live = new Set(runtime.serverIds())
+    for (const serverId of live) {
+      if (toolSubscriptions.has(serverId)) continue
+      toolSubscriptions.set(serverId, runtime.onToolsChanged(serverId, () => {
+        void refreshServer(serverId).catch((error) => {
+          console.warn(`[openloop-dsh-mcp-tools] tool refresh failed for ${serverId}: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      }))
+      if (refreshNew) {
+        void refreshServer(serverId).catch((error) => {
+          console.warn(`[openloop-dsh-mcp-tools] initial tool refresh failed for ${serverId}: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      }
+    }
+    for (const [serverId, dispose] of toolSubscriptions) {
+      if (live.has(serverId)) continue
+      dispose()
+      toolSubscriptions.delete(serverId)
+      dropServerTools(serverId)
+    }
+  }
+  const disposeServersChanged = runtime.onServersChanged(() => { syncServerSubscriptions(true) })
+  syncServerSubscriptions(false)
+
   const disposeResultObserver = ctx.on('tools/result', (exec, result) => {
     const tool = registered.get(exec.name)?.tool
     if (tool) codePresentations.capture(exec, result, tool)
@@ -180,17 +222,14 @@ export async function apply(ctx: Context): Promise<void> {
     const content = await next()
     return block ? [...content, block] : content
   })
-  const subscriptions = runtime.serverIds().map((serverId) => runtime.onToolsChanged(serverId, () => {
-    void refreshServer(serverId).catch((error) => {
-      console.warn(`[openloop-dsh-mcp-tools] tool refresh failed for ${serverId}: ${error instanceof Error ? error.message : String(error)}`)
-    })
-  }))
   ctx.effect(() => () => {
     disposed = true
     disposeResultObserver()
     disposeCodeDispatchLog()
     codePresentations.clear()
-    for (const dispose of subscriptions) dispose()
+    disposeServersChanged()
+    for (const dispose of toolSubscriptions.values()) dispose()
+    toolSubscriptions.clear()
     for (const current of registered.values()) current.dispose()
     registered.clear()
   }, 'mcp-tools-registry')
