@@ -95,12 +95,12 @@ function validateDataBinding(widgetId: string, data: unknown): void {
     throw new Error(`panel widget "${widgetId}" data binding pick must be a string like "items[0].total"`)
   }
   if (sourceRecord.type === 'api') {
-    const api = sourceRecord as { url?: unknown; timeoutMs?: unknown; credentialRef?: unknown; headers?: unknown }
+    const api = sourceRecord as { url?: unknown; timeoutMs?: unknown; headers?: unknown }
     if (typeof api.url !== 'string' || api.url.length === 0) {
       throw new Error(`panel widget "${widgetId}" api source requires a non-empty url string`)
     }
-    if (api.credentialRef !== undefined) {
-      throw new Error(`panel widget "${widgetId}" api source credentialRef is a v2 feature and is not supported in v1`)
+    if (Object.prototype.hasOwnProperty.call(sourceRecord, 'credentialRef')) {
+      throw new Error(`panel widget "${widgetId}" api source must not include credentialRef; panel API bindings are public https only and do not take credentials through DSH`)
     }
     if (typeof api.timeoutMs === 'number' && api.timeoutMs > 30_000) {
       throw new Error(`panel widget "${widgetId}" api source timeoutMs must be at most 30_000`)
@@ -108,7 +108,7 @@ function validateDataBinding(widgetId: string, data: unknown): void {
     if (api.headers !== undefined && typeof api.headers === 'object' && api.headers !== null) {
       for (const key of Object.keys(api.headers)) {
         if (key.toLowerCase() === 'authorization') {
-          throw new Error(`panel widget "${widgetId}" api source must not pass an Authorization header in plain text; v2 credentialRef will cover this`)
+          throw new Error(`panel widget "${widgetId}" api source must not pass an Authorization header in plain text; credentials do not go through DSH`)
         }
       }
     }
