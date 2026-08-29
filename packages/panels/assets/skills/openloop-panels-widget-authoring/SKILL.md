@@ -202,7 +202,7 @@ function NotNamed({ data }) { … }    // ✗ 组件名必须叫 Widget
 ```
 
 规则：
-- url **必须 `https://`**，禁环回/内网（SSRF 防护）；v1 禁凭据（Authorization 头、credentialRef）
+- url **必须 `https://`**，禁环回/内网（SSRF 防护）；面板 API 绑定不走凭据（禁止 Authorization 明文；凭据不经过 DSH）
 - `timeoutMs` 默认 10s 上限 30s；响应 ≤1MB；仅接受 JSON
 - `pick` 支持 `a.b[0].c` 形态，缺路径返回 undefined；缺省取整个响应。**pick 是 data 的字段（与 source 平级），不是 source 的字段**——放错位置会被静默忽略（取到整个响应）
 - **预设组件的数据注入**：解析结果为 plain object 时**浅合并覆盖 props**（数据优先）——所以让 API 返回/用 pick 取出与组件 props 同形的对象（如 data-table 取 `{ columns, rows }`）；合并后仍要过组件 schema，越界会降级占位
