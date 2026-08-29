@@ -154,14 +154,11 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
     const actual = (source as { type?: unknown }).type
     throw new Error(`data binding source.type must be "static" or "api"; got ${JSON.stringify(actual)}`)
   }
-  if (source.credentialRef !== undefined) {
-    throw new Error('api source credentialRef is a v2 feature and is not supported in v1')
-  }
   validateApiUrl(source.url)
   if (source.headers) {
     for (const key of Object.keys(source.headers)) {
       if (key.toLowerCase() === 'authorization') {
-        throw new Error('api source must not pass an Authorization header in plain text; v2 credentialRef will cover this')
+        throw new Error('api source must not pass an Authorization header in plain text; panel datasources are public https-only and must not send credentials through DSH')
       }
     }
   }
