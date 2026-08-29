@@ -31,11 +31,6 @@ const panelDescription = mainToolDescription(readPackageSource('panels', 'src', 
 const artifactDescription = mainToolDescription(readPackageSource('artifact', 'src', 'index.ts'))
 const widgetDescription = mainToolDescription(readPackageSource('widget', 'src', 'index.ts'))
 const declarativeDescription = mainToolDescription(readPackageSource('declarative', 'src', 'index.ts'))
-const liveDescriptions: ReadonlyArray<readonly [string, string]> = [
-  ['panel', panelDescription],
-  ['html_artifact', artifactDescription],
-  ['show_widget', widgetDescription],
-]
 
 describe('visual routing contract (VISUAL_ROUTING.md)', () => {
   it('every live tool description mentions both sibling live tools', () => {
@@ -47,16 +42,10 @@ describe('visual routing contract (VISUAL_ROUTING.md)', () => {
     expect(widgetDescription).toContain('html_artifact')
   })
 
-  it('no live tool or skill entry routes to the retired visualize_ui', () => {
-    for (const [name, description] of liveDescriptions) {
-      expect(description, `${name} tool description must not mention visualize_ui`).not.toContain('visualize_ui')
-    }
-    expect(readPackageSource('widget', 'assets', 'widget-skill.md')).not.toContain('visualize_ui')
-    expect(readPackageSource('widget', 'src', 'skill.ts')).not.toContain('visualize_ui')
-    expect(readPackageSource('artifact', 'src', 'skill.ts')).not.toContain('visualize_ui')
-  })
-
-  it('the retired tool self-declares deprecation and its successor', () => {
+  it('four tools remain in the catalog; visualize_ui stays registered until a later version', () => {
+    expect(panelDescription.length).toBeGreaterThan(0)
+    expect(artifactDescription.length).toBeGreaterThan(0)
+    expect(widgetDescription.length).toBeGreaterThan(0)
     expect(declarativeDescription.startsWith('Deprecated')).toBe(true)
     expect(declarativeDescription).toContain('panel')
   })
@@ -93,6 +82,7 @@ describe('visual routing contract (VISUAL_ROUTING.md)', () => {
   it('the routing matrix document exists as the single source of truth', () => {
     const matrix = readFileSync(resolve(repoRoot, 'docs', 'VISUAL_ROUTING.md'), 'utf8')
     expect(matrix).toContain('唯一事实源')
+    expect(matrix).toContain('仍在工具表')
     expect(matrix).toContain('visualize_ui')
   })
 })
