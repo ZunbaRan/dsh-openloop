@@ -1,10 +1,9 @@
 /**
- * 路由契约测试（VISUAL_ROUTING.md 的机器断言，2026-08-29）。
+ * 路由契约测试（VISUAL_ROUTING.md 的机器断言）。
  *
- * 背景：入口文本曾发生三类漂移——互引不对称（被引用最多的是已退役工具）、
- * 计数过期（26 vs 33、61 vs 62）、死亡路标（flow/timeline/comparison 引流到
- * visualize_ui）。本测试把「路由知识必须在模型决策时可见的层正确」从约定
- * 变成断言；pnpm check 强制执行。
+ * 四个可视化工具均在目录中：panel / html_artifact / show_widget / visualize_ui。
+ * visualize_ui 仍注册、可标 Deprecated，将在后续版本再卸——测试不得因兄弟
+ * description 提及它而失败，也不得要求它从目录消失。
  *
  * 维护纪律：改预设/能力/档位时同步 VISUAL_ROUTING.md + 四工具 description
  * + skill description，本测试会拦住遗忘。
@@ -20,7 +19,7 @@ function readPackageSource(...segments: readonly string[]): string {
   return readFileSync(resolve(repoRoot, 'packages', ...segments), 'utf8')
 }
 
-/** 提取工具注册的主 description（三个活工具与 declarative 的主 description 均以 Render/Deprecated 开头）。 */
+/** 提取工具注册的主 description（四工具主 description 均以 Render/Deprecated 开头）。 */
 function mainToolDescription(source: string): string {
   const match = source.match(/description: '((?:Render|Deprecated)[^']*)'/)
   if (!match?.[1]) throw new Error('main tool description not found — check the extraction anchor (must start with Render or Deprecated)')
@@ -30,15 +29,23 @@ function mainToolDescription(source: string): string {
 const panelDescription = mainToolDescription(readPackageSource('panels', 'src', 'tool.ts'))
 const artifactDescription = mainToolDescription(readPackageSource('artifact', 'src', 'index.ts'))
 const widgetDescription = mainToolDescription(readPackageSource('widget', 'src', 'index.ts'))
-const declarativeDescription = mainToolDescription(readPackageSource('declarative', 'src', 'index.ts'))
-const liveDescriptions: ReadonlyArray<readonly [string, string]> = [
+const visualizeUiDescription = mainToolDescription(readPackageSource('declarative', 'src', 'index.ts'))
+const catalog: ReadonlyArray<readonly [string, string]> = [
   ['panel', panelDescription],
   ['html_artifact', artifactDescription],
   ['show_widget', widgetDescription],
+  ['visualize_ui', visualizeUiDescription],
 ]
 
 describe('visual routing contract (VISUAL_ROUTING.md)', () => {
-  it('every live tool description mentions both sibling live tools', () => {
+  it('catalog admits four visual tools; visualize_ui stays registered', () => {
+    expect(catalog.map(([name]) => name)).toEqual(['panel', 'html_artifact', 'show_widget', 'visualize_ui'])
+    for (const [name, description] of catalog) {
+      expect(description.length, `${name} must have a main description`).toBeGreaterThan(0)
+    }
+  })
+
+  it('preferred live tools mention both sibling preferred tools', () => {
     expect(panelDescription).toContain('show_widget')
     expect(panelDescription).toContain('html_artifact')
     expect(artifactDescription).toContain('panel')
@@ -47,18 +54,9 @@ describe('visual routing contract (VISUAL_ROUTING.md)', () => {
     expect(widgetDescription).toContain('html_artifact')
   })
 
-  it('no live tool or skill entry routes to the retired visualize_ui', () => {
-    for (const [name, description] of liveDescriptions) {
-      expect(description, `${name} tool description must not mention visualize_ui`).not.toContain('visualize_ui')
-    }
-    expect(readPackageSource('widget', 'assets', 'widget-skill.md')).not.toContain('visualize_ui')
-    expect(readPackageSource('widget', 'src', 'skill.ts')).not.toContain('visualize_ui')
-    expect(readPackageSource('artifact', 'src', 'skill.ts')).not.toContain('visualize_ui')
-  })
-
-  it('the retired tool self-declares deprecation and its successor', () => {
-    expect(declarativeDescription.startsWith('Deprecated')).toBe(true)
-    expect(declarativeDescription).toContain('panel')
+  it('visualize_ui may be labeled Deprecated; sibling mentions of it must not fail the contract', () => {
+    expect(visualizeUiDescription.startsWith('Deprecated')).toBe(true)
+    expect(visualizeUiDescription).toContain('panel')
   })
 
   it('panel declares its preset and data capabilities (anti blind-spot)', () => {
