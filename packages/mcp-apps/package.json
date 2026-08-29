@@ -33,7 +33,7 @@
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-tool": "^0.1.0-rc.6",
-    "@openloop/dsh-mcp-runtime": "0.1.5",
+    "@openloop/dsh-mcp-runtime": "0.2.3",
     "react": "^18.2.0"
   },
   "dependencies": {
