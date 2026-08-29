@@ -43,14 +43,6 @@ export interface ResolveWidgetDataContext {
   signal?: AbortSignal
 }
 
-// ---------------------------------------------------------------------------
-// 纯函数
-// ---------------------------------------------------------------------------
-
-/**
- * 解析 pick 路径（v1：仅 a.b[0].c 形态）：`a.b[0].c` → ['a', 'b', 0, 'c']。
- * 裸数字段转 number（数组索引），其余为字符串键。
- */
 export function parsePickPath(pick: string): Array<string | number> {
   const segments: Array<string | number> = []
   const pattern = /[^.\[\]]+/g
@@ -62,10 +54,6 @@ export function parsePickPath(pick: string): Array<string | number> {
   return segments
 }
 
-/**
- * 按 pick 路径取值；缺路径/路径不存在返回 undefined（不抛错）。
- * 段访问用 hasOwnProperty 防护，避免命中原型链（JSON.parse 产物亦安全）。
- */
 export function pickValue(data: unknown, pick?: string): unknown {
   if (!pick || pick.trim() === '') return data
   let cursor: unknown = data
@@ -83,10 +71,6 @@ export function pickValue(data: unknown, pick?: string): unknown {
   return cursor
 }
 
-
-
-
-/** 拼接 query 参数到 api url（原 url 已有 query 时合并） */
 export function buildApiUrl(url: string, query?: Record<string, string>): string {
   if (!query) return url
   const parsed = new URL(url)
@@ -96,10 +80,6 @@ export function buildApiUrl(url: string, query?: Record<string, string>): string
   return parsed.toString()
 }
 
-/**
- * api source URL 校验（§5.4 / §15 S3，fail-closed）：
- * 必须 https://，且不指向环回/内网。复用 validation.ts 的 isForbiddenApiUrl。
- */
 export function validateApiUrl(url: string): void {
   let parsed: URL
   try {
@@ -115,15 +95,10 @@ export function validateApiUrl(url: string): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 编排函数
-// ---------------------------------------------------------------------------
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-/** 超时/外部中止合并 signal；dispose 清理定时器与监听（防长驻进程泄漏） */
 function createAbortHandle(timeoutMs: number, external: AbortSignal | undefined): { signal: AbortSignal; dispose(): void } {
   const controller = new AbortController()
   if (external?.aborted) controller.abort()
@@ -142,11 +117,6 @@ function createAbortHandle(timeoutMs: number, external: AbortSignal | undefined)
   }
 }
 
-/**
- * 解析单个 widget 的数据绑定（§5.2 / §10）。
- * static → 直接返回 value；api → 校验 URL → Node fetch（超时/1MB/仅 JSON）→ pick 取值。
- * 校验失败抛错（消息面向 Agent 可自修正）；网络/解析失败同样抛错，由 resolvePanelData 统一隔离。
- */
 export async function resolveWidgetData(binding: WidgetDataBinding, ctx: ResolveWidgetDataContext = {}): Promise<unknown> {
   const source = binding.source
   if (source.type === 'static') return source.value
@@ -154,14 +124,14 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
     const actual = (source as { type?: unknown }).type
     throw new Error(`data binding source.type must be "static" or "api"; got ${JSON.stringify(actual)}`)
   }
-  if (source.credentialRef !== undefined) {
-    throw new Error('api source credentialRef is a v2 feature and is not supported in v1')
+  if (Object.prototype.hasOwnProperty.call(source, 'credentialRef')) {
+    throw new Error('api source must not include credentialRef; panel API bindings are public https only and do not take credentials through DSH')
   }
   validateApiUrl(source.url)
   if (source.headers) {
     for (const key of Object.keys(source.headers)) {
       if (key.toLowerCase() === 'authorization') {
-        throw new Error('api source must not pass an Authorization header in plain text; v2 credentialRef will cover this')
+        throw new Error('api source must not pass an Authorization header in plain text; credentials do not go through DSH')
       }
     }
   }
@@ -205,13 +175,6 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
   }
 }
 
-/**
- * 解析面板全部 api widget 数据（§10）：并行 fetch（Promise.allSettled），
- * 单格失败不拖垮整体——成功写入 resolved[widgetId]，失败写入 { __error: message }
- * （约定见文件头注释；渲染端据此渲染错误占位）。
- * 面板无 api widget 时返回空对象（与 §5.3 resolved 缺省语义一致）。
- * ctx 透传给 resolveWidgetData（测试注入 fetchFn / 调用方取消 signal）。
- */
 export async function resolvePanelData(panel: PanelDefinition, ctx: ResolveWidgetDataContext = {}): Promise<Record<string, unknown>> {
   const apiWidgets = panel.widgets.filter(
     (widget): widget is (typeof widget & { data: WidgetDataBinding }) => widget.data?.source.type === 'api',
