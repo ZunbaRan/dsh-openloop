@@ -11,10 +11,6 @@ import {
   RefreshRequestError,
 } from '../src/refresh.ts'
 
-// ---------------------------------------------------------------------------
-// mock fetch helpers（注入 fetchFn，不真联网；与 tests/datasource.spec.ts 同手法）
-// ---------------------------------------------------------------------------
-
 function streamFrom(text: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text)
   return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close() } })
@@ -141,7 +137,8 @@ describe('handleRefreshRequest', () => {
   })
 
   it('credentialRef / Authorization 明文 → 400', async () => {
-    const withCredential: WidgetDataBinding = { source: { type: 'api', url: apiBinding.source.type === 'api' ? apiBinding.source.url : '', credentialRef: 'prod' } }
+    const url = apiBinding.source.type === 'api' ? apiBinding.source.url : ''
+    const withCredential = { source: { type: 'api', url, credentialRef: 'prod' } } as WidgetDataBinding
     await expect(handleRefreshRequest(bodyOf({ widgetId: 'w-1', data: withCredential }))).rejects.toMatchObject({ status: 400 })
     const withAuth: WidgetDataBinding = { source: { type: 'api', url: 'https://api.example.com/x', headers: { Authorization: 'Bearer t' } } }
     await expect(handleRefreshRequest(bodyOf({ widgetId: 'w-1', data: withAuth }))).rejects.toMatchObject({ status: 400 })
