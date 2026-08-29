@@ -6,7 +6,7 @@
 
 ## 1. 决策表
 
-工具：`panel`（预设组件 + 数据绑定 + persist）/ `html_artifact`（自由 HTML 三档）/ `show_widget`（小卡片）。`visualize_ui` 已退役。
+四把工具都还在表里：`panel` / `html_artifact` / `show_widget` / `visualize_ui`（Deprecated，仍在工具表，下个版本再摘）。路由按四把讲，不要写成三选一。新意图首选前三把。
 
 | 用户意图（含模糊说法） | panel | html_artifact | show_widget |
 |---|---|---|---|
@@ -27,11 +27,11 @@
 
 ## 3. 退役迁移
 
-`visualize_ui`（declarative 包）已退役：flow / timeline / comparison 一律走 **panel 预设**。任何入口文本（工具 description / skill description / skill 正文路由句）不得再引流到 visualize_ui；declarative 自身 description 以 "Deprecated" 开头自我声明。
+`visualize_ui`（declarative 包）标记 Deprecated，**当前版本不从表里拿掉**（仍在工具表，下个版本再摘）。flow / timeline / comparison 新意图走 **panel 预设**。它仍会出现在模型工具表里。自身 description 必须以 "Deprecated" 开头并指向 panel。不要把矩阵写成三选一。
 
 ## 4. 维护纪律（本文件是唯一事实源）
 
 - **新增/修改预设组件、数据能力、runtime 档位时，必须同步**：① 本矩阵 ② 四个工具 description（`packages/{panels,artifact,widget,declarative}/src` 的工具注册处）③ skill 注册 description（`panels/src/skills/index.ts`、`artifact/src/skill.ts`、`widget/src/skill.ts`）。
 - **计数禁令**：N 个预设 / N 个 token 这类计数**禁止出现在 description 层**（已发生两次漂移）；精确计数只允许存在于 skill 正文一处。
-- **对称性由测试锁定**：`packages/panels/tests/routing-contract.spec.ts` 断言互引矩阵对称、无退役引用、意图词存在——`pnpm check` 强制执行，对称性从「约定」变「断言」。
+- **对称性由测试锁定**：`packages/panels/tests/routing-contract.spec.ts` 断言互引矩阵对称、四把都在表里、意图词存在——`pnpm check` 强制执行，对称性从「约定」变「断言」。
 - **意图级回归**：`docs/PANELS_ACCEPTANCE_PROMPTS.md` §「意图级路由回归」收录不点名工具的模糊 prompt，供真机回归。
