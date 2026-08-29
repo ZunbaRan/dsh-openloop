@@ -11,7 +11,7 @@
  * - resolved[widgetId] 为对象且含字符串字段 `__error` → 该项数据解析失败，
  *   渲染端应渲染错误占位（manual 刷新可用时附重试按钮）；有旧数据时保留旧快照 + stale 标记。
  * - 其余任意值为解析结果（`__error` 为保留键，widget 数据含同名键时渲染端按成功数据处理）。
- * - 单格失败不拖垮面板：resolvePanelData 以 Promise.allSettled 并行，个别失败仅写入该格。
+ * - 单格失败不拖葼面板：resolvePanelData 以 Promise.allSettled 并行，个别失败仅写入该格。
  *
  * 纯函数（可独立测试）：parsePickPath / pickValue / normalizeTimeoutMs /
  * looksLikeJsonContentType / parseJsonResponse / readBodyBytes / buildApiUrl / validateApiUrl。
@@ -154,14 +154,11 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
     const actual = (source as { type?: unknown }).type
     throw new Error(`data binding source.type must be "static" or "api"; got ${JSON.stringify(actual)}`)
   }
-  if (source.credentialRef !== undefined) {
-    throw new Error('api source credentialRef is a v2 feature and is not supported in v1')
-  }
   validateApiUrl(source.url)
   if (source.headers) {
     for (const key of Object.keys(source.headers)) {
       if (key.toLowerCase() === 'authorization') {
-        throw new Error('api source must not pass an Authorization header in plain text; v2 credentialRef will cover this')
+        throw new Error('api source must not pass an Authorization header in plain text; panel datasources are public https-only and must not send credentials through DSH')
       }
     }
   }
@@ -207,7 +204,7 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
 
 /**
  * 解析面板全部 api widget 数据（§10）：并行 fetch（Promise.allSettled），
- * 单格失败不拖垮整体——成功写入 resolved[widgetId]，失败写入 { __error: message }
+ * 单格失败不拖葼整体——成功写入 resolved[widgetId]，失败写入 { __error: message }
  * （约定见文件头注释；渲染端据此渲染错误占位）。
  * 面板无 api widget 时返回空对象（与 §5.3 resolved 缺省语义一致）。
  * ctx 透传给 resolveWidgetData（测试注入 fetchFn / 调用方取消 signal）。
