@@ -51,8 +51,7 @@ export type WidgetDataSource =
       method?: 'GET' | 'POST'   // 默认 GET
       query?: Record<string, string>
       body?: unknown
-      headers?: Record<string, string>  // v1 仅静态值；禁止 Authorization 明文 → 用 credentialRef
-      credentialRef?: string    // 引用插件配置中的凭据名（v2 实现，v1 保留字段）
+      headers?: Record<string, string>  // 仅静态值；禁止 Authorization 明文；凭据不经过 DSH
       timeoutMs?: number        // 默认 10_000，上限 30_000
     }
 
