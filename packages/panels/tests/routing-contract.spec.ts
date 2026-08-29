@@ -8,6 +8,9 @@
  *
  * 维护纪律：改预设/能力/档位时同步 VISUAL_ROUTING.md + 四工具 description
  * + skill description，本测试会拦住遗忘。
+ *
+ * 四把锁的是注册：visualize_ui 必须仍以该名字 register。活工具互引只钉前三把，
+ * 禁止再交叉引流到退役工具。
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -30,19 +33,31 @@ function mainToolDescription(source: string): string {
 const panelDescription = mainToolDescription(readPackageSource('panels', 'src', 'tool.ts'))
 const artifactDescription = mainToolDescription(readPackageSource('artifact', 'src', 'index.ts'))
 const widgetDescription = mainToolDescription(readPackageSource('widget', 'src', 'index.ts'))
-const declarativeDescription = mainToolDescription(readPackageSource('declarative', 'src', 'index.ts'))
+const declarativeSource = readPackageSource('declarative', 'src', 'index.ts')
+const declarativeDocumentSource = readPackageSource('declarative', 'src', 'document.ts')
+const declarativeDescription = mainToolDescription(declarativeSource)
 
 describe('visual routing contract (VISUAL_ROUTING.md)', () => {
-  it('every live tool description mentions both sibling live tools', () => {
-    expect(panelDescription).toContain('show_widget')
-    expect(panelDescription).toContain('html_artifact')
-    expect(artifactDescription).toContain('panel')
-    expect(artifactDescription).toContain('show_widget')
-    expect(widgetDescription).toContain('panel')
-    expect(widgetDescription).toContain('html_artifact')
+  it('every live tool description mentions both sibling live tools',
+    () => {
+      expect(panelDescription).toContain('show_widget')
+      expect(panelDescription).toContain('html_artifact')
+      expect(artifactDescription).toContain('panel')
+      expect(artifactDescription).toContain('show_widget')
+      expect(widgetDescription).toContain('panel')
+      expect(widgetDescription).toContain('html_artifact')
+    })
+
+  it('live tool descriptions do not cross-point at visualize_ui', () => {
+    expect(panelDescription).not.toContain('visualize_ui')
+    expect(artifactDescription).not.toContain('visualize_ui')
+    expect(widgetDescription).not.toContain('visualize_ui')
   })
 
   it('four tools remain in the catalog; visualize_ui stays registered until a later version', () => {
+    expect(declarativeDocumentSource).toMatch(/export const VISUALIZE_UI_TOOL = 'visualize_ui'/)
+    expect(declarativeSource).toContain('name: VISUALIZE_UI_TOOL')
+    expect(declarativeSource).toContain('ctx.tools.register')
     expect(panelDescription.length).toBeGreaterThan(0)
     expect(artifactDescription.length).toBeGreaterThan(0)
     expect(widgetDescription.length).toBeGreaterThan(0)
@@ -83,6 +98,7 @@ describe('visual routing contract (VISUAL_ROUTING.md)', () => {
     const matrix = readFileSync(resolve(repoRoot, 'docs', 'VISUAL_ROUTING.md'), 'utf8')
     expect(matrix).toContain('唯一事实源')
     expect(matrix).toContain('仍在工具表')
-    expect(matrix).toContain('visualize_ui')
+    expect(matrix).toContain('| visualize_ui |')
+    expect(matrix).toContain('❌ 勿选')
   })
 })
