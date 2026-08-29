@@ -7909,7 +7909,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 		}
 		//#endregion
 		//#region src/security.ts
-		const MCP_APP_MIME = "text/html;profile=mcp-app";
+		const MCP_APP_MIME$1 = "text/html;profile=mcp-app";
 		const MCP_APP_PRESENTATION_KIND = "openloop.dsh-mcp";
 		function isUiResourceUri(uri) {
 			return uri.startsWith("ui://") && uri.length > 5;
@@ -7993,7 +7993,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 				if (!result.uiResource || result.uiResource.resourceUri !== binding.resourceUri || result.uiResource.serverId !== binding.serverId) return void 0;
 			} else if (result.uiResource) return;
 			if (result.uiResource) {
-				if (result.isError || result.uiResource.mimeType !== MCP_APP_MIME || result.uiResource.serverId !== envelope.serverId) return void 0;
+				if (result.isError || result.uiResource.mimeType !== MCP_APP_MIME$1 || result.uiResource.serverId !== envelope.serverId) return void 0;
 				if ("html" in result.uiResource) try {
 					validateAppHtml(result.uiResource.html);
 				} catch {
@@ -8114,7 +8114,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 			return `<!doctype html><html><head><meta charset="utf-8">${`<meta http-equiv="Content-Security-Policy" content=${JSON.stringify(policy.csp)}>`}</head><body>${html}</body></html>`;
 		}
 		function resourceAsReadResult(resource) {
-			if (resource.mimeType !== MCP_APP_MIME) throw new Error(`Unexpected MCP App MIME: ${resource.mimeType}`);
+			if (resource.mimeType !== MCP_APP_MIME$1) throw new Error(`Unexpected MCP App MIME: ${resource.mimeType}`);
 			return { contents: [{
 				uri: resource.resourceUri,
 				mimeType: resource.mimeType,
@@ -8169,6 +8169,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 		};
 		//#endregion
 		//#region src/client/index.tsx
+		const MCP_APP_MIME = "text/html;profile=mcp-app";
 		function firstText(content, hiddenText) {
 			for (const part of content) if (typeof part === "object" && part !== null && part.type === "text" && typeof part.text === "string") {
 				const text = part.text;
@@ -8176,31 +8177,33 @@ container holding the app. Specify either width or maxWidth, and either height o
 				if (text !== hiddenText && !text.startsWith("⁣openloop.dsh-mcp/code-dispatch:v1:")) return text;
 			}
 		}
-		function AppFrame({ callId, presentation, toolArgumentsRaw }) {
+		function isReferenceResource(resource) {
+			return !("html" in resource);
+		}
+		/**
+		* 共享沙箱核心（方向1 v2，2026-08-29 提取）：resource 解析（内联 html / 引用
+		* refresh / resourceUrl fetch）+ opaque-origin iframe + AppBridge 生命周期。
+		* 两个消费方：对话流 AppFrame（带 toolCall 上下文）与 dock pin 的
+		* McpAppResourceView（无工具调用，App 经 gateway 的 callToolUrl 回环取数）。
+		*/
+		function McpAppSandbox({ callId, label, serverId, toolName, resource: initialResource, bindingResourceUri, toolCall }) {
 			const [height, setHeight] = (0, react.useState)(560);
 			const [displayMode, setDisplayMode] = (0, react.useState)("inline");
 			const displayModeRef = (0, react.useRef)("inline");
 			const suppressFullscreenUntilRef = (0, react.useRef)(0);
 			const bridgeRef = (0, react.useRef)();
-			const initialResource = presentation.result.uiResource;
 			const [refreshedResource, setRefreshedResource] = (0, react.useState)();
 			const resource = refreshedResource ?? initialResource;
-			const [hydrated, setHydrated] = (0, react.useState)(() => resource && "html" in resource ? resource : void 0);
+			const [hydrated, setHydrated] = (0, react.useState)(() => resource && !isReferenceResource(resource) ? resource : void 0);
 			const [frameReady, setFrameReady] = (0, react.useState)(false);
-			const toolArguments = (0, react.useMemo)(() => {
-				if (!toolArgumentsRaw) return {};
-				try {
-					const parsed = JSON.parse(toolArgumentsRaw);
-					return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
-				} catch {
-					return {};
-				}
-			}, [toolArgumentsRaw]);
+			const [loadError, setLoadError] = (0, react.useState)();
+			const [retryNonce, setRetryNonce] = (0, react.useState)(0);
 			(0, react.useEffect)(() => {
 				setRefreshedResource(void 0);
+				setLoadError(void 0);
 				displayModeRef.current = "inline";
 				setDisplayMode("inline");
-			}, [presentation]);
+			}, [initialResource]);
 			(0, react.useEffect)(() => {
 				if (displayMode !== "fullscreen") return;
 				const previousOverflow = document.body.style.overflow;
@@ -8223,7 +8226,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 					setHydrated(void 0);
 					return;
 				}
-				if ("html" in resource) {
+				if (!isReferenceResource(resource)) {
 					setHydrated(resource);
 					return;
 				}
@@ -8238,23 +8241,28 @@ container holding the app. Specify either width or maxWidth, and either height o
 							Accept: "application/json"
 						},
 						body: JSON.stringify({
-							serverId: presentation.serverId,
-							toolName: presentation.toolName,
+							serverId,
+							toolName,
 							resourceUri: resource.resourceUri
 						})
 					}).then(async (response) => {
 						if (!response.ok) throw new Error(`MCP App resource refresh failed: ${response.status}`);
 						const value = await response.json();
-						if (typeof value.resourceUrl !== "string" || typeof value.documentUrl !== "string" || typeof value.callToolUrl !== "string" || value.serverId !== presentation.serverId || value.resourceUri !== resource.resourceUri || value.mimeType !== resource.mimeType) throw new Error("MCP App resource refresh returned an invalid reference");
-						if (!cancelled) setRefreshedResource(value);
-					}).catch(() => {
-						if (!cancelled) setHydrated(void 0);
+						if (typeof value.resourceUrl !== "string" || typeof value.documentUrl !== "string" || typeof value.callToolUrl !== "string" || value.serverId !== serverId || value.resourceUri !== resource.resourceUri || value.mimeType !== resource.mimeType) throw new Error("MCP App resource refresh returned an invalid reference");
+						if (!cancelled) {
+							setLoadError(void 0);
+							setRefreshedResource(value);
+						}
+					}).catch((error) => {
+						if (cancelled) return;
+						setHydrated(void 0);
+						if (isReferenceResource(initialResource)) setLoadError(error instanceof Error ? error.message : String(error));
 					});
 					return () => {
 						cancelled = true;
 					};
 				}
-				fetch(resource.resourceUrl, {
+				fetch(refreshedResource.resourceUrl, {
 					credentials: "same-origin",
 					headers: { Accept: "application/json" }
 				}).then(async (response) => {
@@ -8262,14 +8270,16 @@ container holding the app. Specify either width or maxWidth, and either height o
 					const value = await response.json();
 					if (typeof value.html !== "string") throw new Error("MCP App resource response omitted HTML");
 					if (!cancelled) setHydrated({
-						serverId: resource.serverId,
-						resourceUri: resource.resourceUri,
-						mimeType: resource.mimeType,
+						serverId: refreshedResource.serverId,
+						resourceUri: refreshedResource.resourceUri,
+						mimeType: refreshedResource.mimeType,
 						html: value.html,
-						...resource._meta ? { _meta: resource._meta } : {}
+						...refreshedResource._meta ? { _meta: refreshedResource._meta } : {}
 					});
-				}).catch(() => {
-					if (!cancelled) setHydrated(void 0);
+				}).catch((error) => {
+					if (cancelled) return;
+					setHydrated(void 0);
+					setLoadError(error instanceof Error ? error.message : String(error));
 				});
 				return () => {
 					cancelled = true;
@@ -8277,8 +8287,10 @@ container holding the app. Specify either width or maxWidth, and either height o
 			}, [
 				resource,
 				refreshedResource,
-				presentation.serverId,
-				presentation.toolName
+				serverId,
+				toolName,
+				retryNonce,
+				initialResource
 			]);
 			const doc = (0, react.useMemo)(() => hydrated ? buildSandboxDocument(hydrated.html, hydrated._meta) : "", [hydrated]);
 			const documentUrl = (0, react.useMemo)(() => {
@@ -8311,18 +8323,19 @@ container holding the app. Specify either width or maxWidth, and either height o
 							height: Math.max(1, iframe.clientHeight)
 						},
 						toolInfo: { tool: {
-							name: presentation.callName,
+							name: toolCall?.callName ?? toolName,
 							inputSchema: { type: "object" }
 						} }
 					} });
 					bridgeRef.current = bridge;
 					bridge.oninitialized = () => {
-						bridge?.sendToolInput({ arguments: toolArguments });
+						if (!toolCall) return;
+						bridge?.sendToolInput({ arguments: toolCall.arguments });
 						bridge?.sendToolResult({
-							content: presentation.result.content,
-							...presentation.result.structuredContent ? { structuredContent: presentation.result.structuredContent } : {},
-							...presentation.result._meta ? { _meta: presentation.result._meta } : {},
-							...presentation.result.isError ? { isError: true } : {}
+							content: toolCall.result.content,
+							...toolCall.result.structuredContent ? { structuredContent: toolCall.result.structuredContent } : {},
+							...toolCall.result._meta ? { _meta: toolCall.result._meta } : {},
+							...toolCall.result.isError ? { isError: true } : {}
 						});
 					};
 					bridge.onsizechange = ({ height: nextHeight }) => {
@@ -8335,7 +8348,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 						return { mode: nextMode };
 					};
 					bridge.onreadresource = async ({ uri }) => {
-						if (uri !== resource.resourceUri || presentation.binding?.resourceUri !== uri) return { contents: [] };
+						if (uri !== resource.resourceUri || bindingResourceUri !== void 0 && bindingResourceUri !== uri) return { contents: [] };
 						return resourceAsReadResult(hydrated);
 					};
 					bridge.onlistresources = async () => ({ resources: [{
@@ -8390,12 +8403,13 @@ container holding the app. Specify either width or maxWidth, and either height o
 				};
 			}, [
 				callId,
-				presentation,
 				resource,
 				hydrated,
 				frameReady,
 				documentUrl,
-				toolArguments
+				toolCall,
+				toolName,
+				bindingResourceUri
 			]);
 			(0, react.useEffect)(() => {
 				const iframe = document.querySelector(`iframe[data-openloop-mcp-call="${CSS.escape(callId)}"]`);
@@ -8410,7 +8424,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 						height: Math.max(1, iframe.clientHeight)
 					},
 					toolInfo: { tool: {
-						name: presentation.callName,
+						name: toolCall?.callName ?? toolName,
 						inputSchema: { type: "object" }
 					} }
 				});
@@ -8419,8 +8433,53 @@ container holding the app. Specify either width or maxWidth, and either height o
 				displayMode,
 				frameReady,
 				height,
-				presentation.callName
+				toolCall,
+				toolName
 			]);
+			if (loadError && !hydrated) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					width: "100%",
+					display: "flex",
+					flexDirection: "column",
+					gap: 8,
+					alignItems: "flex-start",
+					padding: "12px 14px",
+					color: "var(--dsw-alias-label-primary)",
+					background: "var(--dsw-alias-bg-layer-1)",
+					border: "1px solid var(--dsw-alias-border-l2)",
+					borderRadius: 12,
+					fontSize: 12
+				},
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: { color: "var(--dsw-alias-label-caption)" },
+					children: [
+						"MCP App 资源暂不可用（",
+						serverId,
+						" · ",
+						loadError,
+						"）"
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					onClick: () => {
+						setLoadError(void 0);
+						setRefreshedResource(void 0);
+						setRetryNonce((n) => n + 1);
+					},
+					style: {
+						minWidth: 72,
+						height: 30,
+						padding: "0 14px",
+						fontSize: 12,
+						cursor: "pointer",
+						color: "var(--dsw-alias-label-primary)",
+						background: "var(--dsw-alias-bg-layer-2)",
+						border: "1px solid var(--dsw-alias-border-l2)",
+						borderRadius: 8
+					},
+					children: "重试"
+				})]
+			});
 			if (!hydrated || !resource) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: {
 					color: "var(--dsw-alias-label-caption)",
@@ -8439,7 +8498,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 					"data-openloop-mcp-fullscreen": "",
 					role: "dialog",
 					"aria-modal": true,
-					"aria-label": `${presentation.toolName} fullscreen editor`
+					"aria-label": `${label} fullscreen editor`
 				} : {},
 				style: fullscreen ? {
 					position: "fixed",
@@ -8464,7 +8523,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 						borderBottom: 0,
 						borderRadius: "14px 14px 0 0"
 					},
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: presentation.toolName }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("strong", { children: label }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						type: "button",
 						"aria-label": "Close fullscreen editor",
 						onClick: closeFullscreen,
@@ -8482,7 +8541,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 					})]
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
 					"data-openloop-mcp-call": callId,
-					title: `${presentation.toolName} MCP App`,
+					title: `${label} MCP App`,
 					sandbox: documentUrl ? "allow-scripts allow-same-origin" : "allow-scripts",
 					allow: sandboxAllow(hydrated._meta),
 					referrerPolicy: "no-referrer",
@@ -8499,6 +8558,38 @@ container holding the app. Specify either width or maxWidth, and either height o
 						background: fullscreen ? "#fff" : "transparent"
 					}
 				})]
+			});
+		}
+		function AppFrame({ callId, presentation, toolArgumentsRaw }) {
+			const toolArguments = (0, react.useMemo)(() => {
+				if (!toolArgumentsRaw) return {};
+				try {
+					const parsed = JSON.parse(toolArgumentsRaw);
+					return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+				} catch {
+					return {};
+				}
+			}, [toolArgumentsRaw]);
+			const initialResource = presentation.result.uiResource;
+			if (!initialResource) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					color: "var(--dsw-alias-label-caption)",
+					fontSize: 12
+				},
+				children: "MCP App unavailable"
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppSandbox, {
+				callId,
+				label: presentation.toolName,
+				serverId: presentation.serverId,
+				toolName: presentation.toolName,
+				resource: initialResource,
+				...presentation.binding ? { bindingResourceUri: presentation.binding.resourceUri } : {},
+				toolCall: {
+					callName: presentation.callName,
+					arguments: toolArguments,
+					result: presentation.result
+				}
 			});
 		}
 		function McpAppCard({ callId, toolName, block }) {
@@ -8542,6 +8633,26 @@ container holding the app. Specify either width or maxWidth, and either height o
 		}
 		const name = "openloop-dsh-mcp-apps";
 		const inject = ["slots"];
+		/**
+		* 独立资源视图（方向1 v2 pin 入口，2026-08-29）：无工具调用上下文，按
+		* (serverId, toolName, resourceUri) 渲染时 refresh 取数——与对话流卡共享
+		* 同一沙箱核心与 AppBridge 通道（B/C 同通道）。dock pin tile 的渲染组件。
+		*/
+		function McpAppResourceView(props) {
+			const frameId = props.frameId ?? `mcp-app-resource-${CSS.escape(`${props.serverId}__${props.toolName}__${props.resourceUri}`)}`;
+			const initialResource = (0, react.useMemo)(() => ({
+				serverId: props.serverId,
+				resourceUri: props.resourceUri,
+				mimeType: MCP_APP_MIME
+			}), [props.serverId, props.resourceUri]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppSandbox, {
+				callId: frameId,
+				label: props.title ?? props.resourceUri,
+				serverId: props.serverId,
+				toolName: props.toolName,
+				resource: initialResource
+			});
+		}
 		function registerMcpAppToolViews(ctx, toolNames) {
 			const names = [...new Set(toolNames)];
 			if (names.length === 0) return;
@@ -8557,6 +8668,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 			registerMcpAppToolViews(ctx, options.toolNames ?? []);
 		}
 		//#endregion
+		exports.McpAppResourceView = McpAppResourceView;
 		exports.apply = apply;
 		exports.inject = inject;
 		exports.name = name;

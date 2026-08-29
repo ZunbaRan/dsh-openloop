@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-mcp-apps",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "A small, fail-closed DSH MCP Apps host for shared runtime results.",
   "private": true,
   "type": "module",

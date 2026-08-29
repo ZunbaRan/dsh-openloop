@@ -126,7 +126,7 @@ export async function readRequestBody(req: IncomingMessage, maxBytes = MAX_REFRE
  */
 export async function handleRefreshRequest(bodyText: string, ctx: ResolveWidgetDataContext = {}): Promise<RefreshHandleResult> {
   const { widgetId, data } = parseRefreshBody(bodyText)
-  const source = data.source as Extract<WidgetDataBinding['source'], { type: 'api' }>
+  const source = data.source as Extract<WidgetDataBinding['source'], { type: 'api' }> & { credentialRef?: unknown }
   // §5.4 / §15 S3：URL 必须 https:// 且不指向环回/内网；请求级校验失败属 400（非业务失败）
   if (source.credentialRef !== undefined) {
     throw new RefreshRequestError('api source credentialRef is a v2 feature and is not supported in v1')

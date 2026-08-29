@@ -344,7 +344,8 @@ declare function createPbClient(baseUrl: string, credentials: SuperuserCredentia
 //#endregion
 //#region src/facade.d.ts
 type AppKind = 'builtin' | 'local' | 'thirdparty';
-type ComponentKind = 'panel' | 'artifact';
+/** 'mcp-app'：方向 1 v2 引用形态条目（entry = { serverId, toolName, resourceUri }，渲染时取数） */
+type ComponentKind = 'panel' | 'artifact' | 'mcp-app';
 type ApiAuthType = 'none' | 'key';
 interface AppRow {
   name: string;
@@ -391,8 +392,9 @@ interface TileRow {
 interface DockTileV2 {
   tileId: string;
   title: string;
+  /** v2（2026-08-29）：mcp-app = 方向 1 引用形态 tile（meta = { serverId, toolName, resourceUri, rid? }，渲染时取数） */
   source: {
-    kind: 'panel' | 'artifact';
+    kind: 'panel' | 'artifact' | 'mcp-app';
     meta: unknown;
   };
   layout: {
@@ -4948,7 +4950,7 @@ declare const APP_BACKEND_PARAMETERS: {
   readonly action: {
     readonly type: "string";
     readonly required: true;
-    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate", "backend_health", "backend_restart"];
+    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate", "connect_server", "backend_health", "backend_restart"];
     readonly description: "Facade action. Registry: list_apps / upsert_app / delete_app / get_app; components: register_component / remove_component; apis: register_api / remove_api / set_api_key; boards: save_dock_state / load_dock_state.";
   };
   readonly app: {
@@ -4983,8 +4985,19 @@ declare const APP_BACKEND_PARAMETERS: {
     readonly additionalProperties: true;
     readonly description: "Full dock v2 state for save_dock_state: { version: 2, boards: [{ id, name, tiles }], activeBoardId }. Replaces all boards/tiles atomically.";
   };
+  readonly serverId: {
+    readonly type: "string";
+    readonly description: "MCP server id for connect_server: the mcp.json key and the app namespace (kebab-case).";
+  };
+  readonly server: {
+    readonly type: "object";
+    readonly additionalProperties: true;
+    readonly description: "MCP server entry for connect_server (mcp.json shape): { \"type\": \"http\", \"url\": \"https://…\" } or { \"type\": \"stdio\", \"command\": \"npx\", \"args\": […] }, optional headers / env / cwd / protocol (\"legacy\"|\"auto\"|\"2026-07-28\"). Connects a third-party MCP Apps 2.0 pack: writes user-scope mcp.json, hot-activates the runtime, and registers ui-bound tools as mcp-app components (pin-ready).";
+  };
 };
-declare function createAppBackendTool(backend: AppBackend): ToolDefinition;
+declare function createAppBackendTool(backend: AppBackend, options?: {
+  getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined;
+}): ToolDefinition;
 //#endregion
 //#region ../../node_modules/.pnpm/@deepseek-ai+dsh-host-webserver@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-i_4e83f049ed8dee9b8d2facc78c419c22/node_modules/@deepseek-ai/dsh-host-webserver/lib/types/index.d.ts
 declare module '@deepseek-ai/cordis' {

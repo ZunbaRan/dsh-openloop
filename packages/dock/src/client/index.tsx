@@ -17,7 +17,7 @@ import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
 import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab, type RailAppItem } from './RailNav.tsx'
 import { AppListPanel, AppDetail } from './AppListPanel.tsx'
-import { listBuiltinApps, buildPanelMetaForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, type AppDescriptor } from './app-registry.ts'
+import { listBuiltinApps, buildTileSourceForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, type AppDescriptor } from './app-registry.ts'
 import { syncBackend, revalidateBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
@@ -278,9 +278,9 @@ function DockShell(): ReactNode {
   }
 
   /** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点）。
-   *  门面组件（无渲染数据）拒绝并提示。 */
+   *  v2：mcp-app 组件 pin 引用形态 tile（渲染时取数）；门面组件（无渲染数据）拒绝并提示。 */
   const pinComponent = (_app: AppDescriptor, component: AppDescriptor['components'][number]): void => {
-    const source = buildPanelMetaForComponent(component)
+    const source = buildTileSourceForComponent(component)
     if (source === null) {
       setToast(`「${component.title}」暂无渲染数据——让 Agent 经 app_backend 生成内容后再固定`)
       return

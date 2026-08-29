@@ -14,7 +14,8 @@ import type { PbClient } from './pb-client.ts'
 // ---- 公共行类型（对外形态；不含任何存储内部字段） ----
 
 export type AppKind = 'builtin' | 'local' | 'thirdparty'
-export type ComponentKind = 'panel' | 'artifact'
+/** 'mcp-app'：方向 1 v2 引用形态条目（entry = { serverId, toolName, resourceUri }，渲染时取数） */
+export type ComponentKind = 'panel' | 'artifact' | 'mcp-app'
 export type ApiAuthType = 'none' | 'key'
 
 export interface AppRow {
@@ -70,7 +71,8 @@ export interface TileRow {
 export interface DockTileV2 {
   tileId: string
   title: string
-  source: { kind: 'panel' | 'artifact'; meta: unknown }
+  /** v2（2026-08-29）：mcp-app = 方向 1 引用形态 tile（meta = { serverId, toolName, resourceUri, rid? }，渲染时取数） */
+  source: { kind: 'panel' | 'artifact' | 'mcp-app'; meta: unknown }
   layout: { column: number; row: number; columns: number; rows: number }
   origin: unknown
   createdAt: number
@@ -88,7 +90,7 @@ export interface DockStateV2 {
 const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const RID_RE = /^[a-z0-9-]+:[a-z0-9-]+$/
 const APP_KINDS: readonly AppKind[] = ['builtin', 'local', 'thirdparty']
-const COMPONENT_KINDS: readonly ComponentKind[] = ['panel', 'artifact']
+const COMPONENT_KINDS: readonly ComponentKind[] = ['panel', 'artifact', 'mcp-app']
 const AUTH_TYPES: readonly ApiAuthType[] = ['none', 'key']
 
 function bad(field: string, expected: string, actual: unknown): never {
@@ -219,6 +221,15 @@ function sourceIdOfTile(source: DockTileV2['source']): string {
     const panelId = (source.meta as { panel?: { id?: unknown } } | null)?.panel?.id
     return typeof panelId === 'string' && panelId.length > 0 ? `openloop:${panelId}` : ''
   }
+  if (source.kind === 'mcp-app') {
+    const meta = source.meta as { rid?: unknown; serverId?: unknown; toolName?: unknown } | null
+    if (typeof meta?.rid === 'string' && meta.rid.length > 0) return meta.rid
+    // 兜底：由 (serverId, toolName) 推导与 connect 时一致的 rid 段（下划线转连字符）
+    if (typeof meta?.serverId === 'string' && typeof meta?.toolName === 'string' && meta.serverId.length > 0 && meta.toolName.length > 0) {
+      return `${meta.serverId}:${meta.toolName.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`
+    }
+    return ''
+  }
   const path = (source.meta as { path?: unknown } | null)?.path
   if (typeof path !== 'string' || path.length === 0) return ''
   const base = path.split('/').pop() ?? path
@@ -242,7 +253,8 @@ function coerceDockState(state: unknown): DockStateV2 {
       const source = tile.source as Record<string, unknown> | undefined
       if (
         typeof tile.tileId !== 'string' || typeof tile.title !== 'string'
-        || source === null || typeof source !== 'object' || (source.kind !== 'panel' && source.kind !== 'artifact')
+        || source === null || typeof source !== 'object'
+        || (source.kind !== 'panel' && source.kind !== 'artifact' && source.kind !== 'mcp-app')
       ) continue
       const valid: DockTileV2 = {
         tileId: tile.tileId,

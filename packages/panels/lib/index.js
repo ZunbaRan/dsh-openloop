@@ -6933,10 +6933,9 @@ function validateDataBinding(widgetId, data) {
 	if (sourceRecord.type === "api") {
 		const api = sourceRecord;
 		if (typeof api.url !== "string" || api.url.length === 0) throw new Error(`panel widget "${widgetId}" api source requires a non-empty url string`);
-		if (api.credentialRef !== void 0) throw new Error(`panel widget "${widgetId}" api source credentialRef is a v2 feature and is not supported in v1`);
 		if (typeof api.timeoutMs === "number" && api.timeoutMs > 3e4) throw new Error(`panel widget "${widgetId}" api source timeoutMs must be at most 30_000`);
 		if (api.headers !== void 0 && typeof api.headers === "object" && api.headers !== null) {
-			for (const key of Object.keys(api.headers)) if (key.toLowerCase() === "authorization") throw new Error(`panel widget "${widgetId}" api source must not pass an Authorization header in plain text; v2 credentialRef will cover this`);
+			for (const key of Object.keys(api.headers)) if (key.toLowerCase() === "authorization") throw new Error(`panel widget "${widgetId}" api source must not pass an Authorization header in plain text; panel datasources are public https-only and must not send credentials through DSH`);
 		}
 		validateApiSource(api.url, widgetId);
 	} else if (sourceRecord.type !== "static") throw new Error(`panel widget "${widgetId}" data binding source.type must be "static" or "api"`);
@@ -7116,10 +7115,9 @@ async function resolveWidgetData(binding, ctx = {}) {
 		const actual = source.type;
 		throw new Error(`data binding source.type must be "static" or "api"; got ${JSON.stringify(actual)}`);
 	}
-	if (source.credentialRef !== void 0) throw new Error("api source credentialRef is a v2 feature and is not supported in v1");
 	validateApiUrl(source.url);
 	if (source.headers) {
-		for (const key of Object.keys(source.headers)) if (key.toLowerCase() === "authorization") throw new Error("api source must not pass an Authorization header in plain text; v2 credentialRef will cover this");
+		for (const key of Object.keys(source.headers)) if (key.toLowerCase() === "authorization") throw new Error("api source must not pass an Authorization header in plain text; panel datasources are public https-only and must not send credentials through DSH");
 	}
 	const timeoutMs = normalizeTimeoutMs(source.timeoutMs);
 	const url = buildApiUrl(source.url, source.query);

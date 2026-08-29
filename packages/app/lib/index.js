@@ -1279,7 +1279,11 @@ const APP_KINDS = [
 	"local",
 	"thirdparty"
 ];
-const COMPONENT_KINDS = ["panel", "artifact"];
+const COMPONENT_KINDS = [
+	"panel",
+	"artifact",
+	"mcp-app"
+];
 const AUTH_TYPES = ["none", "key"];
 function bad(field, expected, actual) {
 	throw new Error(`invalid ${field}: expected ${expected}, got ${JSON.stringify(actual).slice(0, 120)}`);
@@ -1367,6 +1371,12 @@ function sourceIdOfTile(source) {
 		const panelId = source.meta?.panel?.id;
 		return typeof panelId === "string" && panelId.length > 0 ? `openloop:${panelId}` : "";
 	}
+	if (source.kind === "mcp-app") {
+		const meta = source.meta;
+		if (typeof meta?.rid === "string" && meta.rid.length > 0) return meta.rid;
+		if (typeof meta?.serverId === "string" && typeof meta?.toolName === "string" && meta.serverId.length > 0 && meta.toolName.length > 0) return `${meta.serverId}:${meta.toolName.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
+		return "";
+	}
 	const path = source.meta?.path;
 	if (typeof path !== "string" || path.length === 0) return "";
 	return `openloop:${path.split("/").pop() ?? path}`;
@@ -1386,7 +1396,7 @@ function coerceDockState(state) {
 		for (const t of tiles) {
 			const tile = t;
 			const source = tile.source;
-			if (typeof tile.tileId !== "string" || typeof tile.title !== "string" || source === null || typeof source !== "object" || source.kind !== "panel" && source.kind !== "artifact") continue;
+			if (typeof tile.tileId !== "string" || typeof tile.title !== "string" || source === null || typeof source !== "object" || source.kind !== "panel" && source.kind !== "artifact" && source.kind !== "mcp-app") continue;
 			const valid = {
 				tileId: tile.tileId,
 				title: tile.title,
@@ -6164,6 +6174,7 @@ const ACTIONS = [
 	"save_dock_state",
 	"load_dock_state",
 	"invalidate",
+	"connect_server",
 	"backend_health",
 	"backend_restart"
 ];
@@ -6205,6 +6216,15 @@ const APP_BACKEND_PARAMETERS = {
 		type: "object",
 		additionalProperties: true,
 		description: "Full dock v2 state for save_dock_state: { version: 2, boards: [{ id, name, tiles }], activeBoardId }. Replaces all boards/tiles atomically."
+	},
+	serverId: {
+		type: "string",
+		description: "MCP server id for connect_server: the mcp.json key and the app namespace (kebab-case)."
+	},
+	server: {
+		type: "object",
+		additionalProperties: true,
+		description: "MCP server entry for connect_server (mcp.json shape): { \"type\": \"http\", \"url\": \"https://…\" } or { \"type\": \"stdio\", \"command\": \"npx\", \"args\": […] }, optional headers / env / cwd / protocol (\"legacy\"|\"auto\"|\"2026-07-28\"). Connects a third-party MCP Apps 2.0 pack: writes user-scope mcp.json, hot-activates the runtime, and registers ui-bound tools as mcp-app components (pin-ready)."
 	}
 };
 /** 写操作清单（这些 action 完成后建议 agent 调一次 invalidate 通知 UI 刷新） */
@@ -6216,7 +6236,8 @@ const WRITE_ACTIONS = /* @__PURE__ */ new Set([
 	"register_api",
 	"remove_api",
 	"set_api_key",
-	"save_dock_state"
+	"save_dock_state",
+	"connect_server"
 ]);
 /** 输出契约：各 action 返回形态不同，统一为开放对象（细节由 facade 类型承载） */
 const APP_OUTPUT_SCHEMA = {
@@ -6297,10 +6318,10 @@ async function runCore(action, a, facade) {
 		case "backend_restart": throw new Error(`action "${action}" is handled elsewhere`);
 	}
 }
-function createAppBackendTool(backend) {
+function createAppBackendTool(backend, options = {}) {
 	return defineTool({
 		name: APP_BACKEND_TOOL,
-		description: "Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned.",
+		description: "Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration, and connect_server for third-party MCP Apps 2.0 packs. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned.",
 		parameters: APP_BACKEND_PARAMETERS,
 		output: {
 			schema: APP_OUTPUT_SCHEMA,
@@ -6317,6 +6338,16 @@ function createAppBackendTool(backend) {
 			const action = expectString(a, "action", "list_apps");
 			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
 			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
+			if (action === "connect_server") {
+				const { connectServer } = await import("./connect-CWnTx26V.js");
+				return await connectServer({
+					serverId: expectString(a, "serverId", action),
+					entry: expectObject(a, "server", action),
+					dshHome: backend.dshHome(),
+					backend,
+					mcpRuntime: options.getMcpRuntime?.()
+				});
+			}
 			return await runAction(action, a, backend, await backend.ready());
 		}
 	});
@@ -7216,12 +7247,17 @@ function apply(ctx, config = {}) {
 	const binPath = typeof config.binPath === "string" && config.binPath.length > 0 ? config.binPath : process.env.OPENLOOP_PB_BIN;
 	if (typeof binPath === "string" && binPath.length > 0) backendOptions.binPath = binPath;
 	const backend = createAppBackend(backendOptions);
+	let mcpRuntime;
+	ctx.inject(["mcpRuntime"], () => {
+		mcpRuntime = ctx.mcpRuntime;
+		logger.info("mcpRuntime available — connect_server will hot-activate third-party packs");
+	});
 	backend.start().then(() => {
 		logger.info(`app backend ready (PocketBase ${PB_VERSION})`);
 	}).catch((error) => {
 		logger.error(`app backend failed to start: ${error instanceof Error ? error.message : String(error)}`);
 	});
-	ctx.tools.register(createAppBackendTool(backend));
+	ctx.tools.register(createAppBackendTool(backend, { getMcpRuntime: () => mcpRuntime }));
 	ctx.skills.registerProvider(() => appBackendSkillProvider);
 	ctx.skills.registerProvider(() => appDoctorSkillProvider);
 	ctx.inject(["webServer"], (routeCtx) => {

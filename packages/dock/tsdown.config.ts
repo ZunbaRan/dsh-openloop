@@ -5,6 +5,7 @@ const externals = [
   '@deepseek-ai/dsh-client-runtime/client', '@deepseek-ai/dsh-client-ui-tool/client',
   '@deepseek-ai/dsh-client-ui-primitives',
   '@openloop/dsh-base/client', '@openloop/dsh-panels/client', '@openloop/dsh-html-artifact/client',
+  '@openloop/dsh-mcp/client',
 ]
 export default [
   { entry: { index: 'src/index.ts' }, outDir: 'lib', format: ['esm'], platform: 'node', target: 'es2024', fixedExtension: false, dts: true, clean: true, deps: { neverBundle: ['@deepseek-ai/schemastery', '@deepseek-ai/cordis'] } },

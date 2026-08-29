@@ -9,6 +9,7 @@
  */
 import type { AppKind } from './badges.tsx'
 import { getPanelsClient } from './openloop-clients.ts'
+import type { DockTileSource } from './store.ts'
 
 type JsonObject = Record<string, unknown>
 
@@ -16,13 +17,14 @@ export interface AppComponentDescriptor {
   /** `包名:组件名`（= openloop:<kind>），与 tile 来源 ID 同命名空间 */
   id: string
   title: string
-  type: 'panel' | 'artifact'
+  /** v2（2026-08-29）：mcp-app = 方向 1 引用形态（MCP Apps 2.0 资源，渲染时取数） */
+  type: 'panel' | 'artifact' | 'mcp-app'
   desc: string
   /** panels PresetKind（示例 props 的构造键；门面组件为空串） */
   kind: string
-  /** 内置（有示例 props 可渲染）或门面组件带合法 entry.panel → true；否则「待生成」 */
+  /** 内置（有示例 props 可渲染）或门面组件带合法 entry → true；否则「待生成」 */
   pinnable: boolean
-  /** 门面组件的 entry（v1 契约：{ panel: PanelDefinition } 内联；文件路径无效——浏览器读不到 workspace） */
+  /** 门面组件的 entry（v1 契约：{ panel: PanelDefinition } 内联；mcp-app：{ serverId, toolName, resourceUri } 引用） */
   entry?: unknown
 }
 
@@ -236,7 +238,7 @@ function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
 
-/** 门面行 → dock AppDescriptor（组件 pinnable：entry.panel 合法即可 pin——v1 渲染闭环） */
+/** 门面行 → dock AppDescriptor（组件 pinnable：entry.panel 合法即可 pin——v1 渲染闭环；mcp-app 引用形态合法即可 pin——v2） */
 function remoteAppToDescriptor(detail: RemoteAppDetail): AppDescriptor | null {
   const name = str(detail.app?.name)
   if (name.length === 0) return null
@@ -245,6 +247,17 @@ function remoteAppToDescriptor(detail: RemoteAppDetail): AppDescriptor | null {
       const rid = str(c?.rid)
       if (rid.length === 0) return null
       const entry = c?.entry
+      if (c?.kind === 'mcp-app') {
+        return {
+          id: rid,
+          title: str(c?.title, rid),
+          type: 'mcp-app',
+          desc: str(c?.description),
+          kind: '',
+          pinnable: entryMcpAppOf(entry) !== null,
+          entry,
+        }
+      }
       return {
         id: rid,
         title: str(c?.title, rid),
@@ -360,12 +373,38 @@ function looksLikePanelDefinition(value: unknown): boolean {
 }
 
 /**
- * pin 一个组件资源 = 构造可渲染的面板实例：
- * - 内置（PRESET_INFO[kind]）→ 合法最小示例 props 实例
- * - 门面组件（entry.panel 合法）→ 直接用 agent 内联的完整 PanelDefinition
+ * mcp-app 引用形态提取（方向 1 v2 渲染时取数契约）：
+ * entry = { serverId, toolName, resourceUri }（三 string 即合法；connect_server 写入）。
+ */
+export function entryMcpAppOf(entry: unknown): { serverId: string; toolName: string; resourceUri: string } | null {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null
+  const record = entry as Record<string, unknown>
+  if (typeof record.serverId !== 'string' || record.serverId.length === 0) return null
+  if (typeof record.toolName !== 'string' || record.toolName.length === 0) return null
+  if (typeof record.resourceUri !== 'string' || record.resourceUri.length === 0) return null
+  return { serverId: record.serverId, toolName: record.toolName, resourceUri: record.resourceUri }
+}
+
+/**
+ * pin 一个组件资源 = 构造可渲染 tile source（统一入口，2026-08-29）：
+ * - mcp-app 组件（entry 引用形态合法）→ mcp-app tile（渲染时取数，不复制内容）
+ * - 其余走 buildPanelMetaForComponent 的 panel 通道：
+ *   内置（PRESET_INFO[kind]）→ 合法最小示例 props 实例；
+ *   门面组件（entry.panel 合法）→ 直接用 agent 内联的完整 PanelDefinition
  *   （resolved 置空——api 绑定 widget 由 panels 的 onLoad 刷新在打开时自动拉取）
  * 两者皆无 → null（「待生成」态，pin 拒绝）。
  */
+export function buildTileSourceForComponent(component: AppComponentDescriptor): DockTileSource | null {
+  if (component.type === 'mcp-app') {
+    const reference = entryMcpAppOf(component.entry)
+    if (reference === null) return null
+    return {
+      kind: 'mcp-app',
+      meta: { ...reference, ...(component.id ? { rid: component.id } : {}) },
+    }
+  }
+  return buildPanelMetaForComponent(component)
+}
 export function buildPanelMetaForComponent(component: AppComponentDescriptor): { kind: 'panel'; meta: unknown } | null {
   const info = PRESET_INFO[component.kind]
   if (info !== undefined) {

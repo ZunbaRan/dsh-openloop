@@ -5,6 +5,11 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { apply as applyAppsClient } from '../../../mcp-apps/src/client/index.tsx'
 import { McpSettingsSection } from './McpSettingsSection.tsx'
 
+// 方向 1 v2（2026-08-29）：dock 的 mcp-app tile 经本模块懒桥消费
+// McpAppResourceView（引用形态渲染入口）——profile 单 client 模块原则不变。
+export { McpAppResourceView } from '../../../mcp-apps/src/client/index.tsx'
+export type { McpAppResourceViewProps } from '../../../mcp-apps/src/client/index.tsx'
+
 const MCP_APP_TOOL_NAMES = [
   'mcp__fixture__mcp_app_tool',
   'mcp__tldraw__tldraw_create_view',

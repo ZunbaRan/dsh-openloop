@@ -17,7 +17,7 @@ import { icons } from './icons.tsx'
 // 跨插件 client 组件懒桥（DSH ModuleLoader external：评估期 require 在插件
 // 被禁用时炸 loader——懒 require 后 tile 按需取，缺失渲染降级条）
 import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
-import { getPanelsClient, getArtifactClient } from './openloop-clients.ts'
+import { getPanelsClient, getArtifactClient, getMcpAppsClient } from './openloop-clients.ts'
 
 /** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
 let scopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>['createOpenLoopSettingsScope']> | undefined
@@ -89,6 +89,10 @@ export function sourceIdOf(source: DockTileSource): string | null {
   if (source.kind === 'panel') {
     const panel = (source.meta as { panel?: { id?: unknown } } | null)?.panel
     return typeof panel?.id === 'string' && panel.id.length > 0 ? `openloop:${panel.id}` : null
+  }
+  if (source.kind === 'mcp-app') {
+    if (source.meta.rid !== undefined && source.meta.rid.length > 0) return source.meta.rid
+    return `${source.meta.serverId}:${source.meta.toolName.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`
   }
   const path = (source.meta as { path?: unknown } | null)?.path
   if (typeof path !== 'string' || path.length === 0) return null
@@ -211,6 +215,16 @@ function TileContent({ tile }: { tile: DockTile }) {
     }
     const PanelSurface = panels.PanelSurface
     return <PanelSurface meta={tile.source.meta as never} />
+  }
+  if (tile.source.kind === 'mcp-app') {
+    // 方向 1 v2：引用形态 tile——渲染时经 refresh 端点取数（与对话流卡同沙箱同通道）
+    const mcpApps = getMcpAppsClient()
+    if (mcpApps === undefined) {
+      return <DependencyMissing what="Dock MCP App tile" dep="@openloop/dsh-mcp" />
+    }
+    const McpAppResourceView = mcpApps.McpAppResourceView
+    const meta = tile.source.meta
+    return <McpAppResourceView serverId={meta.serverId} toolName={meta.toolName} resourceUri={meta.resourceUri} title={tile.title} frameId={`dock-${tile.tileId}`} />
   }
   const artifact = getArtifactClient()
   if (artifact === undefined) {

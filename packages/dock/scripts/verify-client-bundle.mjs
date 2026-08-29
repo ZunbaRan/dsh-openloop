@@ -9,6 +9,7 @@ const allowed = new Set([
   '@openloop/dsh-base/client',
   '@openloop/dsh-panels/client',
   '@openloop/dsh-html-artifact/client',
+  '@openloop/dsh-mcp/client',
   'react',
   'react/jsx-runtime',
   'react-dom',

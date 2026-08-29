@@ -63,6 +63,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (typeof binPath === 'string' && binPath.length > 0) backendOptions.binPath = binPath
   const backend = createAppBackend(backendOptions)
 
+  // 方向 1 v2：connect_server 的热激活通道（web profile 装 mcp bundle 时存在；
+  // headless 无 mcpRuntime → connect 降级为「写盘 + 重启后生效」）
+  let mcpRuntime: import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined
+  ctx.inject(['mcpRuntime'], () => {
+    mcpRuntime = ctx.mcpRuntime
+    logger.info('mcpRuntime available — connect_server will hot-activate third-party packs')
+  })
+
   // 启动为 void 异步（apply 同步纪律）；失败只记日志——tool/route 的 ready() 会给
   // 消费方面向 Agent 的错误与重试语义
   void backend.start().then(() => {
@@ -71,7 +79,7 @@ export function apply(ctx: Context, config: Config = {}): void {
     logger.error(`app backend failed to start: ${error instanceof Error ? error.message : String(error)}`)
   })
 
-  ctx.tools.register(createAppBackendTool(backend))
+  ctx.tools.register(createAppBackendTool(backend, { getMcpRuntime: () => mcpRuntime }))
   ctx.skills.registerProvider(() => appBackendSkillProvider)
   // P3 自愈 skill：门面故障诊断决策树（backend_health / backend_restart 的用法载体）
   ctx.skills.registerProvider(() => appDoctorSkillProvider)

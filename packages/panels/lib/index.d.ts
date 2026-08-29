@@ -54,7 +54,6 @@ type WidgetDataSource = {
   query?: Record<string, string>;
   body?: unknown;
   headers?: Record<string, string>;
-  credentialRef?: string;
   timeoutMs?: number;
 };
 interface WidgetDataBinding {

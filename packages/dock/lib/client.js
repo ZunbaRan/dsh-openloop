@@ -4983,6 +4983,7 @@ window.__ModuleLoader__.load({
 		//#region src/client/openloop-clients.ts
 		let panelsCache;
 		let artifactCache;
+		let mcpCache;
 		function getPanelsClient() {
 			if (panelsCache !== void 0) return panelsCache;
 			try {
@@ -5000,6 +5001,15 @@ window.__ModuleLoader__.load({
 				return;
 			}
 			return artifactCache;
+		}
+		function getMcpAppsClient() {
+			if (mcpCache !== void 0) return mcpCache;
+			try {
+				mcpCache = require("@openloop/dsh-mcp/client");
+			} catch {
+				return;
+			}
+			return mcpCache;
 		}
 		//#endregion
 		//#region src/client/DockBoardView.tsx
@@ -5079,6 +5089,10 @@ window.__ModuleLoader__.load({
 			if (source.kind === "panel") {
 				const panel = source.meta?.panel;
 				return typeof panel?.id === "string" && panel.id.length > 0 ? `openloop:${panel.id}` : null;
+			}
+			if (source.kind === "mcp-app") {
+				if (source.meta.rid !== void 0 && source.meta.rid.length > 0) return source.meta.rid;
+				return `${source.meta.serverId}:${source.meta.toolName.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
 			}
 			const path = source.meta?.path;
 			if (typeof path !== "string" || path.length === 0) return null;
@@ -5225,6 +5239,22 @@ window.__ModuleLoader__.load({
 				});
 				const PanelSurface = panels.PanelSurface;
 				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta: tile.source.meta });
+			}
+			if (tile.source.kind === "mcp-app") {
+				const mcpApps = getMcpAppsClient();
+				if (mcpApps === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+					what: "Dock MCP App tile",
+					dep: "@openloop/dsh-mcp"
+				});
+				const McpAppResourceView = mcpApps.McpAppResourceView;
+				const meta = tile.source.meta;
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppResourceView, {
+					serverId: meta.serverId,
+					toolName: meta.toolName,
+					resourceUri: meta.resourceUri,
+					title: tile.title,
+					frameId: `dock-${tile.tileId}`
+				});
 			}
 			const artifact = getArtifactClient();
 			if (artifact === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
@@ -6300,7 +6330,7 @@ window.__ModuleLoader__.load({
 		function str(value, fallback = "") {
 			return typeof value === "string" ? value : fallback;
 		}
-		/** 门面行 → dock AppDescriptor（组件 pinnable：entry.panel 合法即可 pin——v1 渲染闭环） */
+		/** 门面行 → dock AppDescriptor（组件 pinnable：entry.panel 合法即可 pin——v1 渲染闭环；mcp-app 引用形态合法即可 pin——v2） */
 		function remoteAppToDescriptor(detail) {
 			const name = str(detail.app?.name);
 			if (name.length === 0) return null;
@@ -6308,6 +6338,15 @@ window.__ModuleLoader__.load({
 				const rid = str(c?.rid);
 				if (rid.length === 0) return null;
 				const entry = c?.entry;
+				if (c?.kind === "mcp-app") return {
+					id: rid,
+					title: str(c?.title, rid),
+					type: "mcp-app",
+					desc: str(c?.description),
+					kind: "",
+					pinnable: entryMcpAppOf(entry) !== null,
+					entry
+				};
 				return {
 					id: rid,
 					title: str(c?.title, rid),
@@ -6405,12 +6444,44 @@ window.__ModuleLoader__.load({
 			return true;
 		}
 		/**
-		* pin 一个组件资源 = 构造可渲染的面板实例：
-		* - 内置（PRESET_INFO[kind]）→ 合法最小示例 props 实例
-		* - 门面组件（entry.panel 合法）→ 直接用 agent 内联的完整 PanelDefinition
+		* mcp-app 引用形态提取（方向 1 v2 渲染时取数契约）：
+		* entry = { serverId, toolName, resourceUri }（三 string 即合法；connect_server 写入）。
+		*/
+		function entryMcpAppOf(entry) {
+			if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+			const record = entry;
+			if (typeof record.serverId !== "string" || record.serverId.length === 0) return null;
+			if (typeof record.toolName !== "string" || record.toolName.length === 0) return null;
+			if (typeof record.resourceUri !== "string" || record.resourceUri.length === 0) return null;
+			return {
+				serverId: record.serverId,
+				toolName: record.toolName,
+				resourceUri: record.resourceUri
+			};
+		}
+		/**
+		* pin 一个组件资源 = 构造可渲染 tile source（统一入口，2026-08-29）：
+		* - mcp-app 组件（entry 引用形态合法）→ mcp-app tile（渲染时取数，不复制内容）
+		* - 其余走 buildPanelMetaForComponent 的 panel 通道：
+		*   内置（PRESET_INFO[kind]）→ 合法最小示例 props 实例；
+		*   门面组件（entry.panel 合法）→ 直接用 agent 内联的完整 PanelDefinition
 		*   （resolved 置空——api 绑定 widget 由 panels 的 onLoad 刷新在打开时自动拉取）
 		* 两者皆无 → null（「待生成」态，pin 拒绝）。
 		*/
+		function buildTileSourceForComponent(component) {
+			if (component.type === "mcp-app") {
+				const reference = entryMcpAppOf(component.entry);
+				if (reference === null) return null;
+				return {
+					kind: "mcp-app",
+					meta: {
+						...reference,
+						...component.id ? { rid: component.id } : {}
+					}
+				};
+			}
+			return buildPanelMetaForComponent(component);
+		}
 		function buildPanelMetaForComponent(component) {
 			const info = PRESET_INFO[component.kind];
 			if (info !== void 0) {
@@ -7048,9 +7119,9 @@ window.__ModuleLoader__.load({
 				});
 			};
 			/** pin：以示例 props 建面板实例 → 落到当前看板页 → 跳回看板（M2 验收点）。
-			*  门面组件（无渲染数据）拒绝并提示。 */
+			*  v2：mcp-app 组件 pin 引用形态 tile（渲染时取数）；门面组件（无渲染数据）拒绝并提示。 */
 			const pinComponent = (_app, component) => {
-				const source = buildPanelMetaForComponent(component);
+				const source = buildTileSourceForComponent(component);
 				if (source === null) {
 					setToast(`「${component.title}」暂无渲染数据——让 Agent 经 app_backend 生成内容后再固定`);
 					return;

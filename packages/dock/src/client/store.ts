@@ -13,7 +13,15 @@ const STORAGE_KEY = 'openloop.dock.board.v1'
 
 export interface PanelTileSource { kind: 'panel'; meta: unknown }
 export interface ArtifactTileSource { kind: 'artifact'; meta: unknown }
-export type DockTileSource = PanelTileSource | ArtifactTileSource
+/**
+ * 方向 1 v2（2026-08-29）：MCP Apps 引用形态 tile——只存 (serverId, toolName,
+ * resourceUri) 引用，不复制内容；渲染时经 refresh 端点取数（与对话流卡同通道）。
+ */
+export interface McpAppTileSource {
+  kind: 'mcp-app'
+  meta: { serverId: string; toolName: string; resourceUri: string; rid?: string }
+}
+export type DockTileSource = PanelTileSource | ArtifactTileSource | McpAppTileSource
 
 export interface DockTile {
   tileId: string

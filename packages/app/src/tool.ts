@@ -16,6 +16,7 @@ const ACTIONS = [
   'register_api', 'remove_api', 'set_api_key',
   'save_dock_state', 'load_dock_state',
   'invalidate',
+  'connect_server',
   'backend_health', 'backend_restart',
 ] as const
 
@@ -60,12 +61,22 @@ export const APP_BACKEND_PARAMETERS = {
     additionalProperties: true,
     description: 'Full dock v2 state for save_dock_state: { version: 2, boards: [{ id, name, tiles }], activeBoardId }. Replaces all boards/tiles atomically.',
   },
+  serverId: {
+    type: 'string',
+    description: 'MCP server id for connect_server: the mcp.json key and the app namespace (kebab-case).',
+  },
+  server: {
+    type: 'object',
+    additionalProperties: true,
+    description: 'MCP server entry for connect_server (mcp.json shape): { "type": "http", "url": "https://…" } or { "type": "stdio", "command": "npx", "args": […] }, optional headers / env / cwd / protocol ("legacy"|"auto"|"2026-07-28"). Connects a third-party MCP Apps 2.0 pack: writes user-scope mcp.json, hot-activates the runtime, and registers ui-bound tools as mcp-app components (pin-ready).',
+  },
 } as const
 
 /** 写操作清单（这些 action 完成后建议 agent 调一次 invalidate 通知 UI 刷新） */
 const WRITE_ACTIONS: ReadonlySet<Action> = new Set([
   'upsert_app', 'delete_app', 'register_component', 'remove_component',
   'register_api', 'remove_api', 'set_api_key', 'save_dock_state',
+  'connect_server',
 ])
 
 /** 输出契约：各 action 返回形态不同，统一为开放对象（细节由 facade 类型承载） */
@@ -168,10 +179,10 @@ async function runCore(action: Action, a: Record<string, unknown>, facade: Await
   }
 }
 
-export function createAppBackendTool(backend: AppBackend): ToolDefinition {
+export function createAppBackendTool(backend: AppBackend, options: { getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined } = {}): ToolDefinition {
   return defineTool({
     name: APP_BACKEND_TOOL,
-    description: 'Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned.',
+    description: 'Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration, and connect_server for third-party MCP Apps 2.0 packs. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned.',
     parameters: APP_BACKEND_PARAMETERS,
     output: {
       schema: APP_OUTPUT_SCHEMA,
@@ -189,6 +200,17 @@ export function createAppBackendTool(backend: AppBackend): ToolDefinition {
       // doctor 动作（backend_health / backend_restart）不经 facade——backend 挂了也要能诊断/恢复
       if (action === 'backend_health' || action === 'backend_restart') {
         return await runAction(action, a, backend, undefined as never) as Record<string, JsonValue>
+      }
+      // connect_server：方向 1 v2 第三方包 connect（需 mcpRuntime 上下文；facade 落引用条目）
+      if (action === 'connect_server') {
+        const { connectServer } = await import('./connect.ts')
+        return await connectServer({
+          serverId: expectString(a, 'serverId', action),
+          entry: expectObject(a, 'server', action),
+          dshHome: backend.dshHome(),
+          backend,
+          mcpRuntime: options.getMcpRuntime?.(),
+        }) as Record<string, JsonValue>
       }
       const facade = await backend.ready()
       return await runAction(action, a, backend, facade) as Record<string, JsonValue>

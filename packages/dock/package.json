@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-dock",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "OpenLoop Dock: pin panels and html artifacts to a right-side grid dock powered by react-grid-layout (drag, resize, snap, compaction). Push-out (not floating) layout via margin-right + width calc on #root, sharing the same squeeze channel as dsh-better-sidebar (see docs/DOCK_DESIGN.md §1.1).",
   "type": "module",
   "exports": {
@@ -32,12 +32,15 @@
     "@openloop/dsh-base": "workspace:*",
     "@openloop/dsh-panels": "workspace:*",
     "@openloop/dsh-html-artifact": "workspace:*",
+    "@openloop/dsh-mcp": "workspace:*",
     "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-tool": "0.1.0-rc.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.1",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.1",
@@ -55,7 +58,8 @@
       "external": [
         "@openloop/dsh-base/client",
         "@openloop/dsh-panels/client",
-        "@openloop/dsh-html-artifact/client"
+        "@openloop/dsh-html-artifact/client",
+        "@openloop/dsh-mcp/client"
       ]
     }
   }

@@ -141,7 +141,8 @@ describe('handleRefreshRequest', () => {
   })
 
   it('credentialRef / Authorization 明文 → 400', async () => {
-    const withCredential: WidgetDataBinding = { source: { type: 'api', url: apiBinding.source.type === 'api' ? apiBinding.source.url : '', credentialRef: 'prod' } }
+    // credentialRef 是 v2 保留字段（v1 类型不含）——fail-closed 拒绝，构造时放宽类型
+    const withCredential = { source: { type: 'api' as const, url: apiBinding.source.type === 'api' ? apiBinding.source.url : '', credentialRef: 'prod' } }
     await expect(handleRefreshRequest(bodyOf({ widgetId: 'w-1', data: withCredential }))).rejects.toMatchObject({ status: 400 })
     const withAuth: WidgetDataBinding = { source: { type: 'api', url: 'https://api.example.com/x', headers: { Authorization: 'Bearer t' } } }
     await expect(handleRefreshRequest(bodyOf({ widgetId: 'w-1', data: withAuth }))).rejects.toMatchObject({ status: 400 })
