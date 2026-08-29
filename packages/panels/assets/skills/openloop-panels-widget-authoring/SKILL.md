@@ -208,7 +208,6 @@ function NotNamed({ data }) { … }    // ✗ 组件名必须叫 Widget
 - **预设组件的数据注入**：解析结果为 plain object 时**浅合并覆盖 props**（数据优先）——所以让 API 返回/用 pick 取出与组件 props 同形的对象（如 data-table 取 `{ columns, rows }`）；合并后仍要过组件 schema，越界会降级占位
 - `refresh.intervalMs` 最小 10_000（不可见时自动暂停）；`manual` 默认 true（格角刷新按钮）；`onLoad: false` 可关打开即拉
 - 扁平 JSON 绑定 data-table 可走数据驱动模式（免写 columns/rows，见速查）
-- 扁平 JSON 绑定 data-table 可走数据驱动模式（免写 columns/rows，见速查）
 - **实时语义：每次打开面板重新拉取**（D4 已放弃回放稳定承诺）；刷新失败保留旧快照 + stale 角标；无旧数据时渲染错误占位（带重试按钮）
 
 ## 4A. 持久化与复用（§11）

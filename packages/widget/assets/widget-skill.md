@@ -2,7 +2,7 @@
 
 Use `show_widget` for one small, temporary, free-form interactive explanation.
 
-Use `visualize_ui` instead for a flow, timeline, or comparison. Use `html_artifact` instead for a large multi-panel document, custom explorer, or fullscreen canvas.
+Use the `panel` tool instead for flow, timeline, or comparison diagrams (panel preset kinds) and for multi-widget dashboards. Use `html_artifact` instead for a large multi-panel document, custom explorer, or fullscreen canvas.
 
 ## Contract
 

@@ -7,7 +7,7 @@ import { BUNDLED_SKILL_RANK } from "@deepseek-ai/dsh-skill";
 const body = new URL("../assets/artifact-skill.md", import.meta.url);
 const candidate = {
 	name: "openloop-html-artifact",
-	description: "Author large static or scripted multi-panel HTML artifacts for html_artifact.",
+	description: "Author free-form HTML pages for html_artifact: multi-panel explorers, simulations, custom topologies, fullscreen apps. Read when the user wants a full page rather than a dashboard (panel) or a small card (show_widget).",
 	invocation: {
 		modelInvocable: true,
 		userInvocable: true
@@ -198,7 +198,7 @@ const Config = z.object({
 function apply(ctx, config) {
 	ctx.tools.register(defineTool({
 		name: HTML_ARTIFACT_TOOL,
-		description: "Render a completely free HTML page (multi-panel explorer, simulation, custom topology, fullscreen app). Choose static by default, scripts for local computation, network when live API data is needed (openloop.fetch). Use panel for structured dashboards and show_widget for small cards. Load the openloop-html-artifact skill first.",
+		description: "Render a completely free HTML page (multi-panel explorer, simulation, custom topology, fullscreen app). Choose static by default, scripts for local computation, network when live API data is needed (openloop.fetch). Routing: use panel for structured dashboards (preset widgets, API data binding, auto refresh) and for flow/timeline/comparison diagrams (panel preset kinds); use show_widget for one small temporary card. Load the openloop-html-artifact skill first.",
 		parameters: {
 			title: {
 				type: "string",

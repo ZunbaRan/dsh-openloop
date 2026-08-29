@@ -248,3 +248,23 @@ https://api.github.com/repos/nonexistent-org-12345/nonexistent-repo-67890
 | 6.3 唤起不存在 | ✅（headless） | 「先 persist 或传完整定义」提示正确 |
 
 > **headless 测试说明（2026-08-22）**：由 Agent 在 /tmp/dsh-accept workspace 执行，判定依据 = 会话日志（工具调用/结果/存档文件核验）。**行为观察**：5 个面板任务中模型 4 次自发选择 panelFile 通道（skill 教学生效）；2 次字符串直传失败均在 1–2 步内自愈转文件通道；未出现一次「放弃不交付」。
+
+---
+
+## 七、意图级路由回归（2026-08-29 新增）
+
+> **背景**：以上所有验收 prompt 都点名了工具与 kind——路由层（模型在模糊请求下选哪个工具）从未被回归过。三方评审（主 Agent + 路由红队 + 信息架构评审）实测 12 条模糊 prompt 有 7 条犹豫/错路由。本节是路由层的回归防线；判定依据 = `docs/VISUAL_ROUTING.md` 决策表。
+> **用法**：逐条粘贴进 DSH 对话（**不要**补充任何工具提示），记录模型实际调用的工具，与预期对照。
+
+| # | 模糊 prompt（原文粘贴） | 预期工具 | 关键裁决点 |
+|---|---|---|---|
+| 7.1 | 帮我看看这组数据：本月营收 48210 元涨 12.4%，订单 1208 单跌 2.1%，退款率 1.2% | `panel`（或纯文字） | 不得选 show_widget 做数据展示、不得选 visualize_ui |
+| 7.2 | 画个图 | `panel`（追问内容后，单 widget 图表面板） | 不得盲选退役工具；不应杀鸡用 html_artifact |
+| 7.3 | 把 A 方案和 B 方案对比一下，直观一点 | `panel`（comparison 预设） | 死亡路标回归：不得选 visualize_ui |
+| 7.4 | 帮我做个 GitHub 仓库的监控面板 | `panel`（数据绑定 + refresh） | 名义（panel）与能力（API）分裂裁决：panel 的数据能力应胜出 |
+| 7.5 | 做个交互的东西演示一下快排 | `show_widget` | 单焦点小卡片边界 |
+| 7.6 | 画个流程图说明一下这个架构 | `panel`（flow 预设） | 死亡路标回归：不得选 visualize_ui |
+| 7.7 | 做个汇率计算器 | `panel` 或 `html_artifact` | **隐蔽错路由回归**：汇率需实时数据，show_widget 离线禁 API——不得选 show_widget |
+| 7.8 | 把这次分析结果保存下来，以后还要看 | `panel`（persist） | 持久化语义：只有 panel 有 persist/load |
+
+✅ 通过标准：8 条中 ≥7 条首选工具命中且零次调用 visualize_ui；模型可先追问再选（追问不算失败）。

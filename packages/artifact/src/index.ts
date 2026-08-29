@@ -21,7 +21,7 @@ export const Config: z<Config> = z.object({
 export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: HTML_ARTIFACT_TOOL,
-    description: 'Render a completely free HTML page (multi-panel explorer, simulation, custom topology, fullscreen app). Choose static by default, scripts for local computation, network when live API data is needed (openloop.fetch). Use panel for structured dashboards and show_widget for small cards. Load the openloop-html-artifact skill first.',
+    description: 'Render a completely free HTML page (multi-panel explorer, simulation, custom topology, fullscreen app). Choose static by default, scripts for local computation, network when live API data is needed (openloop.fetch). Routing: use panel for structured dashboards (preset widgets, API data binding, auto refresh) and for flow/timeline/comparison diagrams (panel preset kinds); use show_widget for one small temporary card. Load the openloop-html-artifact skill first.',
     parameters: {
       title: { type: 'string', required: true, description: 'Short artifact title.' },
       runtime: { type: 'string', enum: ['static', 'scripts', 'network'], required: true, description: 'static rejects scripts; scripts = local JS (canvas/eval/wasm, offline); network = scripts + openloop.fetch bridge for API data (https-only JSON, SSRF-guarded).' },

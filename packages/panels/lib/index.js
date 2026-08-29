@@ -7284,7 +7284,7 @@ const PANEL_OUTPUT_SCHEMA = {
 function definePanelTool() {
 	return defineTool({
 		name: PANEL_TOOL,
-		description: "Render a reusable dashboard panel from preset widgets, custom sandbox code, or external packs. Each widget must be shaped as { id, source } where source is one of: { type: \"preset\", kind: \"<preset-kind>\", props: {...} } | { type: \"custom\", code: \"<JSX source>\" } | { type: \"pack\", pack, component, props }. Validates the full PanelDefinition contract and fails closed on violations. Prefer presets for standard cards; use this instead of visualize_ui when the output is a multi-widget panel. Load the openloop-panels-widget-authoring skill before the first call.",
+		description: "Render a reusable dashboard panel from preset widgets, custom sandbox code, or external packs. Presets cover metrics, charts (bar/line/donut/gauge/funnel/heatmap), tables, flow/timeline/comparison diagrams, callouts, and layout containers. Widgets can bind live API data (https JSON, server-side fetch, auto refresh) and the panel can persist for later recall. Each widget is { id, source } where source is one of { type: \"preset\", kind, props } | { type: \"custom\", code } | { type: \"pack\", pack, component, props }; the full contract is validated and fails closed. Routing: choose panel for dashboards, monitoring, multi-widget summaries, or a single flow/timeline/comparison diagram (preset kinds exist); choose show_widget for one small temporary card; choose html_artifact for a free-form full HTML page. Load the openloop-panels-widget-authoring skill before the first call.",
 		parameters: PANEL_PARAMETERS,
 		output: {
 			schema: PANEL_OUTPUT_SCHEMA,
@@ -28502,18 +28502,19 @@ function describeCompileError(error) {
 const SKILL_SPECS = [
 	{
 		name: "openloop-panels-style-guide",
-		description: "OpenLoop panels 预设风格开发指引：61 个 token 词汇表、三档 token 规则、半 token 化禁令与 Appica 审美参照。写预设组件/自定义 widget 样式前先读。",
+		description: "OpenLoop panels 预设风格开发指引：token 词汇表、三档 token 规则、半 token 化禁令与 Appica 审美参照。写预设组件/自定义 widget 样式前先读。",
 		file: "openloop-panels-style-guide/SKILL.md"
 	},
 	{
 		name: "openloop-panels-widget-authoring",
-		description: "OpenLoop panels Agent widget 编写指引：资源选择阶梯、26 个预设组件速查、custom code 契约、数据绑定与面板构图硬规则。用 panel 工具前先读。",
+		description: "OpenLoop panels Agent widget 编写指引：资源选择阶梯、全部预设组件 kind+props 速查、custom code 契约、数据绑定与面板构图硬规则。用户要仪表盘/监控看板/多指标汇总/流程图/对比图，或要保存复用面板时，调用 panel 工具前先读本 skill。",
 		file: "openloop-panels-widget-authoring/SKILL.md"
 	},
 	{
 		name: "openloop-panels-pack-guide",
-		description: "OpenLoop panels 外部组件包接入指引：pack manifest 契约、硬性约束、打包注册启用流程、主题桥接器与验收清单。接入外部组件包前先读。",
-		file: "openloop-panels-pack-guide/SKILL.md"
+		description: "OpenLoop panels 外部组件包接入指引：pack manifest 契约、硬性约束、打包注册启用流程、主题桥接器与验收清单。接入外部组件包前先读。（面向开发者）",
+		file: "openloop-panels-pack-guide/SKILL.md",
+		modelInvocable: false
 	}
 ];
 const resourceBase = {
@@ -28526,7 +28527,7 @@ function createProvider(spec) {
 		name: spec.name,
 		description: spec.description,
 		invocation: {
-			modelInvocable: true,
+			modelInvocable: spec.modelInvocable !== false,
 			userInvocable: true
 		},
 		provider: spec.name,

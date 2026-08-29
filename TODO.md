@@ -7,17 +7,14 @@
 
 **方向定调**：面板/看板/APP 数据由「必须存在的服务」接管 = PocketBase。不再把门面挂掉当降级路径设计，而是把它当**要修的故障**——监控/自愈/Agent 可诊断是 base 能力。具体架构用户还没想好，先按项独立推进、逐项验收。
 
-- [ ] **P1 · Registry 刷新机制**（最痛：agent 注册 APP 后 dock 不显示，须 F5）：
-  - dock 侧轮询 `/openloop/app/registry`（30–60s，降级态拉长间隔）+ `POST /openloop/app/invalidate` 端点（agent 操作完主动踢）
-  - agent 流程结尾提示调 invalidate（app-backend skill 文档写明）；SSE 作后续优化
-- [ ] **P2 · PB 进程守护**（监控 + 重启）：
-  - dsh-app 内置 watchdog：健康轮询（/api/health 间隔 15–30s）、异常退出自动重启（指数退避，连续 3 次失败转 failed + 状态上报）
-  - backend.status() 扩展 `restarts / lastError / lastRestartAt`
-  - 单测：杀进程 → 自动拉起 → 数据仍在（复用 pb.e2e 结构）
-- [ ] **P3 · 自愈 skill**（协助 DSH 宿主 agent 发现并修复 PB 故障）：
-  - skill `openloop-app-doctor`：症状→诊断→修复决策树（未启动→等/重启；下载失败→网络/手动二进制；端口占用/数据目录权限→提示路径）
-  - app_backend 增 action：`backend_health`（详细状态）/ `backend_restart`（手动重启）
-  - 错误消息面向 Agent 自修正（既有纪律）
+- [x] **P1 · Registry 刷新机制**（已落地，2026-08-29 核实补记）：
+  - dock 轻探轮询（rev 已知 15s / 未知 60s 降级拉长，`dock/src/client/index.tsx`）+ `POST /openloop/app/invalidate` 端点（app routes）均已实现
+  - app-backend skill 文档已写明 invalidate 用法（「所有写操作已自动通知；仅直改数据后用」）
+- [x] **P2 · PB 进程守护**（已落地，2026-08-29 核实补记）：
+  - watchdog.ts + 状态扩展（`restarts / lastError / lastRestartAt`，`/openloop/app/status` 实测返回）+ 命名单测（`pb.e2e.spec.ts`「P2 守护：SIGKILL 杀掉 PB → watchdog 自动重启 → 数据仍在」+ `watchdog.spec.ts`）
+- [x] **P3 · 自愈 skill**（已落地，2026-08-29 核实补记）：
+  - `skill-doctor.ts`（openloop-app-doctor：症状→诊断→修复决策树）+ `backend_health` / `backend_restart` 两个 action（tool.ts ACTIONS）均已实现
+  - 教训：实现完成但 TODO 未勾选——条目滞后于代码近三天，本次一并修正
 - [x] **P4 · 存储语义收紧**（2026-08-26 完成，dock 0.7.0）：写路径 server-first（推送失败 → pendingSync 标记 + localStorage 镜像；连续 2 次失败 → 降级提示条）；启动决策 reconcile 优先于权威载入（镜像含未对齐修改 → 回推门面）；P1 轻探循环兼作恢复探测（门面恢复 → revalidateBackend 对齐 + 撤降级）。localStorage 定位注释全部改为「缓存镜像」
 - [x] **P5 · 面板持久化迁移评估**（2026-08-26 结论：**暂不迁移，保持 workspace 文件**）：
   - **现状事实**：panel persist 落 `<workspace>/openloop-panels/*.json`（ctx.fs + sandbox seam，按项目隔离）；agent 可用 read/write 工具直接编辑（用户已在 dsh/ 目录实测 5 个面板 JSON）；panelFile 调试通道（read→改→write→重渲染）依赖此布局
@@ -31,7 +28,7 @@
 - [x] **内置 APP 注册进后端**（2026-08-26 完成，app 0.3.1 `e0dc3af`）：seed 33 组件 + 3 API，幂等（用户修改不覆盖），三方 kind 表一致性测试锁定（panels=dock=app）
 - [x] **北极星 demo 剧本**（2026-08-26，docs/NORTH_STAR_DEMO_SCRIPT.md）：形态 B 三层递进（内置目录 → agent 生成 → 用户组装）+ 自愈彩蛋；双场景节奏（团队完整版 6min / 社区剪辑版 2min）；验收清单 + 风险规避表已备。**正式录制前置**：真机过一遍验收清单（7 项）
 - [ ] **北极星 demo 录制**：按剧本走查 + 录屏（待用户安排）
-- [ ] **方向 1 · 第三方包协议**：「刚刚好」版设计已完成（docs/DIRECTION1_PACK_PROTOCOL.md，2026-08-27）——**核心洞察：包是安装时概念**（manifest 引用文件 + agent 即安装器 + 安装后组件与 agent 生成物同形态，零新运行时机制）。实施仅 ~2.5h：dock entryArtifactOf（artifact 形态 entry）+ 安装 skill + 示例包；可选 install_manifest action。**待用户拍板后开工**
+- [ ] **方向 1 · 第三方包协议 v2（MCP Apps 2.0 底座，2026-08-28 拍板）**：v1「安装时概念」草案已废弃（文档已加废弃横幅）。v2 = 第三方包即 MCP Apps 2.0 server，DSH 是 client + 容器；唯一 surface = HTML 沙箱；凭据归 server 自管（方向 2 的 registerApi/set_api_key 不进本协议）。**已落地（`1255eee`）**：mcp-runtime 热加载（addServer/removeServer/onServersChanged）+ mcp-tools 动态订阅。**剩余**：mcp-apps 独立资源视图 → app connect_server action → dock mcp-app tile → 协议文档 v2 重写 → 家族发布。验收对象 = tldraw + excalidraw 真机
 
 ## 低优先 / 观察池
 

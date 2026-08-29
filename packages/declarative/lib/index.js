@@ -332,7 +332,7 @@ const inject = ["tools", "skills"];
 function apply(ctx) {
 	ctx.tools.register(defineTool({
 		name: VISUALIZE_UI_TOOL,
-		description: "Render one polished native Flow, Timeline, or Comparison in the conversation from bounded JSON. Use this for structured explanations; it executes no generated code. Load the openloop-visual-declarative skill before the first call.",
+		description: "Deprecated: prefer the panel tool (its preset kinds include flow, timeline, and comparison) or html_artifact. Renders one polished native Flow, Timeline, or Comparison in the conversation from bounded JSON, executing no generated code. Load the openloop-visual-declarative skill before the first call.",
 		parameters: VISUALIZE_PARAMETERS,
 		output: {
 			schema: OUTPUT_SCHEMA,

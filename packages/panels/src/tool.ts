@@ -96,7 +96,7 @@ export const PANEL_OUTPUT_SCHEMA = {
 export function definePanelTool(): ToolDefinition {
   return defineTool({
     name: PANEL_TOOL,
-    description: 'Render a reusable dashboard panel from preset widgets, custom sandbox code, or external packs. Each widget must be shaped as { id, source } where source is one of: { type: "preset", kind: "<preset-kind>", props: {...} } | { type: "custom", code: "<JSX source>" } | { type: "pack", pack, component, props }. Validates the full PanelDefinition contract and fails closed on violations. Prefer presets for standard cards; use this instead of visualize_ui when the output is a multi-widget panel. Load the openloop-panels-widget-authoring skill before the first call.',
+    description: 'Render a reusable dashboard panel from preset widgets, custom sandbox code, or external packs. Presets cover metrics, charts (bar/line/donut/gauge/funnel/heatmap), tables, flow/timeline/comparison diagrams, callouts, and layout containers. Widgets can bind live API data (https JSON, server-side fetch, auto refresh) and the panel can persist for later recall. Each widget is { id, source } where source is one of { type: "preset", kind, props } | { type: "custom", code } | { type: "pack", pack, component, props }; the full contract is validated and fails closed. Routing: choose panel for dashboards, monitoring, multi-widget summaries, or a single flow/timeline/comparison diagram (preset kinds exist); choose show_widget for one small temporary card; choose html_artifact for a free-form full HTML page. Load the openloop-panels-widget-authoring skill before the first call.',
     parameters: PANEL_PARAMETERS,
     output: {
       schema: PANEL_OUTPUT_SCHEMA,

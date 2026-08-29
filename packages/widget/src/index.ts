@@ -15,7 +15,7 @@ export const Config: z<Config> = z.object({ maxFragmentBytes: z.natural().defaul
 export function apply(ctx: Context, config: Config): void {
   ctx.tools.register(defineTool({
     name: SHOW_WIDGET_TOOL,
-    description: 'Render a small, self-contained interactive HTML fragment inline. Use for one focused simulator, calculator, or free-form explanation; use visualize_ui for structured flow/timeline/comparison and html_artifact for a large multi-panel canvas. Load the openloop-show-widget skill first.',
+    description: 'Render a small, self-contained interactive HTML fragment inline. Use for one focused simulator, calculator, or free-form explanation that fits a single card; the fragment is offline (network APIs are blocked, no live API data). Routing: use panel for multi-widget dashboards and for flow/timeline/comparison diagrams (panel preset kinds); use html_artifact for a large multi-panel page or anything needing live API data. Load the openloop-show-widget skill first.',
     parameters: {
       title: { type: 'string', required: true, description: 'Short user-facing title.' },
       fragment: { type: 'string', required: true, description: 'Inline HTML fragment with optional inline style/script; no document skeleton or remote assets.' },

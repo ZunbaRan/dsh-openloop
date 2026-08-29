@@ -75,7 +75,7 @@ function previewFragment(fragment) {
 const body = new URL("../assets/widget-skill.md", import.meta.url);
 const candidate = {
 	name: "openloop-show-widget",
-	description: "Author small self-contained streaming HTML widgets for show_widget.",
+	description: "Author small self-contained offline HTML widgets for show_widget: one focused simulator, calculator, or inline explanation. Read when the user wants a small card rather than a dashboard (panel) or a full page (html_artifact).",
 	invocation: {
 		modelInvocable: true,
 		userInvocable: true
@@ -187,7 +187,7 @@ const Config = z.object({ maxFragmentBytes: z.natural().default(3e5) });
 function apply(ctx, config) {
 	ctx.tools.register(defineTool({
 		name: SHOW_WIDGET_TOOL,
-		description: "Render a small, self-contained interactive HTML fragment inline. Use for one focused simulator, calculator, or free-form explanation; use visualize_ui for structured flow/timeline/comparison and html_artifact for a large multi-panel canvas. Load the openloop-show-widget skill first.",
+		description: "Render a small, self-contained interactive HTML fragment inline. Use for one focused simulator, calculator, or free-form explanation that fits a single card; the fragment is offline (network APIs are blocked, no live API data). Routing: use panel for multi-widget dashboards and for flow/timeline/comparison diagrams (panel preset kinds); use html_artifact for a large multi-panel page or anything needing live API data. Load the openloop-show-widget skill first.",
 		parameters: {
 			title: {
 				type: "string",
