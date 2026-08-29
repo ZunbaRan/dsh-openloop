@@ -253,7 +253,7 @@ https://api.github.com/repos/nonexistent-org-12345/nonexistent-repo-67890
 
 ## 七、意图级路由回归（2026-08-29 新增）
 
-> **背景**：以上所有验收 prompt 都点名了工具与 kind——路由层（模型在模糊请求下选哪个工具）从未被回归过。三方评审（主 Agent + 路由红队 + 信息架构评审）实测 12 条模糊 prompt 有 7 条犹豫/错路由。本节是路由层的回归防线；判定依据 = `docs/VISUAL_ROUTING.md` 决策表。
+> **背景**：以上所有验收 prompt 都点名了工具与 kind——路由层（模型在模糊请求下选哪个工具）从未被回归过。三方评审（主 Agent + 路由红队 + 信息架构评审）实测 12 条模糊 prompt 有 7 条犹豫/错路由。本节是路由层的回归防线；判定依据 = `docs/VISUAL_ROUTING.md` 决策表。visualize_ui 仍在工具表，新意图选它 = 错路由，不是工具已摘。
 > **用法**：逐条粘贴进 DSH 对话（**不要**补充任何工具提示），记录模型实际调用的工具，与预期对照。
 
 | # | 模糊 prompt（原文粘贴） | 预期工具 | 关键裁决点 |
@@ -267,4 +267,4 @@ https://api.github.com/repos/nonexistent-org-12345/nonexistent-repo-67890
 | 7.7 | 做个汇率计算器 | `panel` 或 `html_artifact` | **隐蔽错路由回归**：汇率需实时数据，show_widget 离线禁 API——不得选 show_widget |
 | 7.8 | 把这次分析结果保存下来，以后还要看 | `panel`（persist） | 持久化语义：只有 panel 有 persist/load |
 
-✅ 通过标准：8 条中 ≥7 条首选工具命中且零次调用 visualize_ui；模型可先追问再选（追问不算失败）。
+✅ 通过标准：8 条中 ≥7 条首选工具命中。visualize_ui 仍在工具表，新意图选它算错路由（不是工具已摘）。模型可先追问再选（追问不算失败）。
