@@ -16,10 +16,6 @@ import {
   validateApiUrl,
 } from '../src/datasource.ts'
 
-// ---------------------------------------------------------------------------
-// mock fetch helpers（注入 fetchFn，不真联网）
-// ---------------------------------------------------------------------------
-
 function streamFrom(text: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(text)
   return new ReadableStream({ start(controller) { controller.enqueue(bytes); controller.close() } })
@@ -64,10 +60,6 @@ function apiBinding(overrides: Record<string, unknown> = {}, bindingOverrides: R
 
 const STATIC_BINDING: WidgetDataBinding = { source: { type: 'static', value: { ok: true, n: 3 } } }
 
-// ---------------------------------------------------------------------------
-// 纯函数：pick 路径
-// ---------------------------------------------------------------------------
-
 describe('parsePickPath（a.b[0].c 形态）', () => {
   it('点号与方括号索引混合', () => {
     expect(parsePickPath('a.b[0].c')).toEqual(['a', 'b', 0, 'c'])
@@ -85,7 +77,6 @@ describe('parsePickPath（a.b[0].c 形态）', () => {
 
 describe('pickValue', () => {
   const data = { a: { b: [{ c: 42 }, { c: 7 }] }, top: 'yes', arr: [10, 20, 30] }
-
   it('深路径取值', () => {
     expect(pickValue(data, 'a.b[0].c')).toBe(42)
     expect(pickValue(data, 'a.b[1].c')).toBe(7)
@@ -96,7 +87,7 @@ describe('pickValue', () => {
     expect(pickValue(data, 'a.b[9].c')).toBeUndefined()
     expect(pickValue(data, 'no.such[0]')).toBeUndefined()
     expect(pickValue(data, 'a.b[0].missing')).toBeUndefined()
-    expect(pickValue(data, 'top.x.y')).toBeUndefined() // 中途遇标量
+    expect(pickValue(data, 'top.x.y')).toBeUndefined()
   })
   it('空/缺省 pick 返回整个数据', () => {
     expect(pickValue(data, undefined)).toBe(data)
@@ -107,10 +98,6 @@ describe('pickValue', () => {
     expect(pickValue(null, 'a.b')).toBeUndefined()
   })
 })
-
-// ---------------------------------------------------------------------------
-// 纯函数：超时 / 大小 / JSON 判定
-// ---------------------------------------------------------------------------
 
 describe('normalizeTimeoutMs（默认 10s，上限 30s）', () => {
   it('缺省返回默认值', () => {
@@ -205,10 +192,6 @@ describe('buildApiUrl / validateApiUrl', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// resolveWidgetData
-// ---------------------------------------------------------------------------
-
 describe('resolveWidgetData：static source', () => {
   it('直接返回 value（不触发 fetch）', async () => {
     await expect(resolveWidgetData(STATIC_BINDING)).resolves.toEqual({ ok: true, n: 3 })
@@ -224,10 +207,26 @@ describe('resolveWidgetData：api 校验（fetch 不被调用）', () => {
     ['SSRF 私网拒绝', { url: 'https://10.1.2.3/x' }, /loopback|private/],
     ['localhost 拒绝', { url: 'https://localhost:8080/x' }, /loopback|private/],
     ['非法 URL', { url: 'not a url' }, /not a valid URL/],
-    ['credentialRef v1 拒绝', { url: 'https://api.example.com/x', credentialRef: 'gh' }, /v2 feature/],
     ['Authorization 明文拒绝', { url: 'https://api.example.com/x', headers: { Authorization: 'Bearer x' } }, /Authorization/],
   ])('%s', async (_name, overrides, pattern) => {
     await expect(resolveWidgetData(apiBinding(overrides), { fetchFn: neverFetch })).rejects.toThrow(pattern)
+  })
+
+  it('Authorization 明文拒绝且错误不提及 credentialRef', async () => {
+    let message = ''
+    try {
+      await resolveWidgetData(apiBinding({ headers: { Authorization: 'Bearer x' } }), { fetchFn: neverFetch })
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message).toMatch(/Authorization/)
+    expect(message).not.toMatch(/credentialRef/)
+  })
+
+  it('extra credentialRef is not a live field: public fetch still proceeds', async () => {
+    const fetchFn = mockFetch(() => mockResponse({ contentType: 'application/json', body: '{"ok":true}' }))
+    const binding = apiBinding({ credentialRef: 'gh' })
+    await expect(resolveWidgetData(binding, { fetchFn })).resolves.toEqual({ ok: true })
   })
 })
 
@@ -276,7 +275,7 @@ describe('resolveWidgetData：api fetch 失败路径', () => {
   })
 
   it('超时抛 timeout（timeoutMs 生效）', async () => {
-    const fetchFn = mockFetch(() => new Promise<Response>(() => {})) // 永不返回，靠 abort 中断
+    const fetchFn = mockFetch(() => new Promise<Response>(() => {}))
     const binding = apiBinding({ timeoutMs: 50 })
     await expect(resolveWidgetData(binding, { fetchFn })).rejects.toThrow(/timed out after 50ms/)
   })
@@ -303,10 +302,6 @@ describe('resolveWidgetData：api fetch 失败路径', () => {
     await expect(resolveWidgetData(apiBinding(), { fetchFn, signal: controller.signal })).rejects.toThrow()
   })
 })
-
-// ---------------------------------------------------------------------------
-// resolvePanelData（单格失败不拖垮面板）
-// ---------------------------------------------------------------------------
 
 describe('resolvePanelData', () => {
   function panel(widgets: PanelDefinition['widgets']): PanelDefinition {
