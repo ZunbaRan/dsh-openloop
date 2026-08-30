@@ -72,6 +72,7 @@ window.__ModuleLoader__.load({
 			const [host, setHost] = (0, react.useState)(null);
 			const [rightEdge, setRightEdge] = (0, react.useState)(() => probeDockRightEdge());
 			const [resizing, setResizing] = (0, react.useState)(false);
+			const [handleHover, setHandleHover] = (0, react.useState)(false);
 			const widthRef = (0, react.useRef)(width);
 			widthRef.current = width;
 			(0, react.useEffect)(() => {
@@ -168,17 +169,25 @@ window.__ModuleLoader__.load({
 					},
 					children: [children, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						onPointerDown: startResize,
+						onPointerEnter: () => setHandleHover(true),
+						onPointerLeave: () => setHandleHover(false),
 						style: {
 							position: "absolute",
 							left: 0,
 							top: 0,
 							bottom: 0,
-							width: 7,
+							width: 10,
 							cursor: open ? "col-resize" : "default",
 							pointerEvents: open ? "auto" : "none",
 							zIndex: 10
 						},
-						title: "拖动调整宽度"
+						title: "拖动调整宽度",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+							width: resizing || handleHover ? 6 : 4,
+							height: "100%",
+							background: resizing || handleHover ? "var(--dsw-alias-state-business-primary, #4176e6)" : "var(--dsw-alias-border-l2, rgba(127,127,127,.3))",
+							transition: "background .15s ease, width .15s ease"
+						} })
 					})]
 				})
 			}), host);

@@ -45,6 +45,7 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
   const [host, setHost] = useState<HTMLElement | null>(null)
   const [rightEdge, setRightEdge] = useState(() => probeDockRightEdge())
   const [resizing, setResizing] = useState(false)
+  const [handleHover, setHandleHover] = useState(false)
   const widthRef = useRef(width)
   widthRef.current = width
 
@@ -157,17 +158,31 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     <div style={outer} data-openloop-dock-panel="">
       <div style={inner}>
         {children}
-        {/* 左缘拖宽手柄 */}
+        {/* 左缘拖宽手柄（0.8.5：常驻 4px 宽条 + hover/拖动中变蓝——此前是 7px 全透明条，
+            用户看不到也找不到 hover 目标；对齐 bsb/col 把手手感） */}
         <div
           onPointerDown={startResize}
+          onPointerEnter={() => setHandleHover(true)}
+          onPointerLeave={() => setHandleHover(false)}
           style={{
-            position: 'absolute', left: 0, top: 0, bottom: 0, width: 7,
+            position: 'absolute', left: 0, top: 0, bottom: 0, width: 10,
             cursor: open ? 'col-resize' : 'default',
             pointerEvents: open ? 'auto' : 'none',
             zIndex: 10,
           }}
           title="拖动调整宽度"
-        />
+        >
+          <div
+            style={{
+              width: resizing || handleHover ? 6 : 4,
+              height: '100%',
+              background: resizing || handleHover
+                ? 'var(--dsw-alias-state-business-primary, #4176e6)'
+                : 'var(--dsw-alias-border-l2, rgba(127,127,127,.3))',
+              transition: 'background .15s ease, width .15s ease',
+            }}
+          />
+        </div>
       </div>
     </div>,
     host,
