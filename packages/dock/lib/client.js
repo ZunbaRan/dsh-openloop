@@ -7535,14 +7535,14 @@ window.__ModuleLoader__.load({
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronR, { size: 14 }), " 收起"]
 								})
 							]
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							style: {
 								display: "flex",
 								flex: 1,
 								minHeight: 0,
 								minWidth: 0
 							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailNav, {
+							children: tabState.tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailNav, {
 								tab: tabState.tab,
 								onTabChange: persistTab,
 								boards: state.boards,
@@ -7554,7 +7554,7 @@ window.__ModuleLoader__.load({
 								width: railWidth,
 								onWidthChange: setRailWidth,
 								onWidthCommit: commitRailWidth
-							}), tabState.tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, {}) : panelsMissing ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, {})] }) : panelsMissing ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "d2-empty-note",
 								style: { margin: "auto" },
 								children: [
@@ -7577,7 +7577,7 @@ window.__ModuleLoader__.load({
 								onOpenApp: openApp,
 								pinnedIds,
 								onPin: pinComponent
-							})]
+							})
 						})]
 					})
 				}),

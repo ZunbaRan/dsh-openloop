@@ -333,29 +333,31 @@ function DockShell(): ReactNode {
             </button>
           </header>
           <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
-            <RailNav
-              tab={tabState.tab}
-              onTabChange={persistTab}
-              boards={state.boards}
-              activeBoardId={state.activeBoardId}
-              onSelectBoard={id => dockStore.setActiveBoard(id)}
-              onAddBoard={addBoard}
-              onRenameBoard={(id, name) => dockStore.renameBoard(id, name)}
-              onRemoveBoard={removeBoard}
-              width={railWidth}
-              onWidthChange={setRailWidth}
-              onWidthCommit={commitRailWidth}
-            />
-            {tabState.tab === 'board' ? <DockBoardView /> : (
-              panelsMissing ? (
-                <div className="d2-empty-note" style={{ margin: 'auto' }}>
-                  <div style={{ fontSize: 22, opacity: 0.6 }}>🧩</div>
-                  <div>APP 注册表不可用</div>
-                  <div className="d2-tcap">安装 / 启用 @openloop/dsh-panels 后，这里可以浏览和固定组件</div>
-                </div>
-              ) : (
-                <AppsTab apps={apps} selectedAppId={selectedApp?.id ?? null} onOpenApp={openApp} pinnedIds={pinnedIds} onPin={pinComponent} />
-              )
+            {tabState.tab === 'board' ? (
+              <>
+                <RailNav
+                  tab={tabState.tab}
+                  onTabChange={persistTab}
+                  boards={state.boards}
+                  activeBoardId={state.activeBoardId}
+                  onSelectBoard={id => dockStore.setActiveBoard(id)}
+                  onAddBoard={addBoard}
+                  onRenameBoard={(id, name) => dockStore.renameBoard(id, name)}
+                  onRemoveBoard={removeBoard}
+                  width={railWidth}
+                  onWidthChange={setRailWidth}
+                  onWidthCommit={commitRailWidth}
+                />
+                <DockBoardView />
+              </>
+            ) : panelsMissing ? (
+              <div className="d2-empty-note" style={{ margin: 'auto' }}>
+                <div style={{ fontSize: 22, opacity: 0.6 }}>🧩</div>
+                <div>APP 注册表不可用</div>
+                <div className="d2-tcap">安装 / 启用 @openloop/dsh-panels 后，这里可以浏览和固定组件</div>
+              </div>
+            ) : (
+              <AppsTab apps={apps} selectedAppId={selectedApp?.id ?? null} onOpenApp={openApp} pinnedIds={pinnedIds} onPin={pinComponent} />
             )}
           </div>
         </div>
