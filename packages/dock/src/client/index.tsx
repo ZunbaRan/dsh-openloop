@@ -1,12 +1,14 @@
 /**
- * OpenLoop Dock client 半（Dock 2.0，2026-08-25）：
+ * OpenLoop Dock client 半（Dock 2.0；0.8.0 三列重构 2026-08-30）：
  * - DockHost 挂载（margin+width push，与 better-sidebar 共通道；空间探测读 --dsh-sidebar-width，见 DockHost.tsx）
- * - RailNav 两态导航轨（52 图标态 ↔ 216 中枢态）+ 内容区（board | apps）
- * - APP tab：AppListPanel 侧栏 + AppDetail 详情 + pin 流程；
- *   registry = 内置 APP（panels 预设，本地恒有）+ dsh-app 门面 APP（M3 合并）
+ * - 顶栏：看板/APP 段控 + 收起按钮（issue 2；取代 rail 的 APP 入口与 board head 的收起）
+ * - RailNav 两态导航轨（52 图标态 ↔ 216 中枢态，只管看板页——APP 分区已移除）
+ * - APP tab 三列（AppListPanel.tsx）：col1 富状态 APP 列表 → col2 资源列表（默认
+ *   「详情」）→ col3 详情/组件预览（免 pin 选中即看，复用 tile 渲染链）/API 详情
+ * - 展开态持久化（issue 3 B 方案）：记住上次离开状态；无存档默认收起
  * - 持久化（M3）：localStorage 恒为本地副本；dsh-app 门面（/openloop/app/boards）
  *   为权威存储——启动 syncBackend（载入/迁移/挂钩推送），不可用降级本地 + 提示条
- * - UI 态独立持久化：rail 宽 / tab+选中 APP / APP 侧栏（不进 dockStore）
+ * - UI 态独立持久化：rail 宽 / tab+选中 APP / 展开态（不进 dockStore）
  * - cordis service `openloop-dock/client`：pinPanel / pinArtifact / toggle / open
  * - 右上角浮动开关（不依赖 slots，零冲突）
  */
@@ -15,12 +17,13 @@ import { createElement, useEffect, useRef, useState, type ReactNode } from 'reac
 import { createRoot, type Root } from 'react-dom/client'
 import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './DockHost.tsx'
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
-import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab, type RailAppItem } from './RailNav.tsx'
-import { AppListPanel, AppDetail } from './AppListPanel.tsx'
+import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab } from './RailNav.tsx'
+import { AppsTab } from './AppListPanel.tsx'
 import { listBuiltinApps, buildTileSourceForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, type AppDescriptor } from './app-registry.ts'
 import { syncBackend, revalidateBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
+import { icons } from './icons.tsx'
 
 export const name = 'openloop-dock'
 // dock 不依赖宿主 cordis 服务（自主渲染 + provide service）——空 inject
@@ -82,7 +85,22 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
 const WIDTH_KEY = 'openloop.dock.width.v1'
 const RAIL_WIDTH_KEY = 'openloop.dock.rail-width.v1'
 const TAB_KEY = 'openloop.dock.tab.v1'
+const OPEN_KEY = 'openloop.dock.open.v1'
 const DEFAULT_WIDTH = 420
+
+/**
+ * 展开态读取（0.8.0 issue 3：进入 DSH 不再默认展开）：
+ * 有存档按存档（记住上次离开状态）；无存档默认收起。
+ * 旧行为（有 tile 即展开）废止——展开是用户动作，不是启动副作用。
+ */
+function readOpenState(): boolean {
+  try {
+    const raw = localStorage.getItem(OPEN_KEY)
+    if (raw === '1') return true
+    if (raw === '0') return false
+  } catch { /* ignore */ }
+  return false
+}
 
 function readStoredWidth(): number {
   try {
@@ -127,7 +145,11 @@ function readTabState(): TabState {
 }
 
 function DockShell(): ReactNode {
-  const [open, setOpen] = useState(() => dockStore.getSnapshot().boards.some(b => b.tiles.length > 0))
+  const [open, setOpen] = useState(readOpenState)
+  // issue 3（B 方案）：展开/收起态持久化——记住上次离开状态
+  useEffect(() => {
+    try { localStorage.setItem(OPEN_KEY, open ? '1' : '0') } catch { /* ignore */ }
+  }, [open])
   const [version, setVersion] = useState(0)
   const [width, setWidth] = useState(readStoredWidth)
   const [tabState, setTabState] = useState<TabState>(readTabState)
@@ -290,56 +312,52 @@ function DockShell(): ReactNode {
     setToast(`已固定「${component.title}」到当前看板`)
   }
 
-  const railApps: RailAppItem[] = apps.map(a => ({
-    id: a.id,
-    name: a.name,
-    kind: a.kind,
-    apiTone: a.apis.some(x => x.status === 'warn') ? 'warn' : 'ok',
-    hint: `${a.components.length} 组件 · ${a.apis.length} API`,
-  }))
-
   return (
     <>
       <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={totalTiles} right={toggleRight} />
       <DockHost open={open} width={width} onWidthChange={(w) => { setWidth(w); try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ } }}>
-        <div style={{ display: 'flex', height: '100%', minWidth: 0 }} data-dock-version={version}>
-          <RailNav
-            tab={tabState.tab}
-            onTabChange={persistTab}
-            apps={railApps}
-            selectedAppId={selectedApp?.id ?? null}
-            onOpenApp={openApp}
-            boards={state.boards}
-            activeBoardId={state.activeBoardId}
-            onSelectBoard={id => dockStore.setActiveBoard(id)}
-            onAddBoard={addBoard}
-            onRenameBoard={(id, name) => dockStore.renameBoard(id, name)}
-            onRemoveBoard={removeBoard}
-            width={railWidth}
-            onWidthChange={setRailWidth}
-            onWidthCommit={commitRailWidth}
-          />
-          {tabState.tab === 'board' ? <DockBoardView onCollapse={() => setOpen(false)} /> : (
-            <section className="d2-apps">
-              {panelsMissing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }} data-dock-version={version}>
+          {/* 顶栏（0.8.0 issue 2：收起按钮随展开态常驻；tab 段控取代 rail 的 APP 入口） */}
+          <header className="d2-topbar">
+            <div className="d2-topbar-seg" role="tablist" aria-label="工作台视图切换">
+              <button type="button" role="tab" aria-selected={tabState.tab === 'board'} className={tabState.tab === 'board' ? 'on' : ''} onClick={() => persistTab('board')}>
+                <icons.board size={13} /> 看板
+              </button>
+              <button type="button" role="tab" aria-selected={tabState.tab === 'apps'} className={tabState.tab === 'apps' ? 'on' : ''} onClick={() => persistTab('apps')}>
+                <icons.apps size={13} /> APP
+              </button>
+            </div>
+            <span className="d2-topbar-spacer" />
+            <button type="button" className="d2-collapse-btn" title="收起工作台（tile 保留，再点右上角 📌 展开）" onClick={() => setOpen(false)}>
+              <icons.chevronR size={14} /> 收起
+            </button>
+          </header>
+          <div style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0 }}>
+            <RailNav
+              tab={tabState.tab}
+              onTabChange={persistTab}
+              boards={state.boards}
+              activeBoardId={state.activeBoardId}
+              onSelectBoard={id => dockStore.setActiveBoard(id)}
+              onAddBoard={addBoard}
+              onRenameBoard={(id, name) => dockStore.renameBoard(id, name)}
+              onRemoveBoard={removeBoard}
+              width={railWidth}
+              onWidthChange={setRailWidth}
+              onWidthCommit={commitRailWidth}
+            />
+            {tabState.tab === 'board' ? <DockBoardView /> : (
+              panelsMissing ? (
                 <div className="d2-empty-note" style={{ margin: 'auto' }}>
                   <div style={{ fontSize: 22, opacity: 0.6 }}>🧩</div>
                   <div>APP 注册表不可用</div>
                   <div className="d2-tcap">安装 / 启用 @openloop/dsh-panels 后，这里可以浏览和固定组件</div>
                 </div>
-              ) : selectedApp === undefined ? (
-                <div className="d2-empty-note" style={{ margin: 'auto' }}>
-                  <div style={{ fontSize: 22, opacity: 0.6 }}>🧩</div>
-                  <div>暂无 APP</div>
-                </div>
               ) : (
-                <>
-                  <AppListPanel apps={apps} selectedAppId={selectedApp.id} onSelect={openApp} />
-                  <AppDetail app={selectedApp} pinnedIds={pinnedIds} onPin={pinComponent} />
-                </>
-              )}
-            </section>
-          )}
+                <AppsTab apps={apps} selectedAppId={selectedApp?.id ?? null} onOpenApp={openApp} pinnedIds={pinnedIds} onPin={pinComponent} />
+              )
+            )}
+          </div>
         </div>
       </DockHost>
       {toast !== null ? <div className="d2-toast">{toast}</div> : null}

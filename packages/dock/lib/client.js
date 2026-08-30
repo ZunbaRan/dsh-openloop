@@ -4938,6 +4938,14 @@ window.__ModuleLoader__.load({
 					"M3 17l3 3 3-3",
 					"M6 18V4"
 				]
+			}),
+			info: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: [
+					"M12 21a9 9 0 100-18 9 9 0 000 18z",
+					"M12 11v6",
+					"M12 7.5v.01"
+				]
 			})
 		};
 		//#endregion
@@ -5269,7 +5277,7 @@ window.__ModuleLoader__.load({
 				scope: getScope()
 			});
 		}
-		function DockBoardView({ onCollapse }) {
+		function DockBoardView() {
 			const { width, containerRef, mounted } = useContainerWidth();
 			const state = dockStore.getSnapshot();
 			const board = state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0];
@@ -5323,38 +5331,28 @@ window.__ModuleLoader__.load({
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "d2-actions",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-									type: "button",
-									className: "d2-ghost-btn",
-									title: "重力紧凑：消除空洞，保持相对顺序",
-									onClick: () => dockStore.compact(),
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.sort, { size: 13 }), " 整理"]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-									type: "button",
-									className: confirmingClear ? "d2-ghost-btn danger" : "d2-ghost-btn",
-									title: confirmingClear ? "再次点击确认清空当前页 tile" : "清空当前页 tile（其他看板页不受影响）",
-									onClick: () => {
-										if (confirmingClear) {
-											dockStore.clear();
-											setConfirmingClear(false);
-										} else setConfirmingClear(true);
-									},
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.trash, { size: 13 }),
-										" ",
-										confirmingClear ? "确认清空？" : "清空"
-									]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									className: "d2-ghost-btn",
-									title: "收起 Dock（tile 保留，再点右上角 📌 展开）",
-									onClick: onCollapse,
-									children: "收起"
-								})
-							]
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								type: "button",
+								className: "d2-ghost-btn",
+								title: "重力紧凑：消除空洞，保持相对顺序",
+								onClick: () => dockStore.compact(),
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.sort, { size: 13 }), " 整理"]
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								type: "button",
+								className: confirmingClear ? "d2-ghost-btn danger" : "d2-ghost-btn",
+								title: confirmingClear ? "再次点击确认清空当前页 tile" : "清空当前页 tile（其他看板页不受影响）",
+								onClick: () => {
+									if (confirmingClear) {
+										dockStore.clear();
+										setConfirmingClear(false);
+									} else setConfirmingClear(true);
+								},
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.trash, { size: 13 }),
+									" ",
+									confirmingClear ? "确认清空？" : "清空"
+								]
+							})]
 						})
 					]
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -5421,36 +5419,6 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region src/client/badges.tsx
-		const KIND_LABEL = {
-			builtin: "内置",
-			thirdparty: "第三方",
-			local: "自研"
-		};
-		function KindBadge({ kind, label }) {
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: `d2-badge ${kind}`,
-				children: label ?? KIND_LABEL[kind]
-			});
-		}
-		function TypeBadge({ type }) {
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: "d2-badge kind",
-				children: type
-			});
-		}
-		function AppIcon({ app, size = 28 }) {
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				className: `d2-app-icon ${app.kind}`,
-				style: size !== 28 ? {
-					width: size,
-					height: size,
-					fontSize: Math.round(size * .46)
-				} : void 0,
-				children: app.name.slice(0, 1)
-			});
-		}
-		//#endregion
 		//#region src/client/drag-resize.ts
 		function dragResize(e, startW, min, max, onLive, onDone) {
 			e.preventDefault();
@@ -5473,7 +5441,7 @@ window.__ModuleLoader__.load({
 		const RAIL_EXPAND_THRESHOLD = 100;
 		const RAIL_DRAG_MAX = 260;
 		function RailNav(props) {
-			const { tab, onTabChange, apps, selectedAppId, onOpenApp, boards, activeBoardId } = props;
+			const { tab, onTabChange, boards, activeBoardId } = props;
 			const { onSelectBoard, onAddBoard, onRenameBoard, onRemoveBoard } = props;
 			const { width, onWidthChange, onWidthCommit } = props;
 			const expanded = width >= RAIL_EXPAND_THRESHOLD;
@@ -5503,111 +5471,63 @@ window.__ModuleLoader__.load({
 				className: `d2-rail${expanded ? " d2-expanded" : ""}${dragging ? " d2-dragging" : ""}`,
 				style: { width },
 				"aria-label": "Dock 导航",
-				children: [expanded ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-rail-sec",
-						children: ["工作台", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							className: "d2-sec-add",
-							title: "新增看板页",
-							onClick: onAddBoard,
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
-						})]
-					}),
-					boards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-						className: "d2-board-rename d2-rail-rename",
-						autoFocus: true,
-						defaultValue: b.name,
-						size: Math.max(4, b.name.length + 2),
-						"aria-label": "重命名看板页",
-						onBlur: (e) => commitRename(b.id, e.target.value),
-						onKeyDown: (e) => onRenameKeyDown(e, b.id)
-					}, b.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+				children: [expanded ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-rail-sec",
+					children: ["工作台", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 						type: "button",
-						className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
-						onClick: () => openBoard(b.id),
-						onDoubleClick: () => setEditingBoard(b.id),
-						title: "双击重命名",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 14 }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "d2-lbl",
-								children: b.name
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "d2-cnt",
-								children: b.tiles.length
-							}),
-							boards.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								role: "button",
-								"aria-label": `删除 ${b.name}`,
-								title: "删除此页",
-								onClick: (e) => {
-									e.stopPropagation();
-									onRemoveBoard(b.id);
-								},
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.x, { size: 9 })
-							}) : null
-						]
-					}, b.id)),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "d2-rail-sec",
-						children: "APP"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "d2-rail-apps",
-						children: apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-							type: "button",
-							className: `d2-rail-app${tab === "apps" && a.id === selectedAppId ? " on" : ""}`,
-							onClick: () => onOpenApp(a.id),
-							title: a.hint,
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
-									app: a,
-									size: 22
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "d2-lbl",
-									children: a.name
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.apiTone}` })
-							]
-						}, a.id))
-					})
-				] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: `d2-rail-tab${tab === "board" ? " on" : ""}`,
-						title: "看板",
-						onClick: () => onTabChange("board"),
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 17 })
-					}),
-					boards.map((b) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: `d2-rail-mini${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
-						title: b.name,
-						onClick: () => openBoard(b.id),
-						children: b.name.slice(0, 1)
-					}, b.id)),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { className: "d2-rail-sep" }),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: `d2-rail-tab${tab === "apps" ? " on" : ""}`,
-						title: "APP",
-						onClick: () => onTabChange("apps"),
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.apps, { size: 17 })
-					}),
-					apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: `d2-rail-mini${tab === "apps" && a.id === selectedAppId ? " on" : ""}`,
-						title: a.name,
-						onClick: () => onOpenApp(a.id),
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
-							app: a,
-							size: 16
-						})
-					}, a.id))
-				] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-sec-add",
+						title: "新增看板页",
+						onClick: onAddBoard,
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
+					})]
+				}), boards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					className: "d2-board-rename d2-rail-rename",
+					autoFocus: true,
+					defaultValue: b.name,
+					size: Math.max(4, b.name.length + 2),
+					"aria-label": "重命名看板页",
+					onBlur: (e) => commitRename(b.id, e.target.value),
+					onKeyDown: (e) => onRenameKeyDown(e, b.id)
+				}, b.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+					type: "button",
+					className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
+					onClick: () => openBoard(b.id),
+					onDoubleClick: () => setEditingBoard(b.id),
+					title: "双击重命名",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 14 }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-lbl",
+							children: b.name
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-cnt",
+							children: b.tiles.length
+						}),
+						boards.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							role: "button",
+							"aria-label": `删除 ${b.name}`,
+							title: "删除此页",
+							onClick: (e) => {
+								e.stopPropagation();
+								onRemoveBoard(b.id);
+							},
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.x, { size: 9 })
+						}) : null
+					]
+				}, b.id))] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: `d2-rail-tab${tab === "board" ? " on" : ""}`,
+					title: "看板",
+					onClick: () => openBoard(activeBoardId),
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 17 })
+				}), boards.map((b) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					className: `d2-rail-mini${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
+					title: b.name,
+					onClick: () => openBoard(b.id),
+					children: b.name.slice(0, 1)
+				}, b.id))] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "d2-resize-h",
 					role: "separator",
 					"aria-orientation": "vertical",
@@ -5615,301 +5535,6 @@ window.__ModuleLoader__.load({
 					title: "拖动调宽（≥100px 变中枢态，双击快捷切换）",
 					onPointerDown: onHandleDown,
 					onDoubleClick: () => onWidthCommit(expanded ? 52 : 216)
-				})]
-			});
-		}
-		//#endregion
-		//#region src/client/AppListPanel.tsx
-		/**
-		* APP tab：左侧 AppListPanel 侧栏 + 右侧 AppDetail 详情（原型 direction-a.jsx
-		* apps 段直搬 + TS 化，类名 d2- 前缀，样式见 v2-styles.ts）。
-		*
-		* - 侧栏三交互（M2 验收点）：拖宽（190–420，连续值）/ 收起（48px 图标条）/ 列表↔卡片视图
-		* - UI 态持久化 openloop.dock.app-panel.v1：{ width, collapsed, view }（不进 dockStore）
-		* - 详情：组件资源（pin 到当前看板页）/ API 资源（状态点 + 鉴权徽章）
-		* - pin = 以示例 props 建一个面板实例（app-registry.buildPanelMetaForComponent），
-		*   pin 后由父层跳回看板 tab（验收点：pin 后 tile 出现）
-		*/
-		const PANEL_UI_KEY = "openloop.dock.app-panel.v1";
-		const DEFAULT_WIDTH$1 = 230;
-		const MIN_WIDTH = 190;
-		const MAX_WIDTH = 420;
-		function readPanelUi() {
-			try {
-				const raw = localStorage.getItem(PANEL_UI_KEY);
-				if (raw === null) return {
-					width: DEFAULT_WIDTH$1,
-					collapsed: false,
-					view: "card"
-				};
-				const p = JSON.parse(raw);
-				return {
-					width: typeof p.width === "number" ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(p.width))) : DEFAULT_WIDTH$1,
-					collapsed: p.collapsed === true,
-					view: p.view === "list" ? "list" : "card"
-				};
-			} catch {
-				return {
-					width: DEFAULT_WIDTH$1,
-					collapsed: false,
-					view: "card"
-				};
-			}
-		}
-		function writePanelUi(state) {
-			try {
-				localStorage.setItem(PANEL_UI_KEY, JSON.stringify(state));
-			} catch {}
-		}
-		function AppListPanel({ apps, selectedAppId, onSelect }) {
-			const [ui, setUi] = (0, react.useState)(readPanelUi);
-			const [query, setQuery] = (0, react.useState)("");
-			const [dragging, setDragging] = (0, react.useState)(false);
-			const update = (patch) => {
-				const next = {
-					...ui,
-					...patch
-				};
-				setUi(next);
-				writePanelUi(next);
-			};
-			const filtered = query.trim() === "" ? apps : apps.filter((a) => a.name.toLowerCase().includes(query.trim().toLowerCase()));
-			const onHandleDown = (e) => {
-				setDragging(true);
-				dragResize(e, ui.width, MIN_WIDTH, MAX_WIDTH, (w) => setUi((u) => ({
-					...u,
-					width: w
-				})), (w) => {
-					setDragging(false);
-					const next = {
-						...ui,
-						width: Math.round(w)
-					};
-					setUi(next);
-					writePanelUi(next);
-				});
-			};
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("aside", {
-				className: `d2-app-list${ui.collapsed ? " collapsed" : ""}${dragging ? " d2-dragging" : ""}`,
-				style: ui.collapsed ? void 0 : { width: ui.width },
-				children: ui.collapsed ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "d2-list-head",
-					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "d2-collapse-btn",
-						title: "展开 APP 列表",
-						onClick: () => update({ collapsed: false }),
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronR, { size: 14 })
-					})
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "d2-rows",
-					children: apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: `d2-app-mini${a.id === selectedAppId ? " on" : ""}`,
-						title: a.name,
-						onClick: () => {
-							onSelect(a.id);
-							update({ collapsed: false });
-						},
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
-							app: a,
-							size: 22
-						})
-					}, a.id))
-				})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-list-head",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "d2-search-input",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.search, { size: 13 }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-									placeholder: "搜索 APP",
-									"aria-label": "搜索 APP",
-									value: query,
-									onChange: (e) => setQuery(e.target.value)
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "d2-view-seg",
-								role: "group",
-								"aria-label": "列表视图切换",
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									className: ui.view === "list" ? "on" : "",
-									title: "列表视图",
-									onClick: () => update({ view: "list" }),
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.list, { size: 13 })
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									className: ui.view === "card" ? "on" : "",
-									title: "卡片视图",
-									onClick: () => update({ view: "card" }),
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.grid, { size: 13 })
-								})]
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								className: "d2-collapse-btn",
-								title: "收起",
-								onClick: () => update({ collapsed: true }),
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronL, { size: 14 })
-							})
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-rows",
-						children: [filtered.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-							type: "button",
-							className: `d2-app-row${ui.view === "list" ? " compact" : ""}${a.id === selectedAppId ? " on" : ""}`,
-							onClick: () => onSelect(a.id),
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "d2-meta",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "d2-name",
-										children: a.name
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "d2-sub",
-										children: [
-											a.components.length,
-											" 组件 · ",
-											a.apis.length,
-											" API"
-										]
-									})]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
-							]
-						}, a.id)), filtered.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "d2-app-empty",
-							children: "无匹配 APP"
-						}) : null]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						className: "d2-resize-h",
-						role: "separator",
-						"aria-orientation": "vertical",
-						"aria-label": "调整 APP 列表宽度",
-						title: "拖动调整宽度",
-						onPointerDown: onHandleDown
-					})
-				] })
-			});
-		}
-		function AppDetail({ app, pinnedIds, onPin }) {
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				className: "d2-app-detail",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
-					className: "d2-app-detail-head",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
-							app,
-							size: 36
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "d2-title-block",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h2", { children: [
-								app.name,
-								" ",
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "d2-ver",
-									children: ["v", app.version]
-								})
-							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "d2-desc",
-								children: app.desc
-							})]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
-					]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d2-resource-groups",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
-						className: "d2-resource-group",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-badge kind",
-							children: app.components.length
-						})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "d2-resource-list",
-							children: app.components.map((c) => {
-								const pinned = pinnedIds.has(c.id);
-								return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									className: `d2-resource-row${pinned ? " pinned" : ""}`,
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "d2-meta",
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "d2-name",
-												children: c.title
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "d2-rid",
-												children: c.id
-											})]
-										}),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "d2-rowdesc",
-											children: c.desc
-										}),
-										c.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-											type: "button",
-											className: "d2-ghost-btn d2-pin-btn",
-											title: pinned ? "已在看板" : "固定到看板",
-											onClick: () => onPin(app, c),
-											children: [pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.check, { size: 13 }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), pinned ? "已固定" : "固定"]
-										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "d2-pin-locked",
-											title: "该组件的 entry 无可渲染面板——让 Agent 经 app_backend 重新注册，entry 内联完整 PanelDefinition（entry: { panel: {...} }），文件路径无效",
-											children: "待生成"
-										})
-									]
-								}, c.id);
-							})
-						})]
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
-						className: "d2-resource-group",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-badge kind",
-							children: app.apis.length
-						})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							className: "d2-resource-list",
-							children: app.apis.map((api) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "d2-resource-row",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: `d2-dot ${api.status}`,
-										title: api.status === "ok" ? "已配置" : "需要注意"
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "d2-meta",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "d2-name",
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "d2-mono",
-												children: api.path
-											})
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "d2-rid",
-											children: [
-												api.domain,
-												" · ",
-												api.id
-											]
-										})]
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "d2-rowdesc",
-										children: api.summary
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "d2-badge kind",
-										children: api.auth === "key" ? "key + 域名" : "无鉴权"
-									})
-								]
-							}, api.id))
-						})]
-					})]
 				})]
 			});
 		}
@@ -6524,6 +6149,670 @@ window.__ModuleLoader__.load({
 			return null;
 		}
 		//#endregion
+		//#region src/client/badges.tsx
+		const KIND_LABEL = {
+			builtin: "内置",
+			thirdparty: "第三方",
+			local: "自研"
+		};
+		function KindBadge({ kind, label }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: `d2-badge ${kind}`,
+				children: label ?? KIND_LABEL[kind]
+			});
+		}
+		function TypeBadge({ type }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: "d2-badge kind",
+				children: type
+			});
+		}
+		function AppIcon({ app, size = 28 }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				className: `d2-app-icon ${app.kind}`,
+				style: size !== 28 ? {
+					width: size,
+					height: size,
+					fontSize: Math.round(size * .46)
+				} : void 0,
+				children: app.name.slice(0, 1)
+			});
+		}
+		//#endregion
+		//#region src/client/AppListPanel.tsx
+		/**
+		* APP tab 三列结构（0.8.0 三列重构，2026-08-30；原型 designs/dock-app-redesign 已批准）：
+		* - col1 AppListPanel：富状态 APP 行（图标/名称/资源计数/来源徽标/连接状态点）
+		* - col2 AppResourceList：选中 APP 的资源列表（顶部默认「详情」行 + 组件/API 分组）
+		* - col3 AppDetailPane：详情（原 AppDetail 直搬）/ 组件预览（免 pin 选中即看）/ API 详情
+		*
+		* 旧版（rail APP 分区 + 230px 侧栏 + 详情两列）废止：APP 入口收敛到 col1，
+		* rail 只留看板页；预览复用 tile 渲染链（PanelSurface / McpAppResourceView）。
+		*/
+		/** MCP server 连接态（/openloop/mcp/servers；mcp bundle 未装时恒为空 map → 回退 API 健康态） */
+		function useMcpServerStates() {
+			const [states, setStates] = (0, react.useState)(() => /* @__PURE__ */ new Map());
+			(0, react.useEffect)(() => {
+				let cancelled = false;
+				const load = () => {
+					fetch("/openloop/mcp/servers", { credentials: "same-origin" }).then((res) => {
+						if (!res.ok) return null;
+						return (res.headers.get("content-type") ?? "").includes("application/json") ? res.json() : null;
+					}).then((body) => {
+						if (cancelled) return;
+						const servers = body?.servers;
+						if (!Array.isArray(servers)) return;
+						const map = /* @__PURE__ */ new Map();
+						for (const s of servers) {
+							const entry = s;
+							if (typeof entry?.id === "string" && typeof entry?.state === "string") map.set(entry.id, entry.state);
+						}
+						setStates(map);
+					}).catch(() => void 0);
+				};
+				load();
+				const timer = setInterval(load, 6e4);
+				return () => {
+					cancelled = true;
+					clearInterval(timer);
+				};
+			}, []);
+			return states;
+		}
+		function toneOfApp(app, mcpStates) {
+			const state = mcpStates.get(app.id);
+			if (state !== void 0) {
+				if (state === "connected" || state === "connecting") return "ok";
+				if (state === "error" || state === "disconnected") return "warn";
+				return "off";
+			}
+			return app.apis.some((x) => x.status === "warn") ? "warn" : "ok";
+		}
+		function AppListPanel({ apps, selectedAppId, onSelect, toneOf }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+				className: "d2-applist",
+				"aria-label": "APP 列表",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-col-head",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						className: "d2-tcap",
+						children: apps.length
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					className: "d2-rows",
+					children: apps.map((a) => {
+						const tone = toneOf(a);
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: `d2-app-row${a.id === selectedAppId ? " on" : ""}`,
+							onClick: () => onSelect(a.id),
+							title: tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : void 0,
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "d2-meta",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-name",
+										children: a.name
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "d2-sub",
+										children: [
+											a.components.length,
+											" 组件 · ",
+											a.apis.length,
+											" API ",
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
+										]
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-status",
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` })
+								})
+							]
+						}, a.id);
+					})
+				})]
+			});
+		}
+		function AppResourceList({ app, selection, onSelect, pinnedIds }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+				className: "d2-rescol",
+				"aria-label": "资源列表",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-rescol-head",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+							app,
+							size: 24
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-rescol-name",
+							children: app.name
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-rescol-kind",
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-rescol-rows",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: `d2-detail-row${selection.kind === "detail" ? " on" : ""}`,
+							onClick: () => onSelect({ kind: "detail" }),
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-di",
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.info, { size: 13 })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-lbl",
+									children: "详情"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-hint",
+									children: "应用概览"
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+							className: "d2-resource-group",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-badge kind",
+								children: app.components.length
+							})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-resource-list",
+								children: [app.components.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-resource-row",
+									style: {
+										color: "var(--dsw-alias-label-caption, #888)",
+										fontSize: 11.5,
+										cursor: "default"
+									},
+									children: "暂无组件资源"
+								}) : null, app.components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
+									onClick: () => onSelect({
+										kind: "component",
+										rid: c.id
+									}),
+									title: "选中后在右侧预览",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "d2-meta",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "d2-name",
+												children: c.title
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "d2-rid",
+												children: c.id
+											})]
+										}),
+										pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-pin-dot",
+											title: "已固定到看板",
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "d2-dot ok" })
+										}) : null
+									]
+								}, c.id))]
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+							className: "d2-resource-group",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-badge kind",
+								children: app.apis.length
+							})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-resource-list",
+								children: [app.apis.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-resource-row",
+									style: {
+										color: "var(--dsw-alias-label-caption, #888)",
+										fontSize: 11.5,
+										cursor: "default"
+									},
+									children: "暂无 API 资源"
+								}) : null, app.apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
+									onClick: () => onSelect({
+										kind: "api",
+										rid: a.id
+									}),
+									title: "选中后在右侧查看详情",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "d2-meta",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "d2-name",
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "d2-mono",
+												children: a.path
+											})
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "d2-rid",
+											children: [
+												a.domain,
+												" · ",
+												a.id
+											]
+										})]
+									})]
+								}, a.id))]
+							})]
+						})
+					]
+				})]
+			});
+		}
+		function AppDetail({ app, pinnedIds, onPin, onSelectComponent }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "d2-app-detail",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+					className: "d2-app-detail-head",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+							app,
+							size: 36
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-title-block",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h2", { children: [
+								app.name,
+								" ",
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "d2-ver",
+									children: ["v", app.version]
+								})
+							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-desc",
+								children: app.desc
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-resource-groups",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+						className: "d2-resource-group",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-badge kind",
+							children: app.components.length
+						})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "d2-resource-list",
+							children: app.components.map((c) => {
+								const pinned = pinnedIds.has(c.id);
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: `d2-resource-row${pinned ? " pinned" : ""}${onSelectComponent !== void 0 ? " d2-row-selectable" : ""}`,
+									onClick: onSelectComponent !== void 0 ? () => onSelectComponent(c) : void 0,
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "d2-meta",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "d2-name",
+												children: c.title
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												className: "d2-rid",
+												children: c.id
+											})]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-rowdesc",
+											children: c.desc
+										}),
+										c.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+											type: "button",
+											className: "d2-ghost-btn d2-pin-btn",
+											title: pinned ? "已在看板" : "固定到看板",
+											onClick: (e) => {
+												e.stopPropagation();
+												onPin(app, c);
+											},
+											children: [pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.check, { size: 13 }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), pinned ? "已固定" : "固定"]
+										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-pin-locked",
+											title: "该组件的 entry 无可渲染面板——让 Agent 经 app_backend 重新注册，entry 内联完整 PanelDefinition（entry: { panel: {...} }），文件路径无效",
+											children: "待生成"
+										})
+									]
+								}, c.id);
+							})
+						})]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+						className: "d2-resource-group",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-badge kind",
+							children: app.apis.length
+						})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							className: "d2-resource-list",
+							children: app.apis.map((api) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-resource-row",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: `d2-dot ${api.status}`,
+										title: api.status === "ok" ? "已配置" : "需要注意"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										className: "d2-meta",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											className: "d2-name",
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "d2-mono",
+												children: api.path
+											})
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											className: "d2-rid",
+											children: [
+												api.domain,
+												" · ",
+												api.id
+											]
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-rowdesc",
+										children: api.summary
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-badge kind",
+										children: api.auth === "key" ? "key + 域名" : "无鉴权"
+									})
+								]
+							}, api.id))
+						})]
+					})]
+				})]
+			});
+		}
+		function ComponentPreview({ app, comp, pinned, onPin, tone }) {
+			const source = buildTileSourceForComponent(comp);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "d2-detailpane",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-preview-head",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: comp.type }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-meta",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-name",
+								children: comp.title
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-rid",
+								children: comp.id
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-mode-badge d2-badge kind",
+							children: "预览"
+						}),
+						comp.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: `d2-pin-primary${pinned ? " pinned" : ""}`,
+							onClick: onPin,
+							children: pinned ? "✓ 已固定到看板" : "固定到看板"
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-pin-locked",
+							children: "待生成"
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-preview-canvas",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-preview-note",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` }), tone === "warn" ? "MCP server 当前不可达——pin 后 tile 会显示可重试错误态（惰性重连自愈）" : tone === "off" ? "MCP server 已关闭" : comp.type === "mcp-app" ? `来自 ${app.name} · 渲染时经 refresh 端点取数（沙箱）` : `来自 ${app.name} · 宿主车道渲染`]
+					}), source === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-empty-note",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: {
+									fontSize: 22,
+									opacity: .6
+								},
+								children: "🧩"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "暂无可渲染内容" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-tcap",
+								children: "让 Agent 经 app_backend 生成内容后重新注册"
+							})
+						]
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-frame",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-frame-bar",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "d2-fdots",
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {})
+								]
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: source.kind === "mcp-app" ? "opaque-origin 沙箱 · AppBridge" : "panel 宿主车道" })]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-frame-body",
+							children: [source.kind === "panel" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelPreviewBody, { meta: source.meta }) : null, source.kind === "mcp-app" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppPreviewBody, { comp }) : null]
+						})]
+					})]
+				})]
+			});
+		}
+		function PanelPreviewBody({ meta }) {
+			const panels = getPanelsClient();
+			if (panels === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+				what: "APP 组件预览",
+				dep: "@openloop/dsh-panels"
+			});
+			const PanelSurface = panels.PanelSurface;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta });
+		}
+		function McpAppPreviewBody({ comp }) {
+			const mcpApps = getMcpAppsClient();
+			if (mcpApps === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+				what: "APP MCP 组件预览",
+				dep: "@openloop/dsh-mcp"
+			});
+			const McpAppResourceView = mcpApps.McpAppResourceView;
+			const reference = buildTileSourceForComponent(comp);
+			if (reference === null || reference.kind !== "mcp-app") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				className: "d2-empty-note",
+				children: "MCP App 引用形态无效"
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppResourceView, {
+				serverId: reference.meta.serverId,
+				toolName: reference.meta.toolName,
+				resourceUri: reference.meta.resourceUri,
+				title: comp.title,
+				frameId: `app-preview-${comp.id}`
+			});
+		}
+		function ApiDetail({ app, api }) {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "d2-detailpane",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-preview-head",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${api.status}` }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-meta",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-name",
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-mono",
+									children: api.path
+								})
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								className: "d2-rid",
+								children: api.id
+							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-mode-badge d2-badge kind",
+							children: "API 详情"
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					className: "d2-preview-canvas",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-preview-note",
+						children: "凭据只写不读——此处仅显示配置状态；key 经 set_api_key 服务端存储，任何途径不可取回。"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-api-card",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-api-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-k",
+									children: "归属 APP"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-v plain",
+									children: app.name
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-api-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-k",
+									children: "域名"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-v",
+									children: api.domain
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-api-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-k",
+									children: "路径"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-v",
+									children: api.path
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-api-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-k",
+									children: "鉴权"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-v plain",
+									children: api.auth === "key" ? "API Key（服务端注入，widget 绑定调用时自动带上）" : "无"
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-api-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-k",
+									children: "配置状态"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-v plain",
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: `d2-status-pill ${api.status}`,
+										children: api.status === "ok" ? "● 已配置" : "● 未配置 key"
+									})
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-api-row",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-k",
+									children: "说明"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-v plain",
+									children: api.summary
+								})]
+							})
+						]
+					})]
+				})]
+			});
+		}
+		function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin }) {
+			const mcpStates = useMcpServerStates();
+			const [selection, setSelection] = (0, react.useState)({ kind: "detail" });
+			const app = apps.find((a) => a.id === selectedAppId) ?? apps[0];
+			const appId = app?.id;
+			(0, react.useEffect)(() => {
+				setSelection({ kind: "detail" });
+			}, [appId]);
+			if (app === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				className: "d2-empty-note",
+				style: { margin: "auto" },
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						fontSize: 22,
+						opacity: .6
+					},
+					children: "🧩"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "暂无 APP" })]
+			});
+			const toneOf = (a) => toneOfApp(a, mcpStates);
+			const selectedComp = selection.kind === "component" ? app.components.find((c) => c.id === selection.rid) : void 0;
+			const selectedApi = selection.kind === "api" ? app.apis.find((a) => a.id === selection.rid) : void 0;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+				className: "d2-apps",
+				"data-screen-label": "apps",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppListPanel, {
+						apps,
+						selectedAppId: app.id,
+						onSelect: onOpenApp,
+						toneOf
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppResourceList, {
+						app,
+						selection,
+						onSelect: setSelection,
+						pinnedIds
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							flex: 1,
+							minWidth: 0,
+							minHeight: 0,
+							display: "flex"
+						},
+						children: [
+							selection.kind === "detail" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppDetail, {
+								app,
+								pinnedIds,
+								onPin,
+								onSelectComponent: (c) => setSelection({
+									kind: "component",
+									rid: c.id
+								})
+							}) : null,
+							selection.kind === "component" && selectedComp !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ComponentPreview, {
+								app,
+								comp: selectedComp,
+								pinned: pinnedIds.has(selectedComp.id),
+								onPin: () => onPin(app, selectedComp),
+								tone: toneOf(app)
+							}) : null,
+							selection.kind === "api" && selectedApi !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ApiDetail, {
+								app,
+								api: selectedApi
+							}) : null,
+							selection.kind === "component" && selectedComp === void 0 || selection.kind === "api" && selectedApi === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-empty-note",
+								style: { margin: "auto" },
+								children: ["该资源已不存在（可能被移除）——", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									className: "d2-ghost-btn",
+									onClick: () => setSelection({ kind: "detail" }),
+									children: "回详情"
+								})]
+							}) : null
+						]
+					})
+				]
+			});
+		}
+		//#endregion
 		//#region src/client/backend-sync.ts
 		const BOARDS_URL = "/openloop/app/boards";
 		const FETCH_TIMEOUT_MS = 4e3;
@@ -6790,11 +7079,6 @@ window.__ModuleLoader__.load({
 .d2-rail-row:hover .d2-x { display: inline-flex; }
 .d2-rail-row:hover .d2-cnt { display: none; }
 .d2-rail-row .d2-x:hover { color: var(--dsw-alias-state-error-primary, #d4453a); background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
-.d2-rail-apps { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
-.d2-rail-app { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 8px; text-align: left; background: none; border: 0; cursor: pointer; }
-.d2-rail-app:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
-.d2-rail-app.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
-.d2-rail-app .d2-lbl { flex: 1; min-width: 0; font-size: 12px; color: var(--dsw-alias-label-primary, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- 横向拖拽把手（rail 右缘） ---------- */
 .d2-resize-h { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
@@ -6818,24 +7102,9 @@ window.__ModuleLoader__.load({
 .d2-empty-note { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 20px; color: var(--dsw-alias-label-caption, #888); text-align: center; font-size: 12px; line-height: 1.7; }
 .d2-toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: var(--dsw-alias-tooltip-bg, #43454a); color: var(--dsw-alias-label-primary, #f9fafb); font-size: 12px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 100; pointer-events: none; }
 
-/* ---------- APP tab（M2：侧栏 + 详情，原型 .app-list/.app-detail 段直搬） ---------- */
-.d2-apps { flex: 1; min-width: 0; min-height: 0; display: flex; }
+/* ---------- APP tab 详情视图（col3「详情」态；0.8.0 三列重构后 AppDetail 专用） ---------- */
 
-.d2-app-list { width: 230px; flex-shrink: 0; position: relative; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); }
-.d2-app-list.d2-dragging { transition: none; }
-.d2-app-list .d2-list-head { padding: 10px 10px 8px; display: flex; align-items: center; gap: 6px; }
-.d2-app-list .d2-list-head .d2-search-input { flex: 1; min-width: 0; }
-.d2-app-list .d2-rows { flex: 1; overflow-y: auto; padding: 0 8px 10px; display: flex; flex-direction: column; gap: 2px; }
-
-.d2-search-input { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 8px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, inherit); font-size: 12px; }
-.d2-search-input input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: inherit; font-size: 12px; font-family: inherit; }
-.d2-search-input:focus-within { border-color: var(--dsw-alias-state-business-primary, #4176e6); }
-
-.d2-view-seg { display: flex; border-radius: 7px; background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); padding: 2px; gap: 2px; flex-shrink: 0; }
-.d2-view-seg button { display: flex; align-items: center; padding: 3px 7px; border-radius: 5px; color: var(--dsw-alias-label-tertiary, inherit); background: none; border: 0; cursor: pointer; }
-.d2-view-seg button.on { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, inherit); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
-
-.d2-collapse-btn { display: flex; align-items: center; justify-content: center; padding: 4px; border-radius: 7px; color: var(--dsw-alias-label-tertiary, inherit); flex-shrink: 0; background: none; border: 0; cursor: pointer; }
+.d2-collapse-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 7px; color: var(--dsw-alias-label-tertiary, inherit); flex-shrink: 0; background: none; border: 0; cursor: pointer; font-size: 11.5px; font-family: inherit; }
 .d2-collapse-btn:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); color: var(--dsw-alias-label-primary, inherit); }
 
 .d2-app-row { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 8px; text-align: left; background: none; border: 0; cursor: pointer; }
@@ -6844,15 +7113,8 @@ window.__ModuleLoader__.load({
 .d2-app-row .d2-meta { min-width: 0; flex: 1; }
 .d2-app-row .d2-name { display: block; font-size: 12.5px; color: var(--dsw-alias-label-primary, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .d2-app-row .d2-sub { display: block; font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); margin-top: 1px; }
-.d2-app-row.compact .d2-sub { display: none; }
-.d2-app-empty { padding: 14px 10px; font-size: 11.5px; color: var(--dsw-alias-label-caption, #888); text-align: center; }
 
-.d2-app-list.collapsed { width: 48px; }
-.d2-app-list.collapsed .d2-list-head { padding: 10px 0 4px; justify-content: center; }
-.d2-app-list.collapsed .d2-rows { align-items: center; gap: 4px; padding: 4px 0 10px; }
-.d2-app-mini { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary, inherit); background: none; border: 0; cursor: pointer; }
-.d2-app-mini:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
-.d2-app-mini.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
+.d2-row-selectable { cursor: pointer; }
 
 .d2-app-detail { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; }
 .d2-app-detail-head { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); }
@@ -6875,6 +7137,71 @@ window.__ModuleLoader__.load({
 .d2-resource-row.pinned .d2-pin-btn { opacity: 1; color: var(--dsw-alias-state-success-primary, #22c55e); }
 .d2-pin-locked { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); border: 1px dashed var(--dsw-alias-border-l2, rgba(127,127,127,.25)); border-radius: 6px; padding: 2px 8px; flex-shrink: 0; opacity: .8; }
 .d2-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; }
+
+/* ---------- 0.8.0 顶栏（tab 段控 + 收起；2026-08-30 三列重构 issue 2） ---------- */
+.d2-topbar { height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-1, #fff); }
+.d2-topbar-seg { display: flex; border-radius: 7px; background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); padding: 2px; gap: 2px; }
+.d2-topbar-seg button { display: flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 5px; border: 0; background: none; font-size: 11.5px; color: var(--dsw-alias-label-tertiary, inherit); cursor: pointer; font-family: inherit; }
+.d2-topbar-seg button.on { background: var(--dsw-alias-bg-layer-1, #fff); color: var(--dsw-alias-label-primary, inherit); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.d2-topbar .d2-topbar-spacer { flex: 1; }
+
+/* ---------- 0.8.0 APP tab 三列（col1 APP 列表 / col2 资源列表 / col3 详情预览） ---------- */
+.d2-apps { flex: 1; min-width: 0; min-height: 0; display: flex; }
+
+.d2-applist { width: 240px; flex-shrink: 0; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); min-height: 0; }
+.d2-applist .d2-col-head { padding: 10px 12px 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption, #888); display: flex; align-items: center; justify-content: space-between; }
+.d2-applist .d2-rows { flex: 1; overflow-y: auto; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+.d2-applist .d2-app-row { width: 100%; border: 0; background: none; font-family: inherit; cursor: pointer; }
+.d2-applist .d2-app-row .d2-sub { display: flex; align-items: center; gap: 6px; }
+.d2-applist .d2-app-row .d2-status { margin-left: auto; flex-shrink: 0; }
+
+.d2-rescol { width: 290px; flex-shrink: 0; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); min-height: 0; }
+.d2-rescol-head { padding: 12px 14px 10px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); flex-shrink: 0; }
+.d2-rescol-head .d2-rescol-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.d2-rescol-head .d2-rescol-kind { margin-left: auto; flex-shrink: 0; }
+.d2-rescol-rows { flex: 1; overflow-y: auto; padding: 8px 10px 14px; display: flex; flex-direction: column; gap: 14px; }
+
+.d2-detail-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-2, #f6f6f7); text-align: left; width: 100%; cursor: pointer; font-family: inherit; }
+.d2-detail-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-detail-row.on { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 55%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 25%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 6%, transparent); }
+.d2-detail-row .d2-di { color: var(--dsw-alias-label-secondary, inherit); display: flex; flex-shrink: 0; }
+.d2-detail-row .d2-lbl { flex: 1; font-size: 12.5px; color: var(--dsw-alias-label-primary, inherit); }
+.d2-detail-row .d2-hint { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); flex-shrink: 0; }
+
+.d2-resource-row { cursor: pointer; font-family: inherit; width: 100%; border: 0; }
+.d2-resource-row.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent); box-shadow: inset 2px 0 0 var(--dsw-alias-state-business-primary, #4176e6); }
+.d2-resource-row .d2-pin-dot { flex-shrink: 0; }
+
+.d2-detailpane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); overflow-y: auto; min-height: 0; }
+.d2-preview-head { display: flex; align-items: center; gap: 10px; padding: 13px 18px 11px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); }
+.d2-preview-head .d2-meta { flex: 1; min-width: 0; }
+.d2-preview-head .d2-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); }
+.d2-preview-head .d2-rid { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); font-family: ui-monospace, "SF Mono", Menlo, monospace; margin-top: 1px; }
+.d2-preview-head .d2-mode-badge { margin-left: auto; flex-shrink: 0; }
+.d2-pin-primary { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 50%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent); color: var(--dsw-alias-state-business-primary, #4176e6); font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit; flex-shrink: 0; }
+.d2-pin-primary:hover { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 22%, transparent); }
+.d2-pin-primary.pinned { border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 50%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 10%, transparent); color: var(--dsw-alias-state-success-primary, #22c55e); }
+
+.d2-preview-canvas { padding: 18px 20px 24px; }
+.d2-preview-note { font-size: 11px; color: var(--dsw-alias-label-caption, #888); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.d2-frame { border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); overflow: hidden; }
+.d2-frame-bar { height: 30px; display: flex; align-items: center; gap: 7px; padding: 0 11px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-2, #f6f6f7); font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); }
+.d2-fdots { display: flex; gap: 5px; }
+.d2-fdots i { width: 8px; height: 8px; border-radius: 50%; background: var(--dsw-alias-border-l2, rgba(127,127,127,.18)); }
+.d2-frame-body { padding: 16px; }
+
+.d2-api-card { border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); border-radius: 12px; background: var(--dsw-alias-bg-layer-1, #fff); overflow: hidden; }
+.d2-api-row { display: flex; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); font-size: 12px; }
+.d2-api-row:last-child { border-bottom: 0; }
+.d2-api-row .d2-k { width: 92px; flex-shrink: 0; color: var(--dsw-alias-label-caption, #888); font-size: 11px; padding-top: 1px; }
+.d2-api-row .d2-v { flex: 1; min-width: 0; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11.5px; color: var(--dsw-alias-label-secondary, inherit); word-break: break-all; }
+.d2-api-row .d2-v.plain { font-family: inherit; color: var(--dsw-alias-label-primary, inherit); }
+
+.d2-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11px; }
+.d2-status-pill.ok { color: var(--dsw-alias-state-success-primary, #22c55e); background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 10%, transparent); border: 1px solid color-mix(in srgb, var(--dsw-alias-state-success-primary, #22c55e) 35%, transparent); }
+.d2-status-pill.warn { color: var(--dsw-alias-state-warn-primary, #f59e0b); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 10%, transparent); border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 35%, transparent); }
+
+.d2-dot.off { background: color-mix(in srgb, var(--dsw-alias-label-caption, #888) 45%, transparent); }
 
 /* ---------- M3：后端降级提示条 ---------- */
 .d2-banner { position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%); padding: 7px 14px; border-radius: 9px; background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 12%, var(--dsw-alias-tooltip-bg, #43454a)); color: var(--dsw-alias-label-primary, #f9fafb); font-size: 12px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 45%, transparent); box-shadow: 0 6px 20px rgba(0,0,0,.25); z-index: 100; pointer-events: none; max-width: 80vw; }
@@ -6924,7 +7251,21 @@ window.__ModuleLoader__.load({
 		const WIDTH_KEY = "openloop.dock.width.v1";
 		const RAIL_WIDTH_KEY = "openloop.dock.rail-width.v1";
 		const TAB_KEY = "openloop.dock.tab.v1";
+		const OPEN_KEY = "openloop.dock.open.v1";
 		const DEFAULT_WIDTH = 420;
+		/**
+		* 展开态读取（0.8.0 issue 3：进入 DSH 不再默认展开）：
+		* 有存档按存档（记住上次离开状态）；无存档默认收起。
+		* 旧行为（有 tile 即展开）废止——展开是用户动作，不是启动副作用。
+		*/
+		function readOpenState() {
+			try {
+				const raw = localStorage.getItem(OPEN_KEY);
+				if (raw === "1") return true;
+				if (raw === "0") return false;
+			} catch {}
+			return false;
+		}
 		function readStoredWidth() {
 			try {
 				const raw = localStorage.getItem(WIDTH_KEY);
@@ -6967,7 +7308,12 @@ window.__ModuleLoader__.load({
 			}
 		}
 		function DockShell() {
-			const [open, setOpen] = (0, react.useState)(() => dockStore.getSnapshot().boards.some((b) => b.tiles.length > 0));
+			const [open, setOpen] = (0, react.useState)(readOpenState);
+			(0, react.useEffect)(() => {
+				try {
+					localStorage.setItem(OPEN_KEY, open ? "1" : "0");
+				} catch {}
+			}, [open]);
 			const [version, setVersion] = (0, react.useState)(0);
 			const [width, setWidth] = (0, react.useState)(readStoredWidth);
 			const [tabState, setTabState] = (0, react.useState)(readTabState);
@@ -7133,13 +7479,6 @@ window.__ModuleLoader__.load({
 				});
 				setToast(`已固定「${component.title}」到当前看板`);
 			};
-			const railApps = apps.map((a) => ({
-				id: a.id,
-				name: a.name,
-				kind: a.kind,
-				apiTone: a.apis.some((x) => x.status === "warn") ? "warn" : "ok",
-				hint: `${a.components.length} 组件 · ${a.apis.length} API`
-			}));
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockToggle, {
 					open,
@@ -7159,28 +7498,63 @@ window.__ModuleLoader__.load({
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						style: {
 							display: "flex",
+							flexDirection: "column",
 							height: "100%",
 							minWidth: 0
 						},
 						"data-dock-version": version,
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailNav, {
-							tab: tabState.tab,
-							onTabChange: persistTab,
-							apps: railApps,
-							selectedAppId: selectedApp?.id ?? null,
-							onOpenApp: openApp,
-							boards: state.boards,
-							activeBoardId: state.activeBoardId,
-							onSelectBoard: (id) => dockStore.setActiveBoard(id),
-							onAddBoard: addBoard,
-							onRenameBoard: (id, name) => dockStore.renameBoard(id, name),
-							onRemoveBoard: removeBoard,
-							width: railWidth,
-							onWidthChange: setRailWidth,
-							onWidthCommit: commitRailWidth
-						}), tabState.tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, { onCollapse: () => setOpen(false) }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("section", {
-							className: "d2-apps",
-							children: panelsMissing ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+							className: "d2-topbar",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "d2-topbar-seg",
+									role: "tablist",
+									"aria-label": "工作台视图切换",
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										type: "button",
+										role: "tab",
+										"aria-selected": tabState.tab === "board",
+										className: tabState.tab === "board" ? "on" : "",
+										onClick: () => persistTab("board"),
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 13 }), " 看板"]
+									}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										type: "button",
+										role: "tab",
+										"aria-selected": tabState.tab === "apps",
+										className: tabState.tab === "apps" ? "on" : "",
+										onClick: () => persistTab("apps"),
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.apps, { size: 13 }), " APP"]
+									})]
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "d2-topbar-spacer" }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: "d2-collapse-btn",
+									title: "收起工作台（tile 保留，再点右上角 📌 展开）",
+									onClick: () => setOpen(false),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronR, { size: 14 }), " 收起"]
+								})
+							]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								flex: 1,
+								minHeight: 0,
+								minWidth: 0
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RailNav, {
+								tab: tabState.tab,
+								onTabChange: persistTab,
+								boards: state.boards,
+								activeBoardId: state.activeBoardId,
+								onSelectBoard: (id) => dockStore.setActiveBoard(id),
+								onAddBoard: addBoard,
+								onRenameBoard: (id, name) => dockStore.renameBoard(id, name),
+								onRemoveBoard: removeBoard,
+								width: railWidth,
+								onWidthChange: setRailWidth,
+								onWidthCommit: commitRailWidth
+							}), tabState.tab === "board" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DockBoardView, {}) : panelsMissing ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "d2-empty-note",
 								style: { margin: "auto" },
 								children: [
@@ -7197,25 +7571,13 @@ window.__ModuleLoader__.load({
 										children: "安装 / 启用 @openloop/dsh-panels 后，这里可以浏览和固定组件"
 									})
 								]
-							}) : selectedApp === void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "d2-empty-note",
-								style: { margin: "auto" },
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: {
-										fontSize: 22,
-										opacity: .6
-									},
-									children: "🧩"
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "暂无 APP" })]
-							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppListPanel, {
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppsTab, {
 								apps,
-								selectedAppId: selectedApp.id,
-								onSelect: openApp
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppDetail, {
-								app: selectedApp,
+								selectedAppId: selectedApp?.id ?? null,
+								onOpenApp: openApp,
 								pinnedIds,
 								onPin: pinComponent
-							})] })
+							})]
 						})]
 					})
 				}),

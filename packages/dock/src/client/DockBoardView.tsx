@@ -234,7 +234,7 @@ function TileContent({ tile }: { tile: DockTile }) {
   return <ArtifactFrame meta={tile.source.meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={getScope()} />
 }
 
-export function DockBoardView({ onCollapse }: { onCollapse: () => void }): ReactNode {
+export function DockBoardView(): ReactNode {
   const { width, containerRef, mounted } = useContainerWidth()
   // 每渲染读最新 snapshot（外层 DockShell 的 store 订阅驱动重渲染）
   const state = dockStore.getSnapshot()
@@ -297,7 +297,6 @@ export function DockBoardView({ onCollapse }: { onCollapse: () => void }): React
           >
             <icons.trash size={13} /> {confirmingClear ? '确认清空？' : '清空'}
           </button>
-          <button type="button" className="d2-ghost-btn" title="收起 Dock（tile 保留，再点右上角 📌 展开）" onClick={onCollapse}>收起</button>
         </div>
       </header>
 

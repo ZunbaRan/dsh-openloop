@@ -39,4 +39,5 @@ export const icons = {
   check: (p: IconProps): ReactNode => <I {...p} d={['M20 6L9 17l-5-5']} />,
   trash: (p: IconProps): ReactNode => <I {...p} d={['M3 6h18', 'M8 6V4h8v2', 'M19 6l-1 14H6L5 6']} />,
   sort: (p: IconProps): ReactNode => <I {...p} d={['M11 5h10', 'M11 9h7', 'M11 13h4', 'M3 17l3 3 3-3', 'M6 18V4']} />,
+  info: (p: IconProps): ReactNode => <I {...p} d={['M12 21a9 9 0 100-18 9 9 0 000 18z', 'M12 11v6', 'M12 7.5v.01']} />,
 } as const

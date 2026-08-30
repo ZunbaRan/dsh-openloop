@@ -1,31 +1,20 @@
 /**
- * RailNav：Dock 2.0 左侧导航轨（两态一轨，原型 direction-a.jsx 直搬 + TS 化）。
+ * RailNav：Dock 左侧导航轨（两态一轨，只管看板页；0.8.0 起 APP 分区移除——
+ * APP 导航收敛到顶栏 tab + APP tab 的 col1 富状态列表，消灭两列重合）。
  *
- * - 图标态 52px：看板 tab + 每个看板页 mini icon（页名首字）→ 分隔线 → APP tab + APP mini icon
+ * - 图标态 52px：看板 tab + 每个看板页 mini icon（页名首字）
  * - 中枢态 216px（拖宽 ≥100px 进入，松手吸附 52/216）：「工作台 + ⊕」看板页行
- *   （双击重命名、悬停 × 删除）+「APP」分组行
+ *   （双击重命名、悬停 × 删除）
  * - 右缘 8px 拖拽把手：实时改宽（父层只写 state）；松手吸附后经 onWidthCommit 持久化；
  *   双击把手 52↔216 快捷切换
- * - 导航收口原则（DOCK_V2_FRONTEND_IMPL §1.4）：看板页与 APP 同级，主区无页签条
+ * - tab 切换（看板 ↔ APP）由顶栏段控负责（DockShell），rail 不再承载
  */
 import { useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { icons } from './icons.tsx'
-import { AppIcon, type AppKind } from './badges.tsx'
 import { dragResize } from './drag-resize.ts'
 import type { DockBoardEntry } from './store.ts'
 
 export type DockTab = 'board' | 'apps'
-
-/** rail 行所需的最小 APP 视图模型（M2 由 app-registry 派生；M1 传空数组占位） */
-export interface RailAppItem {
-  id: string
-  name: string
-  kind: AppKind
-  /** API 健康态：任一 API warn 则整行 warn */
-  apiTone: 'ok' | 'warn'
-  /** tooltip 摘要（如「N 组件 · N API」） */
-  hint: string
-}
 
 export const RAIL_ICON_WIDTH = 52
 export const RAIL_HUB_WIDTH = 216
@@ -36,9 +25,6 @@ const RAIL_DRAG_MAX = 260
 export interface RailNavProps {
   tab: DockTab
   onTabChange: (tab: DockTab) => void
-  apps: RailAppItem[]
-  selectedAppId: string | null
-  onOpenApp: (id: string) => void
   boards: DockBoardEntry[]
   activeBoardId: string
   onSelectBoard: (id: string) => void
@@ -54,7 +40,7 @@ export interface RailNavProps {
 }
 
 export function RailNav(props: RailNavProps): ReactNode {
-  const { tab, onTabChange, apps, selectedAppId, onOpenApp, boards, activeBoardId } = props
+  const { tab, onTabChange, boards, activeBoardId } = props
   const { onSelectBoard, onAddBoard, onRenameBoard, onRemoveBoard } = props
   const { width, onWidthChange, onWidthCommit } = props
   const expanded = width >= RAIL_EXPAND_THRESHOLD
@@ -128,26 +114,10 @@ export function RailNav(props: RailNavProps): ReactNode {
               </button>
             )
           ))}
-          <div className="d2-rail-sec">APP</div>
-          <div className="d2-rail-apps">
-            {apps.map(a => (
-              <button
-                type="button"
-                key={a.id}
-                className={`d2-rail-app${tab === 'apps' && a.id === selectedAppId ? ' on' : ''}`}
-                onClick={() => onOpenApp(a.id)}
-                title={a.hint}
-              >
-                <AppIcon app={a} size={22} />
-                <span className="d2-lbl">{a.name}</span>
-                <span className={`d2-dot ${a.apiTone}`} />
-              </button>
-            ))}
-          </div>
         </>
       ) : (
         <>
-          <button type="button" className={`d2-rail-tab${tab === 'board' ? ' on' : ''}`} title="看板" onClick={() => onTabChange('board')}>
+          <button type="button" className={`d2-rail-tab${tab === 'board' ? ' on' : ''}`} title="看板" onClick={() => openBoard(activeBoardId)}>
             <icons.board size={17} />
           </button>
           {boards.map(b => (
@@ -158,21 +128,6 @@ export function RailNav(props: RailNavProps): ReactNode {
               title={b.name}
               onClick={() => openBoard(b.id)}
             >{b.name.slice(0, 1)}</button>
-          ))}
-          <div className="d2-rail-sep" />
-          <button type="button" className={`d2-rail-tab${tab === 'apps' ? ' on' : ''}`} title="APP" onClick={() => onTabChange('apps')}>
-            <icons.apps size={17} />
-          </button>
-          {apps.map(a => (
-            <button
-              type="button"
-              key={a.id}
-              className={`d2-rail-mini${tab === 'apps' && a.id === selectedAppId ? ' on' : ''}`}
-              title={a.name}
-              onClick={() => onOpenApp(a.id)}
-            >
-              <AppIcon app={a} size={16} />
-            </button>
           ))}
         </>
       )}
