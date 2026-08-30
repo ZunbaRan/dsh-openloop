@@ -60,10 +60,12 @@ export const V2_CSS = `
 .d2-rail-row:hover .d2-cnt { display: none; }
 .d2-rail-row .d2-x:hover { color: var(--dsw-alias-state-error-primary, #d4453a); background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
 
-/* ---------- 横向拖拽把手（col 右缘；0.8.3 常驻可见——hover 才显色时用户找不到触发区） ---------- */
-.d2-resize-h { position: absolute; top: 0; right: -5px; width: 10px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
-.d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.35)); transition: background .15s, width .15s; }
-.d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 3px; }
+/* ---------- 横向拖拽把手（col 右缘内侧；0.8.4 常驻 4px 宽条对齐 bsb 手感。
+ *  0.8.3 的 right:-5px 伸出列外——常驻线恰与相邻 border 重合并被下一列内容层盖住，
+ *  导致「没有宽条 + hover 难触发」；收进列内后视觉与命中都确定。） ---------- */
+.d2-resize-h { position: absolute; top: 0; right: 0; width: 12px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+.d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; right: 3px; width: 4px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.3)); transition: background .15s, width .15s; }
+.d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 6px; }
 
 /* ---------- 看板头 ---------- */
 .d2-board-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; flex-shrink: 0; }
