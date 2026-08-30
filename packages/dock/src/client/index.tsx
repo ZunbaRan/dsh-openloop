@@ -41,8 +41,7 @@ export interface DockClientService {
 }
 
 function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
-  // 开态隐藏：面板 board head 自带「收起」按钮（bsb 同款——开着的面板用面板自己的
-  // 关闭控制，不再让浮动按钮遮挡 tile 内容）
+  // 开态隐藏：顶栏自带「收起」按钮（0.8.0 起统一入口）
   const [hover, setHover] = useState(false)
   if (open) return null
   return (
@@ -54,30 +53,34 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'fixed',
-        // top 52 错层（2026-08-24 真机冲突修复）：bsb 的面板开关在 header 行
-        // （y≈3-40），dock toggle 与其垂直错开避免命中冲突。
-        top: 52,
+        // top 12（0.8.2 用户反馈上移）：与 header 行按钮（Session log 下载等）同层，
+        // 不再悬在其下方的尴尬位置。
+        top: 12,
         right,
         zIndex: 2147483100,
         minWidth: 34,
         height: 34,
         padding: '0 8px',
         borderRadius: 10,
-        // 低存在感处理（2026-08-24 对比 bsb）：无阴影、静止半透明，
-        // hover 才完全显现——浮动按钮不该抢视觉
+        // 低存在感处理：无阴影、静止半透明，hover 才完全显现——浮动按钮不该抢视觉
         border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))',
         background: 'var(--dsw-alias-bg-layer-1, #fff)',
         cursor: 'pointer',
-        fontSize: 14,
         lineHeight: 1,
         opacity: hover ? 1 : 0.55,
         transition: 'opacity .15s ease',
         display: 'flex',
         alignItems: 'center',
         gap: 4,
+        color: 'var(--dsw-alias-label-secondary, inherit)',
       }}
     >
-      📌{count > 0 ? <span style={{ fontSize: 10, opacity: 0.7 }}>{count}</span> : null}
+      {/* 0.8.2 icon 替换：📌 emoji → 线性 SVG「右侧分栏面板」（dock 本体形态） */}
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M15 3v18" />
+      </svg>
+      {count > 0 ? <span style={{ fontSize: 10, opacity: 0.7 }}>{count}</span> : null}
     </button>
   )
 }
@@ -86,7 +89,8 @@ const WIDTH_KEY = 'openloop.dock.width.v1'
 const RAIL_WIDTH_KEY = 'openloop.dock.rail-width.v1'
 const TAB_KEY = 'openloop.dock.tab.v1'
 const OPEN_KEY = 'openloop.dock.open.v1'
-const DEFAULT_WIDTH = 420
+/** 默认展开宽（0.8.2：三列 APP tab 的从容布局起步宽——col1 230 + col2 290 + col3 ≥180） */
+const DEFAULT_WIDTH = 720
 
 /**
  * 展开态读取（0.8.0 issue 3：进入 DSH 不再默认展开）：

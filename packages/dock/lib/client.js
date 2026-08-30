@@ -33,13 +33,12 @@ window.__ModuleLoader__.load({
 		let react_dom = require("react-dom");
 		react_dom = __toESM(react_dom, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
-		/** 拖宽上限：跟随视口，封顶 1200px（对齐 bsb 的可拉宽体验） */
+		/** 拖宽上限：视口全宽（2026-08-30 用户要求「想拖多宽就多宽」——满屏是用户的合法选择，不再预设 1200/70vw 封顶） */
 		const dockMaxWidth = () => {
 			const viewport = globalThis.innerWidth;
-			const width = typeof viewport === "number" && Number.isFinite(viewport) ? viewport : void 0;
-			return width === void 0 ? 1200 : Math.min(1200, Math.round(width * .7));
+			return typeof viewport === "number" && Number.isFinite(viewport) ? viewport : 4096;
 		};
-		const clampDockWidth = (value) => Math.max(320, Math.min(dockMaxWidth(), value));
+		const clampDockWidth = (value) => Math.max(560, Math.min(dockMaxWidth(), value));
 		//#endregion
 		//#region src/client/DockHost.tsx
 		/**
@@ -6189,6 +6188,67 @@ window.__ModuleLoader__.load({
 		* 旧版（rail APP 分区 + 230px 侧栏 + 详情两列）废止：APP 入口收敛到 col1，
 		* rail 只留看板页；预览复用 tile 渲染链（PanelSurface / McpAppResourceView）。
 		*/
+		/** col 缩略/拖宽常量（0.8.2 恢复旧侧栏能力：缩略 48px 图标条；拖到 <120px 松手自动缩略） */
+		const COL_COLLAPSED_WIDTH = 48;
+		const COL_COLLAPSE_THRESHOLD = 120;
+		const COL_MIN_EXPANDED = 160;
+		const COL_MAX_EXPANDED = 420;
+		function readColUi(key, fallbackWidth) {
+			try {
+				const raw = localStorage.getItem(key);
+				if (raw === null) return {
+					width: fallbackWidth,
+					collapsed: false
+				};
+				const p = JSON.parse(raw);
+				return {
+					width: typeof p.width === "number" ? Math.min(COL_MAX_EXPANDED, Math.max(COL_MIN_EXPANDED, Math.round(p.width))) : fallbackWidth,
+					collapsed: p.collapsed === true
+				};
+			} catch {
+				return {
+					width: fallbackWidth,
+					collapsed: false
+				};
+			}
+		}
+		function writeColUi(key, state) {
+			try {
+				localStorage.setItem(key, JSON.stringify(state));
+			} catch {}
+		}
+		/** col1/col2 共用的缩略+拖宽 hook（UI 态持久化 localStorage） */
+		function useCollapsibleColumn(key, fallbackWidth) {
+			const [ui, setUi] = (0, react.useState)(() => readColUi(key, fallbackWidth));
+			const update = (patch) => {
+				const next = {
+					...ui,
+					...patch
+				};
+				setUi(next);
+				writeColUi(key, next);
+			};
+			const expand = () => update({ collapsed: false });
+			const collapse = () => update({ collapsed: true });
+			const onHandleDown = (e) => {
+				dragResize(e, ui.collapsed ? COL_COLLAPSED_WIDTH : ui.width, COL_COLLAPSED_WIDTH, COL_MAX_EXPANDED, (w) => setUi((u) => ({
+					...u,
+					width: w
+				})), (w) => {
+					if (w < COL_COLLAPSE_THRESHOLD) update({ collapsed: true });
+					else update({
+						collapsed: false,
+						width: Math.max(COL_MIN_EXPANDED, Math.round(w))
+					});
+				});
+			};
+			return {
+				ui,
+				expand,
+				collapse,
+				onHandleDown
+			};
+		}
 		/** MCP server 连接态（/openloop/mcp/servers；mcp bundle 未装时恒为空 map → 回退 API 健康态） */
 		function useMcpServerStates() {
 			const [states, setStates] = (0, react.useState)(() => /* @__PURE__ */ new Map());
@@ -6229,183 +6289,313 @@ window.__ModuleLoader__.load({
 			return app.apis.some((x) => x.status === "warn") ? "warn" : "ok";
 		}
 		function AppListPanel({ apps, selectedAppId, onSelect, toneOf }) {
+			const { ui, expand, onHandleDown } = useCollapsibleColumn("openloop.dock.apps-col1.v1", 230);
+			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+				className: "d2-applist d2-col-collapsed",
+				"aria-label": "APP 列表（缩略）",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-col-head",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "d2-collapse-btn",
+							title: "展开 APP 列表",
+							onClick: expand,
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronR, { size: 14 })
+						})
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-rows",
+						children: apps.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: `d2-col-mini${a.id === selectedAppId ? " on" : ""}`,
+							title: a.name,
+							onClick: () => {
+								onSelect(a.id);
+								expand();
+							},
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+								app: a,
+								size: 22
+							})
+						}, a.id))
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-resize-h",
+						role: "separator",
+						"aria-orientation": "vertical",
+						title: "拖动调宽（拖到最左变缩略，缩略态向右拖恢复）",
+						onPointerDown: onHandleDown
+					})
+				]
+			});
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-applist",
+				style: { width: ui.width },
 				"aria-label": "APP 列表",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d2-col-head",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						className: "d2-tcap",
-						children: apps.length
-					})]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					className: "d2-rows",
-					children: apps.map((a) => {
-						const tone = toneOf(a);
-						return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-							type: "button",
-							className: `d2-app-row${a.id === selectedAppId ? " on" : ""}`,
-							onClick: () => onSelect(a.id),
-							title: tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : void 0,
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									className: "d2-meta",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "d2-name",
-										children: a.name
-									}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "d2-sub",
-										children: [
-											a.components.length,
-											" 组件 · ",
-											a.apis.length,
-											" API ",
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
-										]
-									})]
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "d2-status",
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` })
-								})
-							]
-						}, a.id);
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-col-head",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							className: "d2-tcap",
+							children: apps.length
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-rows",
+						children: apps.map((a) => {
+							const tone = toneOf(a);
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								type: "button",
+								className: `d2-app-row${a.id === selectedAppId ? " on" : ""}`,
+								onClick: () => onSelect(a.id),
+								title: tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : void 0,
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+										className: "d2-meta",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-name",
+											children: a.name
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "d2-sub",
+											children: [
+												a.components.length,
+												" 组件 · ",
+												a.apis.length,
+												" API ",
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
+											]
+										})]
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-status",
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` })
+									})
+								]
+							}, a.id);
+						})
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-resize-h",
+						role: "separator",
+						"aria-orientation": "vertical",
+						title: "拖动调宽（拖到最左变缩略）",
+						onPointerDown: onHandleDown
 					})
-				})]
+				]
 			});
 		}
 		function AppResourceList({ app, selection, onSelect, pinnedIds }) {
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
-				className: "d2-rescol",
-				"aria-label": "资源列表",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d2-rescol-head",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
-							app,
-							size: 24
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-rescol-name",
-							children: app.name
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-rescol-kind",
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
-						})
-					]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					className: "d2-rescol-rows",
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+			const { ui, expand, onHandleDown } = useCollapsibleColumn("openloop.dock.apps-col2.v1", 290);
+			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+				className: "d2-rescol d2-col-collapsed",
+				"aria-label": "资源列表（缩略）",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-col-head",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
-							className: `d2-detail-row${selection.kind === "detail" ? " on" : ""}`,
-							onClick: () => onSelect({ kind: "detail" }),
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "d2-di",
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.info, { size: 13 })
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "d2-lbl",
-									children: "详情"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									className: "d2-hint",
-									children: "应用概览"
-								})
-							]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
-							className: "d2-resource-group",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "d2-badge kind",
-								children: app.components.length
-							})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "d2-resource-list",
-								children: [app.components.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "d2-resource-row",
-									style: {
-										color: "var(--dsw-alias-label-caption, #888)",
-										fontSize: 11.5,
-										cursor: "default"
-									},
-									children: "暂无组件资源"
-								}) : null, app.components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-									type: "button",
-									className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
-									onClick: () => onSelect({
+							className: "d2-collapse-btn",
+							title: "展开资源列表",
+							onClick: expand,
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.chevronR, { size: 14 })
+						})
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-rescol-rows",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: `d2-col-mini${selection.kind === "detail" ? " on" : ""}`,
+								title: "详情",
+								onClick: () => {
+									onSelect({ kind: "detail" });
+									expand();
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.info, { size: 16 })
+							}),
+							app.components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: `d2-col-mini${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
+								title: c.title,
+								onClick: () => {
+									onSelect({
 										kind: "component",
 										rid: c.id
+									});
+									expand();
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: `badge plain d2-mini-badge`,
+									children: c.type === "mcp-app" ? "mcp" : "pnl"
+								})
+							}, c.id)),
+							app.apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: `d2-col-mini${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
+								title: a.path,
+								onClick: () => {
+									onSelect({
+										kind: "api",
+										rid: a.id
+									});
+									expand();
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` })
+							}, a.id))
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-resize-h",
+						role: "separator",
+						"aria-orientation": "vertical",
+						title: "拖动调宽（拖到最左变缩略，缩略态向右拖恢复）",
+						onPointerDown: onHandleDown
+					})
+				]
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
+				className: "d2-rescol",
+				style: { width: ui.width },
+				"aria-label": "资源列表",
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-rescol-head",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, {
+								app,
+								size: 24
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-rescol-name",
+								children: app.name
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-rescol-kind",
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						className: "d2-rescol-rows",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+								type: "button",
+								className: `d2-detail-row${selection.kind === "detail" ? " on" : ""}`,
+								onClick: () => onSelect({ kind: "detail" }),
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-di",
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.info, { size: 13 })
 									}),
-									title: "选中后在右侧预览",
-									children: [
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
-										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-lbl",
+										children: "详情"
+									}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										className: "d2-hint",
+										children: "应用概览"
+									})
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+								className: "d2-resource-group",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-badge kind",
+									children: app.components.length
+								})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "d2-resource-list",
+									children: [app.components.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "d2-resource-row",
+										style: {
+											color: "var(--dsw-alias-label-caption, #888)",
+											fontSize: 11.5,
+											cursor: "default"
+										},
+										children: "暂无组件资源"
+									}) : null, app.components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										type: "button",
+										className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
+										onClick: () => onSelect({
+											kind: "component",
+											rid: c.id
+										}),
+										title: "选中后在右侧预览",
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "d2-meta",
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+													className: "d2-name",
+													children: c.title
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+													className: "d2-rid",
+													children: c.id
+												})]
+											}),
+											pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "d2-pin-dot",
+												title: "已固定到看板",
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "d2-dot ok" })
+											}) : null
+										]
+									}, c.id))]
+								})]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+								className: "d2-resource-group",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									className: "d2-badge kind",
+									children: app.apis.length
+								})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									className: "d2-resource-list",
+									children: [app.apis.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+										className: "d2-resource-row",
+										style: {
+											color: "var(--dsw-alias-label-caption, #888)",
+											fontSize: 11.5,
+											cursor: "default"
+										},
+										children: "暂无 API 资源"
+									}) : null, app.apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										type: "button",
+										className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
+										onClick: () => onSelect({
+											kind: "api",
+											rid: a.id
+										}),
+										title: "选中后在右侧查看详情",
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											className: "d2-meta",
 											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 												className: "d2-name",
-												children: c.title
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: "d2-mono",
+													children: a.path
+												})
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												className: "d2-rid",
-												children: c.id
+												children: [
+													a.domain,
+													" · ",
+													a.id
+												]
 											})]
-										}),
-										pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "d2-pin-dot",
-											title: "已固定到看板",
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "d2-dot ok" })
-										}) : null
-									]
-								}, c.id))]
-							})]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
-							className: "d2-resource-group",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								className: "d2-badge kind",
-								children: app.apis.length
-							})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								className: "d2-resource-list",
-								children: [app.apis.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									className: "d2-resource-row",
-									style: {
-										color: "var(--dsw-alias-label-caption, #888)",
-										fontSize: 11.5,
-										cursor: "default"
-									},
-									children: "暂无 API 资源"
-								}) : null, app.apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-									type: "button",
-									className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
-									onClick: () => onSelect({
-										kind: "api",
-										rid: a.id
-									}),
-									title: "选中后在右侧查看详情",
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-										className: "d2-meta",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-											className: "d2-name",
-											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "d2-mono",
-												children: a.path
-											})
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "d2-rid",
-											children: [
-												a.domain,
-												" · ",
-												a.id
-											]
 										})]
-									})]
-								}, a.id))]
-							})]
-						})
-					]
-				})]
+									}, a.id))]
+								})]
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						className: "d2-resize-h",
+						role: "separator",
+						"aria-orientation": "vertical",
+						title: "拖动调宽（拖到最左变缩略）",
+						onPointerDown: onHandleDown
+					})
+				]
 			});
 		}
 		function AppDetail({ app, pinnedIds, onPin, onSelectComponent }) {
@@ -7131,7 +7321,7 @@ window.__ModuleLoader__.load({
 .d2-resource-row .d2-meta { min-width: 0; flex: 1; }
 .d2-resource-row .d2-name { font-size: 12.5px; color: var(--dsw-alias-label-primary, inherit); display: flex; align-items: center; gap: 7px; }
 .d2-resource-row .d2-rid { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); font-family: ui-monospace, "SF Mono", Menlo, monospace; margin-top: 1px; }
-.d2-resource-row .d2-rowdesc { font-size: 11px; color: var(--dsw-alias-label-tertiary, inherit); flex-shrink: 0; }
+.d2-resource-row .d2-rowdesc { font-size: 11px; color: var(--dsw-alias-label-tertiary, inherit); flex-shrink: 1; min-width: 0; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .d2-resource-row .d2-pin-btn { opacity: 0; transition: opacity .15s; flex-shrink: 0; }
 .d2-resource-row:hover .d2-pin-btn { opacity: 1; }
 .d2-resource-row.pinned .d2-pin-btn { opacity: 1; color: var(--dsw-alias-state-success-primary, #22c55e); }
@@ -7148,14 +7338,23 @@ window.__ModuleLoader__.load({
 /* ---------- 0.8.0 APP tab 三列（col1 APP 列表 / col2 资源列表 / col3 详情预览） ---------- */
 .d2-apps { flex: 1; min-width: 0; min-height: 0; display: flex; }
 
-.d2-applist { width: 240px; flex-shrink: 0; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); min-height: 0; }
+.d2-applist { width: 230px; min-width: 160px; flex-shrink: 1; position: relative; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); min-height: 0; }
 .d2-applist .d2-col-head { padding: 10px 12px 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption, #888); display: flex; align-items: center; justify-content: space-between; }
 .d2-applist .d2-rows { flex: 1; overflow-y: auto; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 2px; }
 .d2-applist .d2-app-row { width: 100%; border: 0; background: none; font-family: inherit; cursor: pointer; }
 .d2-applist .d2-app-row .d2-sub { display: flex; align-items: center; gap: 6px; }
 .d2-applist .d2-app-row .d2-status { margin-left: auto; flex-shrink: 0; }
 
-.d2-rescol { width: 290px; flex-shrink: 0; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); min-height: 0; }
+/* col 缩略模式（0.8.2 恢复：48px 图标条；拖到 <120px 松手自动缩略） */
+.d2-applist.d2-col-collapsed, .d2-rescol.d2-col-collapsed { width: 48px; min-width: 48px; flex-shrink: 0; }
+.d2-col-collapsed .d2-col-head { padding: 10px 0 6px; justify-content: center; }
+.d2-col-collapsed .d2-rows, .d2-col-collapsed .d2-rescol-rows { align-items: center; gap: 4px; padding: 4px 0 10px; }
+.d2-col-mini { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary, inherit); background: none; border: 0; cursor: pointer; flex-shrink: 0; }
+.d2-col-mini:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.16)); color: var(--dsw-alias-label-primary, inherit); }
+.d2-col-mini.on { background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.24)); }
+.d2-col-mini .d2-mini-badge { font-size: 9px; padding: 1px 4px; }
+
+.d2-rescol { width: 290px; min-width: 200px; flex-shrink: 1; position: relative; border-right: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); min-height: 0; }
 .d2-rescol-head { padding: 12px 14px 10px; display: flex; align-items: center; gap: 9px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); flex-shrink: 0; }
 .d2-rescol-head .d2-rescol-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .d2-rescol-head .d2-rescol-kind { margin-left: auto; flex-shrink: 0; }
@@ -7169,10 +7368,12 @@ window.__ModuleLoader__.load({
 .d2-detail-row .d2-hint { font-size: 10.5px; color: var(--dsw-alias-label-caption, #888); flex-shrink: 0; }
 
 .d2-resource-row { cursor: pointer; font-family: inherit; width: 100%; border: 0; }
-.d2-resource-row.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent); box-shadow: inset 2px 0 0 var(--dsw-alias-state-business-primary, #4176e6); }
+.d2-resource-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.16)); }
+.d2-resource-row.on { background: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent); box-shadow: inset 3px 0 0 var(--dsw-alias-state-business-primary, #4176e6); }
 .d2-resource-row .d2-pin-dot { flex-shrink: 0; }
+.d2-resource-row .d2-rid { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.d2-detailpane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); overflow-y: auto; min-height: 0; }
+.d2-detailpane { flex: 1; min-width: 180px; display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1, #fff); overflow-y: auto; min-height: 0; }
 .d2-preview-head { display: flex; align-items: center; gap: 10px; padding: 13px 18px 11px; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); }
 .d2-preview-head .d2-meta { flex: 1; min-width: 0; }
 .d2-preview-head .d2-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, inherit); }
@@ -7221,7 +7422,7 @@ window.__ModuleLoader__.load({
 				onMouseLeave: () => setHover(false),
 				style: {
 					position: "fixed",
-					top: 52,
+					top: 12,
 					right,
 					zIndex: 2147483100,
 					minWidth: 34,
@@ -7231,15 +7432,32 @@ window.__ModuleLoader__.load({
 					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))",
 					background: "var(--dsw-alias-bg-layer-1, #fff)",
 					cursor: "pointer",
-					fontSize: 14,
 					lineHeight: 1,
 					opacity: hover ? 1 : .55,
 					transition: "opacity .15s ease",
 					display: "flex",
 					alignItems: "center",
-					gap: 4
+					gap: 4,
+					color: "var(--dsw-alias-label-secondary, inherit)"
 				},
-				children: ["📌", count > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+					width: "15",
+					height: "15",
+					viewBox: "0 0 24 24",
+					fill: "none",
+					stroke: "currentColor",
+					strokeWidth: "1.6",
+					strokeLinecap: "round",
+					strokeLinejoin: "round",
+					"aria-hidden": "true",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "3",
+						y: "3",
+						width: "18",
+						height: "18",
+						rx: "2"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M15 3v18" })]
+				}), count > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					style: {
 						fontSize: 10,
 						opacity: .7
@@ -7252,7 +7470,8 @@ window.__ModuleLoader__.load({
 		const RAIL_WIDTH_KEY = "openloop.dock.rail-width.v1";
 		const TAB_KEY = "openloop.dock.tab.v1";
 		const OPEN_KEY = "openloop.dock.open.v1";
-		const DEFAULT_WIDTH = 420;
+		/** 默认展开宽（0.8.2：三列 APP tab 的从容布局起步宽——col1 230 + col2 290 + col3 ≥180） */
+		const DEFAULT_WIDTH = 720;
 		/**
 		* 展开态读取（0.8.0 issue 3：进入 DSH 不再默认展开）：
 		* 有存档按存档（记住上次离开状态）；无存档默认收起。
@@ -7437,8 +7656,8 @@ window.__ModuleLoader__.load({
 				try {
 					localStorage.setItem(RAIL_WIDTH_KEY, String(next));
 				} catch {}
-				if (width < next + 320) {
-					const widened = clampDockWidth(next + 320);
+				if (width < next + 560) {
+					const widened = clampDockWidth(next + 560);
 					setWidth(widened);
 					try {
 						localStorage.setItem(WIDTH_KEY, String(widened));

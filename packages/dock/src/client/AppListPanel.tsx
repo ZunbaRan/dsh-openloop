@@ -7,13 +7,71 @@
  * 旧版（rail APP 分区 + 230px 侧栏 + 详情两列）废止：APP 入口收敛到 col1，
  * rail 只留看板页；预览复用 tile 渲染链（PanelSurface / McpAppResourceView）。
  */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type PointerEvent, type ReactNode } from 'react'
 import type { AppDescriptor, AppComponentDescriptor } from './app-registry.ts'
 import { buildTileSourceForComponent } from './app-registry.ts'
 import { AppIcon, KindBadge, TypeBadge } from './badges.tsx'
 import { icons } from './icons.tsx'
 import { DependencyMissing } from './base-bridge.tsx'
 import { getPanelsClient, getMcpAppsClient } from './openloop-clients.ts'
+import { dragResize } from './drag-resize.ts'
+
+/** col 缩略/拖宽常量（0.8.2 恢复旧侧栏能力：缩略 48px 图标条；拖到 <120px 松手自动缩略） */
+const COL_COLLAPSED_WIDTH = 48
+const COL_COLLAPSE_THRESHOLD = 120
+const COL_MIN_EXPANDED = 160
+const COL_MAX_EXPANDED = 420
+
+interface ColUiState {
+  width: number
+  collapsed: boolean
+}
+
+function readColUi(key: string, fallbackWidth: number): ColUiState {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw === null) return { width: fallbackWidth, collapsed: false }
+    const p = JSON.parse(raw) as Partial<ColUiState>
+    const width = typeof p.width === 'number' ? Math.min(COL_MAX_EXPANDED, Math.max(COL_MIN_EXPANDED, Math.round(p.width))) : fallbackWidth
+    return { width, collapsed: p.collapsed === true }
+  } catch {
+    return { width: fallbackWidth, collapsed: false }
+  }
+}
+
+function writeColUi(key: string, state: ColUiState): void {
+  try { localStorage.setItem(key, JSON.stringify(state)) } catch { /* ignore */ }
+}
+
+/** col1/col2 共用的缩略+拖宽 hook（UI 态持久化 localStorage） */
+function useCollapsibleColumn(key: string, fallbackWidth: number): {
+  ui: ColUiState
+  expand: () => void
+  collapse: () => void
+  onHandleDown: (e: PointerEvent<HTMLDivElement>) => void
+} {
+  const [ui, setUi] = useState<ColUiState>(() => readColUi(key, fallbackWidth))
+  const update = (patch: Partial<ColUiState>): void => {
+    const next = { ...ui, ...patch }
+    setUi(next)
+    writeColUi(key, next)
+  }
+  const expand = (): void => update({ collapsed: false })
+  const collapse = (): void => update({ collapsed: true })
+  const onHandleDown = (e: PointerEvent<HTMLDivElement>): void => {
+    const startW = ui.collapsed ? COL_COLLAPSED_WIDTH : ui.width
+    dragResize(
+      e, startW, COL_COLLAPSED_WIDTH, COL_MAX_EXPANDED,
+      w => setUi(u => ({ ...u, width: w })),
+      w => {
+        // 松手吸附：<120px → 缩略图标条（width 保持展开值备还原）；≥120 → 展开态持久化
+        if (w < COL_COLLAPSE_THRESHOLD) update({ collapsed: true })
+        else update({ collapsed: false, width: Math.max(COL_MIN_EXPANDED, Math.round(w)) })
+      },
+    )
+  }
+  return { ui, expand, collapse, onHandleDown }
+}
 
 /** col1/col2/col3 的资源选择态 */
 export type ResourceSelection =
@@ -75,8 +133,34 @@ export interface AppListPanelProps {
 }
 
 export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListPanelProps): ReactNode {
+  const { ui, expand, onHandleDown } = useCollapsibleColumn('openloop.dock.apps-col1.v1', 230)
+
+  if (ui.collapsed) {
+    return (
+      <aside className="d2-applist d2-col-collapsed" aria-label="APP 列表（缩略）">
+        <div className="d2-col-head">
+          <button type="button" className="d2-collapse-btn" title="展开 APP 列表" onClick={expand}><icons.chevronR size={14} /></button>
+        </div>
+        <div className="d2-rows">
+          {apps.map(a => (
+            <button
+              type="button"
+              key={a.id}
+              className={`d2-col-mini${a.id === selectedAppId ? ' on' : ''}`}
+              title={a.name}
+              onClick={() => { onSelect(a.id); expand() }}
+            >
+              <AppIcon app={a} size={22} />
+            </button>
+          ))}
+        </div>
+        <div className="d2-resize-h" role="separator" aria-orientation="vertical" title="拖动调宽（拖到最左变缩略，缩略态向右拖恢复）" onPointerDown={onHandleDown} />
+      </aside>
+    )
+  }
+
   return (
-    <aside className="d2-applist" aria-label="APP 列表">
+    <aside className="d2-applist" style={{ width: ui.width }} aria-label="APP 列表">
       <div className="d2-col-head">
         <span>APP</span>
         <span className="d2-tcap">{apps.length}</span>
@@ -102,6 +186,7 @@ export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListP
           )
         })}
       </div>
+      <div className="d2-resize-h" role="separator" aria-orientation="vertical" title="拖动调宽（拖到最左变缩略）" onPointerDown={onHandleDown} />
     </aside>
   )
 }
@@ -116,8 +201,53 @@ export interface AppResourceListProps {
 }
 
 export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppResourceListProps): ReactNode {
+  const { ui, expand, onHandleDown } = useCollapsibleColumn('openloop.dock.apps-col2.v1', 290)
+
+  if (ui.collapsed) {
+    return (
+      <aside className="d2-rescol d2-col-collapsed" aria-label="资源列表（缩略）">
+        <div className="d2-col-head">
+          <button type="button" className="d2-collapse-btn" title="展开资源列表" onClick={expand}><icons.chevronR size={14} /></button>
+        </div>
+        <div className="d2-rescol-rows">
+          <button
+            type="button"
+            className={`d2-col-mini${selection.kind === 'detail' ? ' on' : ''}`}
+            title="详情"
+            onClick={() => { onSelect({ kind: 'detail' }); expand() }}
+          >
+            <icons.info size={16} />
+          </button>
+          {app.components.map(c => (
+            <button
+              type="button"
+              key={c.id}
+              className={`d2-col-mini${selection.kind === 'component' && selection.rid === c.id ? ' on' : ''}`}
+              title={c.title}
+              onClick={() => { onSelect({ kind: 'component', rid: c.id }); expand() }}
+            >
+              <span className={`badge plain d2-mini-badge`}>{c.type === 'mcp-app' ? 'mcp' : 'pnl'}</span>
+            </button>
+          ))}
+          {app.apis.map(a => (
+            <button
+              type="button"
+              key={a.id}
+              className={`d2-col-mini${selection.kind === 'api' && selection.rid === a.id ? ' on' : ''}`}
+              title={a.path}
+              onClick={() => { onSelect({ kind: 'api', rid: a.id }); expand() }}
+            >
+              <span className={`d2-dot ${a.status}`} />
+            </button>
+          ))}
+        </div>
+        <div className="d2-resize-h" role="separator" aria-orientation="vertical" title="拖动调宽（拖到最左变缩略，缩略态向右拖恢复）" onPointerDown={onHandleDown} />
+      </aside>
+    )
+  }
+
   return (
-    <aside className="d2-rescol" aria-label="资源列表">
+    <aside className="d2-rescol" style={{ width: ui.width }} aria-label="资源列表">
       <div className="d2-rescol-head">
         <AppIcon app={app} size={24} />
         <span className="d2-rescol-name">{app.name}</span>
@@ -179,6 +309,7 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
           </div>
         </section>
       </div>
+      <div className="d2-resize-h" role="separator" aria-orientation="vertical" title="拖动调宽（拖到最左变缩略）" onPointerDown={onHandleDown} />
     </aside>
   )
 }
