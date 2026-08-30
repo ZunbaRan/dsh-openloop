@@ -65,9 +65,13 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // 方向 1 v2：connect_server 的热激活通道（web profile 装 mcp bundle 时存在；
   // headless 无 mcpRuntime → connect 降级为「写盘 + 重启后生效」）
+  // 注意（2026-08-30 真机事故）：服务属性必须在 inject 回调的参数 ctx 上读取——
+  // 外层 ctx 未声明 inject，直接读 ctx.mcpRuntime 会 throw "cannot get property
+  // without inject"，错误被 fiber 吞掉后 connect 永远走降级路径（webServer 同款
+  // 回调参数模式才正确）。
   let mcpRuntime: import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined
-  ctx.inject(['mcpRuntime'], () => {
-    mcpRuntime = ctx.mcpRuntime
+  ctx.inject(['mcpRuntime'], (runtimeCtx) => {
+    mcpRuntime = runtimeCtx.mcpRuntime
     logger.info('mcpRuntime available — connect_server will hot-activate third-party packs')
   })
 

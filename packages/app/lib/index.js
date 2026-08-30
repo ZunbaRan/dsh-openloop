@@ -6340,13 +6340,15 @@ function createAppBackendTool(backend, options = {}) {
 			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
 			if (action === "connect_server") {
 				const { connectServer } = await import("./connect-CWnTx26V.js");
-				return await connectServer({
+				const result = await connectServer({
 					serverId: expectString(a, "serverId", action),
 					entry: expectObject(a, "server", action),
 					dshHome: backend.dshHome(),
 					backend,
 					mcpRuntime: options.getMcpRuntime?.()
 				});
+				backend.invalidateRegistry();
+				return result;
 			}
 			return await runAction(action, a, backend, await backend.ready());
 		}
@@ -7248,8 +7250,8 @@ function apply(ctx, config = {}) {
 	if (typeof binPath === "string" && binPath.length > 0) backendOptions.binPath = binPath;
 	const backend = createAppBackend(backendOptions);
 	let mcpRuntime;
-	ctx.inject(["mcpRuntime"], () => {
-		mcpRuntime = ctx.mcpRuntime;
+	ctx.inject(["mcpRuntime"], (runtimeCtx) => {
+		mcpRuntime = runtimeCtx.mcpRuntime;
 		logger.info("mcpRuntime available — connect_server will hot-activate third-party packs");
 	});
 	backend.start().then(() => {

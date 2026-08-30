@@ -204,13 +204,17 @@ export function createAppBackendTool(backend: AppBackend, options: { getMcpRunti
       // connect_server：方向 1 v2 第三方包 connect（需 mcpRuntime 上下文；facade 落引用条目）
       if (action === 'connect_server') {
         const { connectServer } = await import('./connect.ts')
-        return await connectServer({
+        const result = await connectServer({
           serverId: expectString(a, 'serverId', action),
           entry: expectObject(a, 'server', action),
           dshHome: backend.dshHome(),
           backend,
           mcpRuntime: options.getMcpRuntime?.(),
         }) as Record<string, JsonValue>
+        // 写操作：bump registryRev（本分支提前 return 绕过了 runAction 的
+        // WRITE_ACTIONS 通道；不 bump 则 dock 15s 轻探永远看不到新组件）
+        backend.invalidateRegistry()
+        return result
       }
       const facade = await backend.ready()
       return await runAction(action, a, backend, facade) as Record<string, JsonValue>
