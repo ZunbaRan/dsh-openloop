@@ -53,9 +53,10 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'fixed',
-        // top 12（0.8.2 用户反馈上移）：与 header 行按钮（Session log 下载等）同层，
-        // 不再悬在其下方的尴尬位置。
-        top: 12,
+        // top 50% 垂直居中（0.8.3 用户反馈：top:12 与 header 按钮排重叠；
+        // 垂直居中独立于一切 header/底部控件，且是面板展开把手的惯例位置）
+        top: '50%',
+        transform: 'translateY(-50%)',
         right,
         zIndex: 2147483100,
         minWidth: 34,
@@ -75,10 +76,12 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
         color: 'var(--dsw-alias-label-secondary, inherit)',
       }}
     >
-      {/* 0.8.2 icon 替换：📌 emoji → 线性 SVG「右侧分栏面板」（dock 本体形态） */}
+      {/* 0.8.3 icon 替换：四宫格 tiles 拼贴——「看板」的本体形态 */}
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <path d="M15 3v18" />
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
       </svg>
       {count > 0 ? <span style={{ fontSize: 10, opacity: 0.7 }}>{count}</span> : null}
     </button>

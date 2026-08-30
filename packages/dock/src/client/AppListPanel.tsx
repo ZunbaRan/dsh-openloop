@@ -43,7 +43,8 @@ function writeColUi(key: string, state: ColUiState): void {
   try { localStorage.setItem(key, JSON.stringify(state)) } catch { /* ignore */ }
 }
 
-/** col1/col2 共用的缩略+拖宽 hook（UI 态持久化 localStorage） */
+/** col1/col2 共用的缩略+拖宽 hook（UI 态持久化 localStorage；
+ *  0.8.3：缩略/展开切换即时化——拖到 <120px 即缩、拖回 ≥120px 即展开，不等松手） */
 function useCollapsibleColumn(key: string, fallbackWidth: number): {
   ui: ColUiState
   expand: () => void
@@ -62,11 +63,22 @@ function useCollapsibleColumn(key: string, fallbackWidth: number): {
     const startW = ui.collapsed ? COL_COLLAPSED_WIDTH : ui.width
     dragResize(
       e, startW, COL_COLLAPSED_WIDTH, COL_MAX_EXPANDED,
-      w => setUi(u => ({ ...u, width: w })),
+      // 拖动中即时切换（只写 state，不持久化）
       w => {
-        // 松手吸附：<120px → 缩略图标条（width 保持展开值备还原）；≥120 → 展开态持久化
-        if (w < COL_COLLAPSE_THRESHOLD) update({ collapsed: true })
-        else update({ collapsed: false, width: Math.max(COL_MIN_EXPANDED, Math.round(w)) })
+        const collapsed = w < COL_COLLAPSE_THRESHOLD
+        setUi(u => ({
+          collapsed,
+          // 缩略时保持展开宽备还原；展开时实时跟随（≥160 下限）
+          width: collapsed ? u.width : Math.max(COL_MIN_EXPANDED, w),
+        }))
+      },
+      // 松手只持久化（切换早已发生）
+      w => {
+        const collapsed = w < COL_COLLAPSE_THRESHOLD
+        const width = collapsed ? ui.width : Math.max(COL_MIN_EXPANDED, Math.round(w))
+        const next = { collapsed, width }
+        setUi(next)
+        writeColUi(key, next)
       },
     )
   }

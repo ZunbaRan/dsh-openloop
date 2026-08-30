@@ -6217,7 +6217,8 @@ window.__ModuleLoader__.load({
 				localStorage.setItem(key, JSON.stringify(state));
 			} catch {}
 		}
-		/** col1/col2 共用的缩略+拖宽 hook（UI 态持久化 localStorage） */
+		/** col1/col2 共用的缩略+拖宽 hook（UI 态持久化 localStorage；
+		*  0.8.3：缩略/展开切换即时化——拖到 <120px 即缩、拖回 ≥120px 即展开，不等松手） */
 		function useCollapsibleColumn(key, fallbackWidth) {
 			const [ui, setUi] = (0, react.useState)(() => readColUi(key, fallbackWidth));
 			const update = (patch) => {
@@ -6231,15 +6232,20 @@ window.__ModuleLoader__.load({
 			const expand = () => update({ collapsed: false });
 			const collapse = () => update({ collapsed: true });
 			const onHandleDown = (e) => {
-				dragResize(e, ui.collapsed ? COL_COLLAPSED_WIDTH : ui.width, COL_COLLAPSED_WIDTH, COL_MAX_EXPANDED, (w) => setUi((u) => ({
-					...u,
-					width: w
-				})), (w) => {
-					if (w < COL_COLLAPSE_THRESHOLD) update({ collapsed: true });
-					else update({
-						collapsed: false,
-						width: Math.max(COL_MIN_EXPANDED, Math.round(w))
-					});
+				dragResize(e, ui.collapsed ? COL_COLLAPSED_WIDTH : ui.width, COL_COLLAPSED_WIDTH, COL_MAX_EXPANDED, (w) => {
+					const collapsed = w < COL_COLLAPSE_THRESHOLD;
+					setUi((u) => ({
+						collapsed,
+						width: collapsed ? u.width : Math.max(COL_MIN_EXPANDED, w)
+					}));
+				}, (w) => {
+					const collapsed = w < COL_COLLAPSE_THRESHOLD;
+					const next = {
+						collapsed,
+						width: collapsed ? ui.width : Math.max(COL_MIN_EXPANDED, Math.round(w))
+					};
+					setUi(next);
+					writeColUi(key, next);
 				});
 			};
 			return {
@@ -7270,10 +7276,10 @@ window.__ModuleLoader__.load({
 .d2-rail-row:hover .d2-cnt { display: none; }
 .d2-rail-row .d2-x:hover { color: var(--dsw-alias-state-error-primary, #d4453a); background: var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2)); }
 
-/* ---------- 横向拖拽把手（rail 右缘） ---------- */
-.d2-resize-h { position: absolute; top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
-.d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background .15s; }
-.d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); }
+/* ---------- 横向拖拽把手（col 右缘；0.8.3 常驻可见——hover 才显色时用户找不到触发区） ---------- */
+.d2-resize-h { position: absolute; top: 0; right: -5px; width: 10px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+.d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.35)); transition: background .15s, width .15s; }
+.d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 3px; }
 
 /* ---------- 看板头 ---------- */
 .d2-board-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px 10px; flex-shrink: 0; }
@@ -7422,7 +7428,8 @@ window.__ModuleLoader__.load({
 				onMouseLeave: () => setHover(false),
 				style: {
 					position: "fixed",
-					top: 12,
+					top: "50%",
+					transform: "translateY(-50%)",
 					right,
 					zIndex: 2147483100,
 					minWidth: 34,
@@ -7450,13 +7457,36 @@ window.__ModuleLoader__.load({
 					strokeLinecap: "round",
 					strokeLinejoin: "round",
 					"aria-hidden": "true",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
-						x: "3",
-						y: "3",
-						width: "18",
-						height: "18",
-						rx: "2"
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M15 3v18" })]
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+							x: "3",
+							y: "3",
+							width: "7",
+							height: "7",
+							rx: "1"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+							x: "14",
+							y: "3",
+							width: "7",
+							height: "7",
+							rx: "1"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+							x: "3",
+							y: "14",
+							width: "7",
+							height: "7",
+							rx: "1"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+							x: "14",
+							y: "14",
+							width: "7",
+							height: "7",
+							rx: "1"
+						})
+					]
 				}), count > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 					style: {
 						fontSize: 10,
