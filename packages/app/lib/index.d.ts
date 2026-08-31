@@ -3559,7 +3559,7 @@ declare class AgentRegistry extends Service {
   private releaseInitiatorRun;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.0-rc.6_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/presentation.d.ts
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.1-rc.2_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/presentation.d.ts
 /**
  * Category of a tool call, used by a UI to pick an icon or treatment. The
  * provider-neutral vocabulary lets tools describe themselves without depending
@@ -3920,7 +3920,7 @@ interface WebFetchResultView {
   truncated: boolean;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.0-rc.6_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/json-schema.d.ts
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.1-rc.2_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/json-schema.d.ts
 /** Scalar JSON values supported by `enum` and `const`. */
 type JsonSchemaScalar = string | number | boolean | null;
 /** Single-type keywords accepted by the enforced subset. */
@@ -3957,7 +3957,7 @@ interface JsonSchemaNode {
   examples?: JsonValue;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.0-rc.6_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/types.d.ts
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.1-rc.2_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/types.d.ts
 /** Payload recorded when one nested Code Mode Tool dispatch starts. */
 interface CodeDispatchStartEventData {
   rootCallId: CallId;
@@ -4173,7 +4173,7 @@ declare abstract class CodeRuntime extends Service {
   abstract run(request: CodeRunRequest): Promise<CodeRunResult>;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.0-rc.6_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/index.d.ts
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.1-rc.2_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/types/index.d.ts
 declare module '@deepseek-ai/cordis' {
   interface Context {
     tools: ToolRuntime;
@@ -4999,10 +4999,68 @@ declare function createAppBackendTool(backend: AppBackend, options?: {
   getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined;
 }): ToolDefinition;
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-host-webserver@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-i_4e83f049ed8dee9b8d2facc78c419c22/node_modules/@deepseek-ai/dsh-host-webserver/lib/types/index.d.ts
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-host-webserver@0.1.1-rc.2_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-i_e7f477f2960cf0c612a9f538dd11e2fa/node_modules/@deepseek-ai/dsh-host-webserver/lib/types/injections.d.ts
+/**
+ * Structured index injections: the typed rows plugins contribute to the boot
+ * HTML instead of raw `tapIndex` string transforms. Rows are pure
+ * JSON-serializable data because one table feeds two renderers: the served
+ * form renders rows into the index.html text ({@link renderIndexInjections}),
+ * and a static worker deployment ships the same rows over its boot payload
+ * for a page-side interpreter. Anything not expressible as a row stays on
+ * `tapIndex`, which runs after row rendering.
+ */
+/** Document region a rendered row lands in: after the opening head or body tag. */
+type IndexInjectionPlacement = 'head' | 'body';
+/** One structured index injection row. */
+type IndexInjection =
+/** Assign a JSON-serializable value to a `globalThis` property, ahead of later script rows. */
+{
+  kind: 'global';
+  name: string;
+  value: unknown;
+} |
+/** Inline classic script. `text` must not contain `</script`, which would close the element early. */
+{
+  kind: 'script';
+  placement: IndexInjectionPlacement;
+  text: string;
+} |
+/**
+ * External classic script, executed in table order: a parser-blocking tag
+ * when served, an awaited fetch-and-execute in the worker form (whose
+ * loader resolves worker-only URLs such as `/plugins/...`).
+ */
+{
+  kind: 'script-src';
+  placement: IndexInjectionPlacement;
+  src: string;
+} |
+/** A `<style>` element in the head. `text` must not contain `</style`, which would close the element early. */
+{
+  kind: 'style';
+  text: string;
+} |
+/** Raw markup fragment. */
+{
+  kind: 'html';
+  placement: IndexInjectionPlacement;
+  html: string;
+};
+//#endregion
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-host-webserver@0.1.1-rc.2_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-i_e7f477f2960cf0c612a9f538dd11e2fa/node_modules/@deepseek-ai/dsh-host-webserver/lib/types/index.d.ts
 declare module '@deepseek-ai/cordis' {
   interface Context {
     webServer: WebServer;
+  }
+  interface Events {
+    /**
+     * Collect the structured index injection table. Emitted on every index
+     * render and every worker boot-payload request; listeners push their
+     * current rows, so a row's data is read fresh at emit time.
+     * @param table - Mutable row table; listeners append in activation order.
+     * @mode emit
+     */
+    'webserver/index-inject'(table: IndexInjection[]): void;
   }
 }
 /** Route match kind: 'exact' matches the pathname verbatim; 'prefix' p matches p and p/<anything>. */
@@ -5076,8 +5134,9 @@ declare class WebServer extends Service {
    */
   registerFallback(handler: WebRoute['handler']): () => void;
   /**
-   * Register an index.html transform, applied by the fallback owner to every
-   * index response ({@link applyIndexTaps}) in registration order.
+   * Register a raw-HTML index transform, the escape hatch for markup no
+   * {@link IndexInjection} row expresses: {@link renderIndex} applies taps in
+   * registration order after rendering the structured rows.
    * @param transform - pure html-to-html function.
    * @returns the disposer removing the transform.
    */
@@ -5093,6 +5152,20 @@ declare class WebServer extends Service {
    * @returns the transformed body.
    */
   applyIndexTaps(html: string): string;
+  /**
+   * Gather the structured injection table: one `webserver/index-inject` emit,
+   * every subscriber pushes its current rows. Fresh per call, so subscribers
+   * read live state (module graph, theme preference) at emit time.
+   * @returns rows in subscriber activation order.
+   */
+  collectIndexInjections(): IndexInjection[];
+  /**
+   * Render one index.html body: the structured injection table first, then
+   * the raw `tapIndex` transforms over the result.
+   * @param html - the raw index.html body.
+   * @returns the transformed body.
+   */
+  renderIndex(html: string): string;
 }
 //#endregion
 //#region src/routes.d.ts

@@ -2355,6 +2355,25 @@ const MAX_TIMER_DELAY_MS = 2147483647;
 //#endregion
 //#region ../../node_modules/.pnpm/@deepseek-ai+dsh-llm@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-attachment@0_4ed4e5c71eb965b0bd6912871e829940/node_modules/@deepseek-ai/dsh-llm/lib/index.js
 /**
+* dsh-llm's owned branded ids: tool-call correlation and provider request
+* diagnostics.
+*
+* The `Branded<B>` primitive itself lives in `@deepseek-ai/dsh-brand` (a
+* zero-dependency type-only package) so every owner of a cross-boundary id can
+* brand it without depending on dsh-llm; see that package's README for the
+* nominal-typing policy.
+*
+* @module @deepseek-ai/dsh-llm/brand
+*/
+/**
+* Brand a message identifier.
+* @param id - the opaque message identifier.
+* @returns the same string, branded; no validation is performed.
+*/
+function MessageId(id) {
+	return id;
+}
+/**
 * Brand a string as a {@link CallId}.
 * @param id - the provider-issued (or synthesized) call id.
 * @returns the same string, branded; no validation is performed.
@@ -2406,6 +2425,36 @@ function deepFreeze(value) {
 		}
 	}
 	return value;
+}
+/**
+* Detach and deep-freeze a message whose identity already exists.
+* @param message - complete message, including its stable identity.
+* @returns an immutable snapshot that preserves the identity.
+*/
+function freezeMessage(message) {
+	return deepFreeze(structuredClone(message));
+}
+/**
+* Create one identified message and freeze it before publication.
+* @param input - complete role, content, and source for a new message.
+* @returns an immutable message with a fresh stable identity.
+*/
+function createMessage(input) {
+	return freezeMessage({
+		...input,
+		id: MessageId(crypto.randomUUID())
+	});
+}
+/**
+* Create one identified user-role message and freeze it before publication.
+* @param input - complete content and source for a new user message.
+* @returns an immutable user message with a fresh stable identity.
+*/
+function createUserMessage(input) {
+	return createMessage({
+		...input,
+		role: "user"
+	});
 }
 /**
 * Harness error base with a stable machine-routable code and chained cause.
@@ -2672,7 +2721,7 @@ function isJsonValue(value) {
 	return walkJsonValue(value, false) === true;
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.0-rc.6_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/index.js
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-tools@0.1.1-rc.2_f8724372086ccc1457fc84e7becee2e0/node_modules/@deepseek-ai/dsh-tools/lib/index.js
 /**
 * Enforced JSON Schema subset shared by tool outputs, generated Code Mode
 * types, subagents, and workflows. The subset accepts any JSON root, an
@@ -3540,14 +3589,14 @@ const RUN_CODE_NAME = "run_code";
 * fallback outside its own language.
 */
 const TYPESCRIPT_FLAVOR = {
-	description: "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return comes back — curate it.",
+	description: "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return is program output — curate it. Image-bearing subtool results are attached after the run.",
 	codeDescription: "The program: the body of an async TypeScript function."
 };
 /** Per-language `run_code` schema flavors (see {@link RunCodeFlavor}); one entry per {@link CodeSdkLanguage}. */
 const RUN_CODE_FLAVORS = {
 	typescript: TYPESCRIPT_FLAVOR,
 	python: {
-		description: "Execute a Python program against the available tools. Takes two required arguments: `code`, the BODY of an async function (top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Answer with `print(...)` and/or `return <value>` — only that comes back, so curate it.",
+		description: "Execute a Python program against the available tools. Takes two required arguments: `code`, the BODY of an async function (top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Use `print(...)` and/or `return <value>` for program output — curate it. Image-bearing subtool results are attached after the run.",
 		codeDescription: "The program: the body of an async Python function."
 	}
 };
@@ -3933,6 +3982,13 @@ function createRunCodeTool(registry, options) {
 							/* v8 ignore next -- commit() runs only after `settled` flipped, which set parked. */
 							if (parked === void 0) return;
 							const result = parked.kind === "post-result" ? await scheduler.finalize(parked.exec, parked.result) : scheduler.finish(parked.exec, parked.result);
+							if (!result.isError && result.content.some((block) => block.type === "image")) exec.deferContext(createUserMessage({
+								content: result.content,
+								source: {
+									kind: "plugin",
+									plugin: "tools-code-mode"
+								}
+							}));
 							for (const context of result.additionalContexts ?? []) exec.deferContext(context);
 							if (result.concludesTurn) exec.concludeTurn();
 							settle(result);
@@ -4229,7 +4285,7 @@ const SDK_INSTRUCTIONS$1 = `## Writing code for run_code
 - Call tools as \`await tools.name(args)\` — quoted access for exotic names: \`tools["my-tool"](args)\`. Every call resolves to the tool's typed canonical JSON value. Tool arguments must be lossless JSON.
 - A FAILED tool call rejects with \`ToolCallError\`, whose \`toolName\` identifies the failed tool and whose \`message\` is human-readable — \`try/catch\` it to handle and continue.
 - Independent read-only calls MAY overlap under \`Promise.all\` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with \`await\`.
-- Emit results with \`return\` and/or \`console.log(...)\`. ONLY what you print or return comes back to you — intermediate tool results never enter the conversation, so extract just what you need.
+- Emit results with \`return\` and/or \`console.log(...)\`. Only what you print or return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.
 
 The available tools:`;
 /**
@@ -4903,7 +4959,7 @@ const SDK_INSTRUCTIONS = `## Writing code for run_code
 - Call tools as \`await tools.name(args)\` — subscript access for exotic, reserved, or underscore-leading names: \`await tools["my-tool"](args)\`. Every call resolves to the tool's typed canonical JSON value (each method's return type below). Tool arguments must be lossless JSON.
 - A FAILED tool call raises \`ToolCallError\`, whose \`toolName\` identifies the failed tool and whose message is human-readable — wrap in \`try/except\` to handle and continue.
 - Independent read-only calls MAY overlap under \`asyncio.gather\` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with \`await\`.
-- Emit the run's answer with \`print(...)\` and/or a top-level \`return <value>\`; the returned value must be lossless JSON. ONLY what you print and the returned value come back — intermediate tool results never enter the conversation, so extract just what you need.
+- Emit the run's answer with \`print(...)\` and/or a top-level \`return <value>\`; the returned value must be lossless JSON. Only what you print and return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.
 
 The available tools:`;
 /**
@@ -6355,7 +6411,7 @@ function createAppBackendTool(backend, options = {}) {
 	});
 }
 //#endregion
-//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-skill@0.1.0-rc.6_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-invariants_4052638b0b26c5a8ff62b742c3e8a235/node_modules/@deepseek-ai/dsh-skill/lib/index.js
+//#region ../../node_modules/.pnpm/@deepseek-ai+dsh-skill@0.1.1-rc.2_@deepseek-ai+cordis@4.0.1_@deepseek-ai+dsh-invariants_8e540be08712eb0192427c91631b3fb1/node_modules/@deepseek-ai/dsh-skill/lib/index.js
 /**
 * Agent skill provider registry.
 *

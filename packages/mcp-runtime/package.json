@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-mcp-runtime",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "One shared MCP connection per server for the OpenLoop DSH MCP bundles.",
   "private": true,
   "type": "module",
@@ -26,14 +26,14 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6"
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.0.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-host-webserver": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.1-rc.2",
     "@types/node": "^22.0.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",

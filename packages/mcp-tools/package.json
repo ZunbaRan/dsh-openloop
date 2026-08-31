@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-mcp-tools",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Ordinary DSH tool projections backed by the shared OpenLoop MCP runtime.",
   "private": true,
   "type": "module",
@@ -19,12 +19,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
-    "@openloop/dsh-mcp-runtime": "0.2.3"
+    "@deepseek-ai/dsh-tools": "^0.1.1-rc.2",
+    "@openloop/dsh-mcp-runtime": "0.2.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.1-rc.2",
     "@openloop/dsh-mcp-runtime": "workspace:*",
     "@types/node": "^22.0.0",
     "tsdown": "^0.22.2",

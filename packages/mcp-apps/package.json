@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-mcp-apps",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "A small, fail-closed DSH MCP Apps host for shared runtime results.",
   "private": true,
   "type": "module",
@@ -30,11 +30,11 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-tool": "^0.1.0-rc.6",
-    "@openloop/dsh-mcp-runtime": "0.2.3",
-    "react": "^18.2.0"
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-tool": "^0.1.1-rc.2",
+    "@openloop/dsh-mcp-runtime": "0.2.5",
+    "react": "^18.2.0 || ^19.0.0"
   },
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "1.7.5",
@@ -42,13 +42,13 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-tool": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.1.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-tool": "^0.1.1-rc.2",
     "@openloop/dsh-mcp-runtime": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/react": "~18.3.1",
-    "react": "^18.2.0",
+    "react": "^18.2.0 || ^19.0.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
