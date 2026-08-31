@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { McpRuntimeService, McpServerConfig, McpToolRecord } from '@openloop/dsh-mcp-runtime'
-import { connectServer } from '../src/connect.ts'
+import { connectServer, disconnectServer, reconnectServer } from '../src/connect.ts'
 import { createAppFacade } from '../src/facade.ts'
 import { initCollections } from '../src/schema.ts'
 import type { AppBackend } from '../src/backend.ts'
@@ -54,9 +54,11 @@ function fakeRuntime(options: FakeRuntimeOptions = {}) {
 async function fakeBackend(pb: FakePb, dshHome: string): Promise<AppBackend> {
   await initCollections(pb as never)
   const facade = createAppFacade(pb as never)
+  let registryRev = 0
   return {
     ready: async () => facade,
     dshHome: () => dshHome,
+    invalidateRegistry: () => ++registryRev,
   } as unknown as AppBackend
 }
 
@@ -187,5 +189,43 @@ describe('connect_server (direction-1 v2)', () => {
       backend: await fakeBackend(pb, dshHome),
       mcpRuntime: runtime,
     })).rejects.toThrow(/invalid MCP server entry.*"type": "http"/s)
+  })
+
+  it('disconnect removes the registry shell + hot-removes the server, keeps the mcp.json entry', async () => {
+    const dshHome = tmpDshHome()
+    const pb = new FakePb()
+    const { runtime, events } = fakeRuntime({ tools: [UI_TOOL] })
+    const backend = await fakeBackend(pb, dshHome)
+    await connectServer({ serverId: 'tldraw', entry: { type: 'http', url: 'http://127.0.0.1:39512/mcp' }, dshHome, backend, mcpRuntime: runtime })
+
+    const result = await disconnectServer({ serverId: 'tldraw', dshHome, backend, mcpRuntime: runtime })
+
+    expect(result.ok).toBe(true)
+    expect(result.runtimeRemoved).toBe(true)
+    expect(result.removedComponents).toBe(1)
+    // 热移除事件 + registry 壳已删
+    expect(events).toContain('remove:tldraw')
+    const facade = createAppFacade(pb as never)
+    expect(await facade.getAppDetail('tldraw')).toBeUndefined()
+    // mcp.json 条目保留（重连用）
+    const saved = JSON.parse(readFileSync(join(dshHome, 'mcp.json'), 'utf8')) as { servers: Record<string, unknown> }
+    expect(saved.servers['tldraw']).toEqual({ type: 'http', url: 'http://127.0.0.1:39512/mcp' })
+    // 未注册的 server 报 Agent 向错误
+    await expect(disconnectServer({ serverId: 'ghost', dshHome, backend, mcpRuntime: runtime })).rejects.toThrow(/not registered/)
+  })
+
+  it('reconnect re-activates from the kept mcp.json entry', async () => {
+    const dshHome = tmpDshHome()
+    const pb = new FakePb()
+    const { runtime } = fakeRuntime({ tools: [UI_TOOL] })
+    const backend = await fakeBackend(pb, dshHome)
+    await connectServer({ serverId: 'tldraw', entry: { type: 'http', url: 'http://127.0.0.1:39512/mcp' }, dshHome, backend, mcpRuntime: runtime })
+    await disconnectServer({ serverId: 'tldraw', dshHome, backend, mcpRuntime: runtime })
+
+    const result = await reconnectServer({ serverId: 'tldraw', dshHome, backend, mcpRuntime: runtime })
+    expect(result.state).toBe('connected')
+    expect(result.uiResourceCount).toBe(1)
+    // 条目缺失时报 Agent 向错误
+    await expect(reconnectServer({ serverId: 'never-was', dshHome, backend, mcpRuntime: runtime })).rejects.toThrow(/no mcp.json entry/)
   })
 })

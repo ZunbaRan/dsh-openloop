@@ -17,6 +17,7 @@
  * looksLikeJsonContentType / parseJsonResponse / readBodyBytes / buildApiUrl / validateApiUrl。
  */
 import type { PanelDefinition, WidgetDataBinding } from './contract.ts'
+import { recordApiUsage } from './api-usage-bridge.ts'
 import { isForbiddenApiUrl } from './validation.ts'
 
 /*
@@ -167,6 +168,9 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
   const url = buildApiUrl(source.url, source.query)
   const doFetch = ctx.fetchFn ?? fetch
   const abort = createAbortHandle(timeoutMs, ctx.signal)
+  // api-usage 埋点（自管理四件套；globalThis 单例，失败静默）
+  const startedAt = Date.now()
+  const record = (ok: boolean): void => recordApiUsage(source.url, 'panel-binding', ok, Date.now() - startedAt)
   try {
     const init: RequestInit = { method: source.method ?? 'GET', headers: {}, signal: abort.signal }
     if (source.headers) init.headers = { ...source.headers }
@@ -179,12 +183,14 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
     try {
       response = await doFetch(url, init)
     } catch (error) {
+      record(false)
       if (abort.signal.aborted) {
         throw new Error(`api source timed out after ${timeoutMs}ms: ${url}`)
       }
       throw new Error(`api source fetch failed: ${errorMessage(error)} (${url})`)
     }
     if (!response.ok) {
+      record(false)
       const statusText = response.statusText ? ` ${response.statusText}` : ''
       throw new Error(`api source returned HTTP ${response.status}${statusText} for ${url}`)
     }
@@ -192,10 +198,12 @@ export async function resolveWidgetData(binding: WidgetDataBinding, ctx: Resolve
     const contentType = response.headers.get('content-type')
     const { bytes, truncated } = await readBodyBytes(response.body ?? new ReadableStream<Uint8Array>(), MAX_RESPONSE_BYTES)
     if (truncated) {
+      record(false)
       throw new Error(`api source response exceeds the ${MAX_RESPONSE_BYTES} byte limit: ${url}`)
     }
     const text = new TextDecoder().decode(bytes)
     const parsed = parseJsonResponse(contentType, text)
+    record(true)
     return binding.pick !== undefined ? pickValue(parsed, binding.pick) : parsed
   } finally {
     abort.dispose()

@@ -5,6 +5,11 @@
  */
 import type { ComponentType } from 'react'
 import type { JsonObject, PresetKind } from '../contract.ts'
+import { agentActivityPreset } from './agent-activity/index.ts'
+import { apiUsageMonitorPreset } from './api-usage-monitor/index.ts'
+import { appManagerPreset } from './app-manager/index.ts'
+import { eventLogPreset } from './event-log/index.ts'
+import { systemOverviewPreset } from './system-overview/index.ts'
 import { accordionPreset } from './accordion/index.ts'
 import { apiCredentialsPreset } from './api-credentials/index.ts'
 import { avatarPreset } from './avatar/index.ts'
@@ -97,6 +102,12 @@ const registry: Readonly<Partial<Record<PresetKind, PresetModule>>> = {
   'sessions-stats': sessionsStatsPreset,
   'mcp-status': mcpStatusPreset,
   'plugin-registry': pluginRegistryPreset,
+  // 自管理四件套 +1（2026-08-31）：「系统能读懂/管理/观察自己」
+  'app-manager': appManagerPreset,
+  'api-usage-monitor': apiUsageMonitorPreset,
+  'system-overview': systemOverviewPreset,
+  'event-log': eventLogPreset,
+  'agent-activity': agentActivityPreset,
 }
 
 /** 取预设模块；未实现/未知 kind 返回 undefined */

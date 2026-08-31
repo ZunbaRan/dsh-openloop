@@ -1766,10 +1766,13 @@ var PbWatchdog = class {
 };
 //#endregion
 //#region src/seed.ts
-/** 与 panels 0.4.0 allPresetKinds() 对齐（33 个） */
+/** 与 panels allPresetKinds() 对齐（38 个：33 + 自管理四件套 5） */
 const BUILTIN_KINDS = [
 	"accordion",
+	"agent-activity",
 	"api-credentials",
+	"api-usage-monitor",
+	"app-manager",
 	"avatar",
 	"badge",
 	"callout",
@@ -1779,6 +1782,7 @@ const BUILTIN_KINDS = [
 	"data-table",
 	"db-browser",
 	"divider",
+	"event-log",
 	"flow",
 	"funnel",
 	"gauge",
@@ -1798,6 +1802,7 @@ const BUILTIN_KINDS = [
 	"split",
 	"stack",
 	"storage-usage",
+	"system-overview",
 	"tag",
 	"text",
 	"timeline"
@@ -1859,7 +1864,12 @@ const KIND_TITLES = {
 	"storage-usage": "存储占用",
 	tag: "标签",
 	text: "文本",
-	timeline: "时间线"
+	timeline: "时间线",
+	"app-manager": "APP 管理",
+	"api-usage-monitor": "调用监控",
+	"system-overview": "系统总览",
+	"event-log": "系统事件流",
+	"agent-activity": "Agent 行为"
 };
 /** 极简合法 PanelDefinition（单 widget 平铺 entry）——保证目录条目「可固定」 */
 function minimalEntry(kind) {
@@ -6231,6 +6241,8 @@ const ACTIONS = [
 	"load_dock_state",
 	"invalidate",
 	"connect_server",
+	"disconnect_server",
+	"reconnect_server",
 	"backend_health",
 	"backend_restart"
 ];
@@ -6394,15 +6406,25 @@ function createAppBackendTool(backend, options = {}) {
 			const action = expectString(a, "action", "list_apps");
 			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
 			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
-			if (action === "connect_server") {
-				const { connectServer } = await import("./connect-CWnTx26V.js");
-				const result = await connectServer({
+			if (action === "connect_server" || action === "disconnect_server" || action === "reconnect_server") {
+				const { connectServer, disconnectServer, reconnectServer } = await import("./connect-CayUaK0M.js");
+				const result = await (action === "connect_server" ? () => connectServer({
 					serverId: expectString(a, "serverId", action),
 					entry: expectObject(a, "server", action),
 					dshHome: backend.dshHome(),
 					backend,
 					mcpRuntime: options.getMcpRuntime?.()
-				});
+				}) : action === "disconnect_server" ? () => disconnectServer({
+					serverId: expectString(a, "serverId", action),
+					dshHome: backend.dshHome(),
+					backend,
+					mcpRuntime: options.getMcpRuntime?.()
+				}) : () => reconnectServer({
+					serverId: expectString(a, "serverId", action),
+					dshHome: backend.dshHome(),
+					backend,
+					mcpRuntime: options.getMcpRuntime?.()
+				}))();
 				backend.invalidateRegistry();
 				return result;
 			}
@@ -7171,9 +7193,9 @@ function json(res, status, body) {
 	res.statusCode = status;
 	res.end(JSON.stringify(body));
 }
-function registerAppRoutes(ctx, webServer, backend) {
+function registerAppRoutes(ctx, webServer, backend, options = {}) {
 	const handler = (req, res) => {
-		handle(req, res, backend).catch((error) => {
+		handle(req, res, backend, options).catch((error) => {
 			json(res, 500, { error: error instanceof Error ? error.message : String(error) });
 		});
 	};
@@ -7183,7 +7205,7 @@ function registerAppRoutes(ctx, webServer, backend) {
 		handler
 	});
 }
-async function handle(req, res, backend) {
+async function handle(req, res, backend, options) {
 	const url = new URL(req.url ?? "/", "http://loopback.invalid");
 	const sub = url.pathname.slice(13).replace(/^\/+|\/+$/g, "");
 	const method = req.method ?? "GET";
@@ -7195,6 +7217,70 @@ async function handle(req, res, backend) {
 		json(res, 200, {
 			ok: true,
 			registryRev: backend.invalidateRegistry()
+		});
+		return;
+	}
+	if (sub === "agent-activity" && method === "GET") {
+		const { snapshotAgentActivity } = await import("./agent-activity-Byu8Knx9.js");
+		json(res, 200, await snapshotAgentActivity(join(backend.dshHome(), "sessions")));
+		return;
+	}
+	if (sub === "events" && method === "GET") {
+		const url = new URL(req.url ?? "/", "http://loopback.invalid");
+		const limitRaw = Number(url.searchParams.get("limit") ?? "100");
+		const { snapshotSystemEvents } = await import("./event-log-B7kLpBeW.js");
+		json(res, 200, { events: snapshotSystemEvents(Number.isFinite(limitRaw) ? limitRaw : 100) });
+		return;
+	}
+	if (sub === "api-usage" && method === "GET") {
+		const { snapshotApiUsage } = await import("./api-usage-C6dj2Dal.js");
+		json(res, 200, snapshotApiUsage());
+		return;
+	}
+	if (sub === "manage/disconnect" && method === "POST") {
+		const body = JSON.parse(await readBody(req));
+		if (typeof body.serverId !== "string" || body.serverId.length === 0) {
+			json(res, 400, { error: "serverId is required" });
+			return;
+		}
+		const { disconnectServer } = await import("./connect-CayUaK0M.js");
+		json(res, 200, await disconnectServer({
+			serverId: body.serverId,
+			dshHome: backend.dshHome(),
+			backend,
+			mcpRuntime: options.getMcpRuntime?.()
+		}));
+		return;
+	}
+	if (sub === "manage/reconnect" && method === "POST") {
+		const body = JSON.parse(await readBody(req));
+		if (typeof body.serverId !== "string" || body.serverId.length === 0) {
+			json(res, 400, { error: "serverId is required" });
+			return;
+		}
+		const { reconnectServer } = await import("./connect-CayUaK0M.js");
+		json(res, 200, await reconnectServer({
+			serverId: body.serverId,
+			dshHome: backend.dshHome(),
+			backend,
+			mcpRuntime: options.getMcpRuntime?.()
+		}));
+		return;
+	}
+	if (sub === "manage/delete" && method === "POST") {
+		const body = JSON.parse(await readBody(req));
+		if (typeof body.appName !== "string" || body.appName.length === 0) {
+			json(res, 400, { error: "appName is required" });
+			return;
+		}
+		const result = await (await backend.ready()).deleteApp(body.appName);
+		const { recordSystemEvent } = await import("./event-log-B7kLpBeW.js");
+		recordSystemEvent("registry", "warn", `删除 APP「${body.appName}」（级联清理 ${result.removedComponents ?? 0} 组件）`);
+		backend.invalidateRegistry();
+		json(res, 200, {
+			ok: true,
+			appName: body.appName,
+			...result
 		});
 		return;
 	}
@@ -7318,8 +7404,12 @@ function apply(ctx, config = {}) {
 	ctx.tools.register(createAppBackendTool(backend, { getMcpRuntime: () => mcpRuntime }));
 	ctx.skills.registerProvider(() => appBackendSkillProvider);
 	ctx.skills.registerProvider(() => appDoctorSkillProvider);
-	ctx.inject(["webServer"], (routeCtx) => {
-		registerAppRoutes(routeCtx, routeCtx.webServer, backend);
+	ctx.inject(["webServer"], (routeCtx, routeConfig) => {
+		let routeMcpRuntime;
+		routeCtx.inject(["mcpRuntime"], (rc) => {
+			routeMcpRuntime = rc.mcpRuntime;
+		});
+		registerAppRoutes(routeCtx, routeCtx.webServer, backend, { getMcpRuntime: () => routeMcpRuntime });
 	});
 	ctx.effect(() => () => {
 		backend.stop();

@@ -154,6 +154,12 @@ const PRESET_INFO: Record<string, PresetInfo> = {
   'sessions-stats': { title: '会话统计', desc: '会话数/占用/活跃度', props: {} },
   'mcp-status': { title: 'MCP 状态', desc: 'MCP 服务清单与连接', props: {} },
   'plugin-registry': { title: '插件清单', desc: '已加载插件分组', props: {} },
+  // 自管理四件套 +1（2026-08-31）：「系统能读懂/管理/观察自己」
+  'app-manager': { title: 'APP 管理', desc: '全部应用的管理面板（断开/重连/删除）', props: { autoRefreshMs: 30000 } },
+  'api-usage-monitor': { title: '调用监控', desc: 'API 绑定与 MCP 调用统计', props: { autoRefreshMs: 30000 } },
+  'system-overview': { title: '系统总览', desc: '后端/MCP/存储/会话一屏聚合', props: { autoRefreshMs: 30000 } },
+  'event-log': { title: '系统事件流', desc: '系统行为的历史记录', props: { limit: 50 } },
+  'agent-activity': { title: 'Agent 行为', desc: 'Agent 最近动作与工具热度', props: {} },
   row: { title: '横向行', desc: '水平排列子组件', props: { children: [textChild('w1', '项 A'), textChild('w2', '项 B')] } },
   section: { title: '分区', desc: '带标题的内容区块', props: { title: '分区标题' } },
   sparkline: { title: '迷你走势', desc: '数值 + 趋势火花线', props: { label: '近 7 日访问', value: 1280, series: [1, 3, 2, 5, 4, 8, 6] } },

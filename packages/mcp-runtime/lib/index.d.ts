@@ -207,6 +207,7 @@ declare class McpRuntime {
     readonly binding?: McpUiBinding;
     readonly hydrateApp?: boolean;
   }): Promise<McpCallResult>;
+  private callToolInner;
   readAppResource(serverId: string, resourceUri: string, binding?: McpUiBinding, signal?: AbortSignal): Promise<McpAppResource>;
   private ensureConnection;
   private closeServer;

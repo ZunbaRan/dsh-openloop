@@ -22,14 +22,15 @@ describe('preset registry', () => {
     expect(getPreset('metric')).toBeUndefined()
   })
 
-  it('allPresetKinds 覆盖批 1+批 2+批 3+批 4+批 5 共 33 个 kind', () => {
+  it('allPresetKinds 覆盖批 1+批 2+批 3+批 4+批 5+自管理四件套共 38 个 kind', () => {
     const kinds = allPresetKinds()
     expect(kinds.sort()).toEqual([
-      'accordion', 'api-credentials', 'avatar', 'badge', 'callout', 'card', 'chart',
-      'comparison', 'data-table', 'db-browser', 'divider', 'flow', 'funnel', 'gauge',
+      'accordion', 'agent-activity', 'api-credentials', 'api-usage-monitor', 'app-manager',
+      'avatar', 'badge', 'callout', 'card', 'chart',
+      'comparison', 'data-table', 'db-browser', 'divider', 'event-log', 'flow', 'funnel', 'gauge',
       'grid', 'heading', 'heatmap', 'markdown', 'mcp-status', 'metric-grid',
       'pb-stats', 'plugin-registry', 'progress', 'row', 'section', 'sessions-stats',
-      'sparkline', 'split', 'stack', 'storage-usage', 'tag', 'text', 'timeline',
+      'sparkline', 'split', 'stack', 'storage-usage', 'system-overview', 'tag', 'text', 'timeline',
     ])
     for (const kind of kinds) {
       expect(getPreset(kind)).toBeDefined()
@@ -48,6 +49,7 @@ describe('preset registry', () => {
       'callout', 'status', 'progress', 'skeleton',
       'tabs', 'accordion', 'pagination', 'tooltip',
       'pb-stats', 'db-browser', 'storage-usage', 'api-credentials', 'sessions-stats', 'mcp-status', 'plugin-registry',
+      'app-manager', 'api-usage-monitor', 'system-overview', 'event-log', 'agent-activity',
     ])
     for (const kind of kinds) expect(valid.has(kind)).toBe(true)
   })

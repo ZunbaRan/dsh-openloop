@@ -16,7 +16,7 @@ const ACTIONS = [
   'register_api', 'remove_api', 'set_api_key',
   'save_dock_state', 'load_dock_state',
   'invalidate',
-  'connect_server',
+  'connect_server', 'disconnect_server', 'reconnect_server',
   'backend_health', 'backend_restart',
 ] as const
 
@@ -201,18 +201,34 @@ export function createAppBackendTool(backend: AppBackend, options: { getMcpRunti
       if (action === 'backend_health' || action === 'backend_restart') {
         return await runAction(action, a, backend, undefined as never) as Record<string, JsonValue>
       }
-      // connect_server：方向 1 v2 第三方包 connect（需 mcpRuntime 上下文；facade 落引用条目）
-      if (action === 'connect_server') {
-        const { connectServer } = await import('./connect.ts')
-        const result = await connectServer({
-          serverId: expectString(a, 'serverId', action),
-          entry: expectObject(a, 'server', action),
-          dshHome: backend.dshHome(),
-          backend,
-          mcpRuntime: options.getMcpRuntime?.(),
-        }) as Record<string, JsonValue>
+      // connect_server / disconnect_server / reconnect_server：方向 1 v2 第三方包
+      // 生命周期（需 mcpRuntime 上下文；facade 落/清引用条目）
+      if (action === 'connect_server' || action === 'disconnect_server' || action === 'reconnect_server') {
+        const { connectServer, disconnectServer, reconnectServer } = await import('./connect.ts')
+        const run = action === 'connect_server'
+          ? () => connectServer({
+              serverId: expectString(a, 'serverId', action),
+              entry: expectObject(a, 'server', action),
+              dshHome: backend.dshHome(),
+              backend,
+              mcpRuntime: options.getMcpRuntime?.(),
+            })
+          : action === 'disconnect_server'
+            ? () => disconnectServer({
+                serverId: expectString(a, 'serverId', action),
+                dshHome: backend.dshHome(),
+                backend,
+                mcpRuntime: options.getMcpRuntime?.(),
+              })
+            : () => reconnectServer({
+                serverId: expectString(a, 'serverId', action),
+                dshHome: backend.dshHome(),
+                backend,
+                mcpRuntime: options.getMcpRuntime?.(),
+              })
+        const result = await run() as Record<string, JsonValue>
         // 写操作：bump registryRev（本分支提前 return 绕过了 runAction 的
-        // WRITE_ACTIONS 通道；不 bump 则 dock 15s 轻探永远看不到新组件）
+        // WRITE_ACTIONS 通道；不 bump 则 dock 15s 轻探永远看不到变化）
         backend.invalidateRegistry()
         return result
       }

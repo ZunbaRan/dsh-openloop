@@ -5825,6 +5825,31 @@ window.__ModuleLoader__.load({
 				desc: "已加载插件分组",
 				props: {}
 			},
+			"app-manager": {
+				title: "APP 管理",
+				desc: "全部应用的管理面板（断开/重连/删除）",
+				props: { autoRefreshMs: 3e4 }
+			},
+			"api-usage-monitor": {
+				title: "调用监控",
+				desc: "API 绑定与 MCP 调用统计",
+				props: { autoRefreshMs: 3e4 }
+			},
+			"system-overview": {
+				title: "系统总览",
+				desc: "后端/MCP/存储/会话一屏聚合",
+				props: { autoRefreshMs: 3e4 }
+			},
+			"event-log": {
+				title: "系统事件流",
+				desc: "系统行为的历史记录",
+				props: { limit: 50 }
+			},
+			"agent-activity": {
+				title: "Agent 行为",
+				desc: "Agent 最近动作与工具热度",
+				props: {}
+			},
 			row: {
 				title: "横向行",
 				desc: "水平排列子组件",
@@ -6613,7 +6638,50 @@ window.__ModuleLoader__.load({
 				]
 			});
 		}
-		function AppDetail({ app, pinnedIds, onPin, onSelectComponent }) {
+		/** 受控管理动作（POST /openloop/app/manage/*；错误以 toast 文案返回） */
+		function useManageAction(onDone) {
+			const [busy, setBusy] = (0, react.useState)(null);
+			const run = (action, appName, confirm) => {
+				if (busy !== null) return;
+				if (action === "delete" && confirm !== appName) {
+					onDone();
+					return;
+				}
+				setBusy(`${action}:${appName}`);
+				const body = action === "delete" ? { appName } : { serverId: appName };
+				fetch(`/openloop/app/manage/${action}`, {
+					method: "POST",
+					credentials: "same-origin",
+					headers: {
+						"Content-Type": "application/json",
+						Accept: "application/json"
+					},
+					body: JSON.stringify(body)
+				}).then(async (res) => {
+					if (!(res.headers.get("content-type") ?? "").includes("application/json")) throw new Error(`HTTP ${res.status}`);
+					const payload = await res.json();
+					if (!res.ok || payload.ok !== true) throw new Error(typeof payload.error === "string" ? payload.error : `HTTP ${res.status}`);
+					onDone();
+				}).catch(() => {}).finally(() => setBusy(null));
+			};
+			return {
+				run,
+				busy
+			};
+		}
+		function AppDetail({ app, pinnedIds, onPin, onSelectComponent, onManaged }) {
+			const [confirming, setConfirming] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				if (confirming === null) return;
+				const timer = setTimeout(() => setConfirming(null), 3e3);
+				return () => clearTimeout(timer);
+			}, [confirming]);
+			const manage = useManageAction(() => {
+				setConfirming(null);
+				onManaged?.();
+			});
+			const isThirdparty = app.kind === "thirdparty";
+			const isBuiltin = app.kind === "builtin";
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "d2-app-detail",
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
@@ -6637,7 +6705,36 @@ window.__ModuleLoader__.load({
 								children: app.desc
 							})]
 						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind }),
+						!isBuiltin ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								gap: 6,
+								flexShrink: 0,
+								marginLeft: 8
+							},
+							children: [isThirdparty ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "d2-ghost-btn",
+								disabled: manage.busy !== null,
+								title: "断开（热移除工具与连接；保留配置，可重连）",
+								onClick: () => manage.run("disconnect", app.id, null),
+								children: "断开"
+							}) : null, confirming === app.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "d2-ghost-btn danger",
+								disabled: manage.busy !== null,
+								onClick: () => manage.run("delete", app.id, app.id),
+								children: "确认删除？"
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								className: "d2-ghost-btn danger",
+								disabled: manage.busy !== null,
+								title: "删除（级联清理组件与 API 资源）",
+								onClick: () => setConfirming(app.id),
+								children: "删除"
+							})]
+						}) : null
 					]
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "d2-resource-groups",
@@ -6936,7 +7033,7 @@ window.__ModuleLoader__.load({
 				})]
 			});
 		}
-		function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin }) {
+		function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin, onManaged }) {
 			const mcpStates = useMcpServerStates();
 			const [selection, setSelection] = (0, react.useState)({ kind: "detail" });
 			const app = apps.find((a) => a.id === selectedAppId) ?? apps[0];
@@ -6989,7 +7086,8 @@ window.__ModuleLoader__.load({
 								onSelectComponent: (c) => setSelection({
 									kind: "component",
 									rid: c.id
-								})
+								}),
+								onManaged
 							}) : null,
 							selection.kind === "component" && selectedComp !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ComponentPreview, {
 								app,
@@ -7836,7 +7934,10 @@ window.__ModuleLoader__.load({
 								selectedAppId: selectedApp?.id ?? null,
 								onOpenApp: openApp,
 								pinnedIds,
-								onPin: pinComponent
+								onPin: pinComponent,
+								onManaged: () => {
+									fetchRemoteApps().then((merged) => setRemoteApps(merged));
+								}
 							})
 						})]
 					})

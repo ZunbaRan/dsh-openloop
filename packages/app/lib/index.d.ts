@@ -4950,7 +4950,7 @@ declare const APP_BACKEND_PARAMETERS: {
   readonly action: {
     readonly type: "string";
     readonly required: true;
-    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate", "connect_server", "backend_health", "backend_restart"];
+    readonly enum: readonly ["list_apps", "upsert_app", "delete_app", "get_app", "register_component", "remove_component", "register_api", "remove_api", "set_api_key", "save_dock_state", "load_dock_state", "invalidate", "connect_server", "disconnect_server", "reconnect_server", "backend_health", "backend_restart"];
     readonly description: "Facade action. Registry: list_apps / upsert_app / delete_app / get_app; components: register_component / remove_component; apis: register_api / remove_api / set_api_key; boards: save_dock_state / load_dock_state.";
   };
   readonly app: {
@@ -5170,10 +5170,14 @@ declare class WebServer extends Service {
 //#endregion
 //#region src/routes.d.ts
 declare const APP_ROUTE = "/openloop/app";
-declare function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend): () => void;
+interface AppRouteOptions {
+  /** web profile 的活动 mcpRuntime（管理端点的热移除/热激活通道；headless 缺省） */
+  getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined;
+}
+declare function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend, options?: AppRouteOptions): () => void;
 //#endregion
 //#region src/seed.d.ts
-/** 与 panels 0.4.0 allPresetKinds() 对齐（33 个） */
+/** 与 panels allPresetKinds() 对齐（38 个：33 + 自管理四件套 5） */
 declare const BUILTIN_KINDS: readonly string[];
 /**
  * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；

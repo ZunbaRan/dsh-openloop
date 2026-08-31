@@ -16,6 +16,7 @@ export type PresetKind =
   | 'callout' | 'status' | 'progress' | 'skeleton'
   | 'tabs' | 'accordion' | 'pagination' | 'tooltip'
   | 'pb-stats' | 'db-browser' | 'storage-usage' | 'api-credentials' | 'sessions-stats' | 'mcp-status' | 'plugin-registry'
+  | 'app-manager' | 'api-usage-monitor' | 'system-overview' | 'event-log' | 'agent-activity'
 
 export type WidgetSource =
   | { type: 'preset'; kind: PresetKind; props: JsonObject }

@@ -156,6 +156,43 @@ function validateAppResource(serverId, requestedUri, contents, options = {}) {
 	};
 }
 //#endregion
+//#region src/api-usage-bridge.ts
+const GLOBAL_KEY = "__openloopApiUsage";
+const RECORDS_CAP = 50;
+/** 记一次 MCP 工具调用。失败静默——埋点永不影响工具调用主流程。 */
+function recordApiUsage(source, kind, ok, ms) {
+	try {
+		const g = globalThis;
+		let s = g[GLOBAL_KEY];
+		if (s === void 0) {
+			s = {
+				stats: /* @__PURE__ */ new Map(),
+				windowMs: 864e5
+			};
+			g[GLOBAL_KEY] = s;
+		}
+		let stat = s.stats.get(source);
+		if (stat === void 0) {
+			stat = {
+				source,
+				kind,
+				total: 0,
+				failures: 0,
+				records: []
+			};
+			s.stats.set(source, stat);
+		}
+		stat.total += 1;
+		if (!ok) stat.failures += 1;
+		stat.records.push({
+			at: Date.now(),
+			ok,
+			ms
+		});
+		if (stat.records.length > RECORDS_CAP) stat.records.splice(0, stat.records.length - RECORDS_CAP);
+	} catch {}
+}
+//#endregion
 //#region src/mcp-json.ts
 /**
 * 多作用域 mcp.json 加载（对齐参考实现 dsh-plugin-mcp 的配置体系，2026-08-23）。
@@ -646,6 +683,18 @@ var McpRuntime = class {
 		return tools;
 	}
 	async callTool(serverId, toolName, args, options = {}) {
+		const usageStartedAt = Date.now();
+		const usageKey = `${serverId}:${toolName}`;
+		try {
+			const result = await this.callToolInner(serverId, toolName, args, options);
+			recordApiUsage(usageKey, "mcp-call", true, Date.now() - usageStartedAt);
+			return result;
+		} catch (error) {
+			recordApiUsage(usageKey, "mcp-call", false, Date.now() - usageStartedAt);
+			throw error;
+		}
+	}
+	async callToolInner(serverId, toolName, args, options = {}) {
 		const state = this.getServer(serverId);
 		const connection = await this.ensureConnection(serverId);
 		const tool = await this.findTool(state, serverId, toolName, options.signal);

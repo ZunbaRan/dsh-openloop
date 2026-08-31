@@ -88,9 +88,15 @@ export function apply(ctx: Context, config: Config = {}): void {
   // P3 自愈 skill：门面故障诊断决策树（backend_health / backend_restart 的用法载体）
   ctx.skills.registerProvider(() => appDoctorSkillProvider)
 
-  // webServer 条件注入（panels 同款模式）：web 环境注册 UI 路由；headless 跳过
-  ctx.inject(['webServer'], routeCtx => {
-    registerAppRoutes(routeCtx, routeCtx.webServer, backend)
+  // webServer 条件注入（panels 同款模式）：web 环境注册 UI 路由；headless 跳过。
+  // mcpRuntime 同款条件捕获（2026-08-30 事故教训：必须经回调参数 ctx 读服务）。
+  ctx.inject(['webServer'], (routeCtx, routeConfig) => {
+    void routeConfig
+    let routeMcpRuntime: import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined
+    routeCtx.inject(['mcpRuntime'], (rc) => {
+      routeMcpRuntime = rc.mcpRuntime
+    })
+    registerAppRoutes(routeCtx, routeCtx.webServer, backend, { getMcpRuntime: () => routeMcpRuntime })
   })
 
   ctx.effect(() => () => {

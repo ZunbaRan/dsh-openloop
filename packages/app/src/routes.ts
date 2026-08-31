@@ -14,6 +14,7 @@
  * headless profile 无 webServer：路由不注册（tools 通道照常可用）。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import type { AppBackend } from './backend.ts'
@@ -41,16 +42,21 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
-export function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend): () => void {
+export interface AppRouteOptions {
+  /** web profile 的活动 mcpRuntime（管理端点的热移除/热激活通道；headless 缺省） */
+  getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined
+}
+
+export function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend, options: AppRouteOptions = {}): () => void {
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
-    void handle(req, res, backend).catch(error => {
+    void handle(req, res, backend, options).catch(error => {
       json(res, 500, { error: error instanceof Error ? error.message : String(error) })
     })
   }
   return webServer.register({ kind: 'prefix', path: APP_ROUTE, handler })
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBackend): Promise<void> {
+async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBackend, options: AppRouteOptions): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://loopback.invalid')
   const sub = url.pathname.slice(APP_ROUTE.length).replace(/^\/+|\/+$/g, '')
   const method = req.method ?? 'GET'
@@ -65,6 +71,81 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBac
   if (sub === 'invalidate' && method === 'POST') {
     const rev = backend.invalidateRegistry()
     json(res, 200, { ok: true, registryRev: rev })
+    return
+  }
+
+  // ---- Agent 行为流水（自管理四件套；会话日志聚合，30s 缓存） ----
+  if (sub === 'agent-activity' && method === 'GET') {
+    const { snapshotAgentActivity } = await import('./agent-activity.ts')
+    const sessionsDir = join(backend.dshHome(), 'sessions')
+    json(res, 200, await snapshotAgentActivity(sessionsDir))
+    return
+  }
+
+  // ---- 系统事件流（自管理四件套；ring buffer 新→旧） ----
+  if (sub === 'events' && method === 'GET') {
+    const url = new URL(req.url ?? '/', 'http://loopback.invalid')
+    const limitRaw = Number(url.searchParams.get('limit') ?? '100')
+    const { snapshotSystemEvents } = await import('./event-log.ts')
+    json(res, 200, { events: snapshotSystemEvents(Number.isFinite(limitRaw) ? limitRaw : 100) })
+    return
+  }
+
+  // ---- api-usage 聚合（自管理四件套：面板绑定 + MCP 调用监控；globalThis 单例读取） ----
+  if (sub === 'api-usage' && method === 'GET') {
+    const { snapshotApiUsage } = await import('./api-usage.ts')
+    json(res, 200, snapshotApiUsage())
+    return
+  }
+
+  // ---- app-manager 受控管理端点（0.4.0 自管理四件套；写操作全部门面化） ----
+  // 断开第三方包：热移除 runtime + 保留 mcp.json 条目 + 级联清 registry 壳
+  if (sub === 'manage/disconnect' && method === 'POST') {
+    const body = JSON.parse(await readBody(req)) as { serverId?: unknown }
+    if (typeof body.serverId !== 'string' || body.serverId.length === 0) {
+      json(res, 400, { error: 'serverId is required' })
+      return
+    }
+    const { disconnectServer } = await import('./connect.ts')
+    const result = await disconnectServer({
+      serverId: body.serverId,
+      dshHome: backend.dshHome(),
+      backend,
+      mcpRuntime: options.getMcpRuntime?.(),
+    })
+    json(res, 200, result)
+    return
+  }
+  // 重连：复用 mcp.json 保留条目热激活
+  if (sub === 'manage/reconnect' && method === 'POST') {
+    const body = JSON.parse(await readBody(req)) as { serverId?: unknown }
+    if (typeof body.serverId !== 'string' || body.serverId.length === 0) {
+      json(res, 400, { error: 'serverId is required' })
+      return
+    }
+    const { reconnectServer } = await import('./connect.ts')
+    const result = await reconnectServer({
+      serverId: body.serverId,
+      dshHome: backend.dshHome(),
+      backend,
+      mcpRuntime: options.getMcpRuntime?.(),
+    })
+    json(res, 200, result)
+    return
+  }
+  // 删除 APP（自研/第三方通用）：级联清组件与 API 资源
+  if (sub === 'manage/delete' && method === 'POST') {
+    const body = JSON.parse(await readBody(req)) as { appName?: unknown }
+    if (typeof body.appName !== 'string' || body.appName.length === 0) {
+      json(res, 400, { error: 'appName is required' })
+      return
+    }
+    const deleteFacade = await backend.ready()
+    const result = await deleteFacade.deleteApp(body.appName)
+    const { recordSystemEvent } = await import('./event-log.ts')
+    recordSystemEvent('registry', 'warn', `删除 APP「${body.appName}」（级联清理 ${(result as { removedComponents?: number }).removedComponents ?? 0} 组件）`)
+    backend.invalidateRegistry()
+    json(res, 200, { ok: true, appName: body.appName, ...result })
     return
   }
 

@@ -1,0 +1,76 @@
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.5 -apple-system, "PingFang SC", sans-serif; background: var(--background); color: var(--foreground); padding: 18px; }
+  h1 { font-size: 15px; margin-bottom: 2px; }
+  .sub { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+  .canvas { position: relative; height: 520px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: color-mix(in srgb, var(--surface) 60%, transparent); }
+  .node { position: absolute; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); font-size: 12px; cursor: grab; user-select: none; transition: box-shadow .15s, border-color .15s; }
+  .node:hover { box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 25%, transparent); border-color: var(--accent); }
+  .node .t { font-weight: 650; }
+  .node .d { font-size: 10px; color: var(--muted); margin-top: 1px; }
+  .node.hub { border-color: color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface)); }
+  .node.user { border-radius: 999px; }
+  .node.dead { border-style: dashed; opacity: .75; }
+  .edge { position: absolute; pointer-events: none; }
+  .legend { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+</style>
+
+<h1>OpenLoop 系统地图</h1>
+<div class="sub">用户 → DSH 宿主 → 内置 APP / 第三方 MCP / 本地后端 → 组件与 API · 拖动节点可重排</div>
+
+<div class="canvas" id="cv">
+  <svg id="edges" style="position:absolute;inset:0;width:100%;height:100%"></svg>
+  <div class="node user" data-id="user" style="left:50%;top:14px;transform:translateX(-50%)"><div class="t">👤 用户</div><div class="d">组装自己的工作台</div></div>
+  <div class="node hub" data-id="dsh" style="left:50%;top:88px;transform:translateX(-50%)"><div class="t">DSH 宿主</div><div class="d">Agent Native 产品底座</div></div>
+  <div class="node" data-id="openloop" style="left:8%;top:200px"><div class="t">OpenLoop 内置 APP</div><div class="d">38 预设组件 · 自管理四件套</div></div>
+  <div class="node" data-id="thirdparty" style="left:38%;top:200px"><div class="t">第三方 MCP Apps</div><div class="d">excalidraw · fixture · …</div></div>
+  <div class="node dead" data-id="tldraw" style="left:38%;top:330px"><div class="t">tldraw</div><div class="d">不可达（惰性重连中）</div></div>
+  <div class="node" data-id="backend" style="left:70%;top:200px"><div class="t">本地后端</div><div class="d">PocketBase · registry / boards</div></div>
+  <div class="node" data-id="panels" style="left:8%;top:330px"><div class="t">panels / artifact</div><div class="d">渲染层 · 沙箱</div></div>
+  <div class="node" data-id="apis" style="left:70%;top:330px"><div class="t">API 资源</div><div class="d">凭据服务端自管</div></div>
+</div>
+<div class="legend">
+  <span><i style="background:color-mix(in srgb,var(--accent) 40%,transparent)"></i>中枢</span>
+  <span><i style="background:var(--surface);border:1px solid var(--border)"></i>子系统</span>
+  <span><i style="border:1px dashed var(--border);background:transparent"></i>不可达</span>
+</div>
+
+<script>
+(function () {
+  var cv = document.getElementById('cv'), svg = document.getElementById('edges')
+  var links = [['user','dsh'],['dsh','openloop'],['dsh','thirdparty'],['dsh','backend'],['thirdparty','tldraw'],['openloop','panels'],['backend','apis']]
+  function center(el) {
+    var r = el.getBoundingClientRect(), c = cv.getBoundingClientRect()
+    return { x: r.left - c.left + r.width / 2, y: r.top - c.top + r.height / 2 }
+  }
+  function draw() {
+    var byId = {}
+    cv.querySelectorAll('.node').forEach(function (n) { byId[n.dataset.id] = n })
+    var lines = links.map(function (l) {
+      var a = center(byId[l[0]]), b = center(byId[l[1]])
+      var dead = byId[l[1]].classList.contains('dead')
+      return '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="' + (dead ? 'color-mix(in srgb, var(--muted) 45%, transparent)' : 'color-mix(in srgb, var(--accent) 45%, transparent)') + '" stroke-width="1.5" stroke-dasharray="' + (dead ? '4 4' : '') + '"/>'
+    }).join('')
+    svg.innerHTML = lines
+  }
+  // 拖动
+  cv.querySelectorAll('.node').forEach(function (n) {
+    n.addEventListener('pointerdown', function (e) {
+      e.preventDefault()
+      var sx = e.clientX, sy = e.clientY, ox = n.offsetLeft, oy = n.offsetTop
+      function mv(ev) {
+        n.style.transform = 'none'
+        n.style.left = Math.max(2, Math.min(cv.clientWidth - n.offsetWidth - 2, ox + ev.clientX - sx)) + 'px'
+        n.style.top = Math.max(2, Math.min(cv.clientHeight - n.offsetHeight - 2, oy + ev.clientY - sy)) + 'px'
+        draw()
+      }
+      function up() { removeEventListener('pointermove', mv); removeEventListener('pointerup', up) }
+      addEventListener('pointermove', mv); addEventListener('pointerup', up)
+    })
+  })
+  draw()
+  new ResizeObserver(draw).observe(cv)
+})()
+</script>

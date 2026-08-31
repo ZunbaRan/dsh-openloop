@@ -364,7 +364,7 @@ function DockShell(): ReactNode {
                 <div className="d2-tcap">安装 / 启用 @openloop/dsh-panels 后，这里可以浏览和固定组件</div>
               </div>
             ) : (
-              <AppsTab apps={apps} selectedAppId={selectedApp?.id ?? null} onOpenApp={openApp} pinnedIds={pinnedIds} onPin={pinComponent} />
+              <AppsTab apps={apps} selectedAppId={selectedApp?.id ?? null} onOpenApp={openApp} pinnedIds={pinnedIds} onPin={pinComponent} onManaged={() => { void fetchRemoteApps().then(merged => setRemoteApps(merged)) }} />
             )}
           </div>
         </div>

@@ -35,6 +35,15 @@ Reference them by the host runtime routes (offline, version-pinned, immutable ca
 - External CDNs are blocked. If a library you need is not preset, inline it or ask the user to preset it.
 - **React version rule (critical)**: one page = one React. Use the preset react18, OR inline your own react19 UMD — never both (two React instances = "Invalid hook call" and the page dies). React 18 libraries run on the preset; older libraries that need `ReactDOM.render`/`findDOMNode` will not work on 19.
 
+## Preset example: system map (the ecosystem at a glance)
+
+`assets/system-map-example.html` in this skill's directory is a ready-made
+interactive topology (user → DSH host → built-in APP / third-party MCP /
+local backend → components & APIs; draggable nodes, dashed edges for
+unreachable servers). Pass its content as the `html` parameter with
+`runtime: "static"` and adjust labels freely — it consumes only the
+injected theme variables.
+
 ## Theming (two modes)
 
 - **Follow the OpenLoop theme (recommended when no brand colors)**: use the injected CSS variables (`--background`, `--foreground`, `--muted`, `--surface`, `--elevated`, `--border`, `--accent`, `--radius`) plus helper classes (`.artifact-grid`, `.artifact-panel`, `.artifact-toolbar`, `.artifact-muted`, `.artifact-value`). The page follows the user's preset and light/dark switch.

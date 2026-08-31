@@ -1,6 +1,6 @@
 ---
 name: openloop-panels-widget-authoring
-description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选择阶梯、33 个预设组件 kind+props 速查、custom code 契约、数据绑定写法与面板构图硬规则。调用 panel 工具前先读。
+description: OpenLoop panels Agent widget 编写指引（§13.2）：资源选择阶梯、38 个预设组件 kind+props 速查、custom code 契约、数据绑定写法与面板构图硬规则。调用 panel 工具前先读。
 ---
 
 # OpenLoop Panels Agent widget 编写指引
@@ -125,7 +125,7 @@ write `panels/<id>.json`（单层编码无转义问题）→ `panel { "panelFile
 | `callout` | `tone` info/success/warning/error；`title`(≤80)；`description` 必填(≤240) | error 渲染 role="alert" |
 | `accordion` | `title`(≤80)；`defaultOpenIndex`；`items` 必填(1–20，`{label,content}`) | 单开手风琴 |
 
-### 本地后端（7）· 免注入——组件自己同源 fetch /openloop/app/*，无需 data 绑定
+### 本地后端与自管理（12）· 免注入——组件自己同源 fetch /openloop/app/*（或 mcp 路由），无需 data 绑定
 
 | kind | props | 要点 |
 |---|---|---|
@@ -139,6 +139,18 @@ write `panels/<id>.json`（单层编码无转义问题）→ `panel { "panelFile
 
 组合子：`pb_stats(title=..., auto_refresh_ms=...)` / `db_browser(collection=..., per_page=...)` / `storage_usage(...)` / `api_credentials(...)` / `sessions_stats(...)` / `mcp_status(...)` / `plugin_registry(title=...)`。
 适用场景：用户问「后端/数据库/存储/凭据/会话/MCP/插件」的运行状况，或要一个本地系统的自省看板。
+
+**自管理四件套（2026-08-31，「系统像一个系统」）**——数据源同上，管理面板族：
+
+| kind | props | 要点 |
+|---|---|---|
+| `system-overview` | `title`；`autoRefreshMs` | 系统总览：后端/MCP/存储/会话四格 + 异常清单（纯聚合既有端点；demo 开场卡） |
+| `app-manager` | `title`；`autoRefreshMs` | APP 管理面板：全部应用清单 + 断开/重连/删除（**首个带写操作的预设**，受控路由 + 删除二次确认） |
+| `event-log` | `title`；`limit`(1–200 默认 50) | 系统事件流：接入/断开/删除/重启等动作的历史（ring buffer，重启清零） |
+| `api-usage-monitor` | `title`；`autoRefreshMs` | API 调用监控：面板数据绑定 + MCP 工具调用的次数/失败/耗时（24h 窗口） |
+| `agent-activity` | `title`；`autoRefreshMs` | Agent 行为流水：最近动作时间线 + 工具热度（会话日志聚合，30s 缓存）——Agent Native 旗舰卡 |
+
+适用场景：用户要「看看系统状态/管理这些 APP/Agent 都干了什么」，或 demo 的叙事弧（system-overview 开场 → event-log 讲故事 → agent-activity 点题）。
 
 ### 图表（4）
 

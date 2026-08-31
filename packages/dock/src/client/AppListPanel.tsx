@@ -326,7 +326,35 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
   )
 }
 
-// ---- col3a：详情（原 AppDetail 直搬；组件行可点选进预览） ----
+// ---- col3a：详情（原 AppDetail 直搬；组件行可点选进预览；第三方 app 带管理入口） ----
+
+/** 受控管理动作（POST /openloop/app/manage/*；错误以 toast 文案返回） */
+function useManageAction(onDone: () => void): { run: (action: 'disconnect' | 'reconnect' | 'delete', appName: string, confirm: string | null) => void; busy: string | null } {
+  const [busy, setBusy] = useState<string | null>(null)
+  const run = (action: 'disconnect' | 'reconnect' | 'delete', appName: string, confirm: string | null): void => {
+    if (busy !== null) return
+    // delete 二次确认（同 app-manager 预设语义：第一次点只亮「确认」，3s 复位）
+    if (action === 'delete' && confirm !== appName) { onDone(); return }
+    setBusy(`${action}:${appName}`)
+    const body = action === 'delete' ? { appName } : { serverId: appName }
+    void fetch(`/openloop/app/manage/${action}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+      .then(async res => {
+        const contentType = res.headers.get('content-type') ?? ''
+        if (!contentType.includes('application/json')) throw new Error(`HTTP ${res.status}`)
+        const payload = await res.json() as { ok?: unknown; error?: unknown }
+        if (!res.ok || payload.ok !== true) throw new Error(typeof payload.error === 'string' ? payload.error : `HTTP ${res.status}`)
+        onDone()
+      })
+      .catch(() => { /* 静默——详情页不做错误 toast（面板卡有完整态） */ })
+      .finally(() => setBusy(null))
+  }
+  return { run, busy }
+}
 
 export interface AppDetailProps {
   app: AppDescriptor
@@ -335,9 +363,24 @@ export interface AppDetailProps {
   onPin: (app: AppDescriptor, component: AppDescriptor['components'][number]) => void
   /** 组件行点选（进入 col3 预览） */
   onSelectComponent?: (component: AppComponentDescriptor) => void
+  /** 管理动作完成后的刷新回调（registry 变化重拉） */
+  onManaged?: (() => void) | undefined
 }
 
-export function AppDetail({ app, pinnedIds, onPin, onSelectComponent }: AppDetailProps): ReactNode {
+export function AppDetail({ app, pinnedIds, onPin, onSelectComponent, onManaged }: AppDetailProps): ReactNode {
+  const [confirming, setConfirming] = useState<string | null>(null)
+  useEffect(() => {
+    if (confirming === null) return
+    const timer = setTimeout(() => setConfirming(null), 3000)
+    return () => clearTimeout(timer)
+  }, [confirming])
+  const manage = useManageAction(() => {
+    setConfirming(null)
+    onManaged?.()
+  })
+  const isThirdparty = app.kind === 'thirdparty'
+  const isBuiltin = app.kind === 'builtin'
+
   return (
     <div className="d2-app-detail">
       <header className="d2-app-detail-head">
@@ -347,6 +390,24 @@ export function AppDetail({ app, pinnedIds, onPin, onSelectComponent }: AppDetai
           <div className="d2-desc">{app.desc}</div>
         </div>
         <KindBadge kind={app.kind} />
+        {/* 管理入口（0.4.0 自管理：第三方=断开/删除；自研=删除；内置=无） */}
+        {!isBuiltin ? (
+          <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginLeft: 8 }}>
+            {isThirdparty ? (
+              <button type="button" className="d2-ghost-btn" disabled={manage.busy !== null}
+                title="断开（热移除工具与连接；保留配置，可重连）"
+                onClick={() => manage.run('disconnect', app.id, null)}>断开</button>
+            ) : null}
+            {confirming === app.id ? (
+              <button type="button" className="d2-ghost-btn danger" disabled={manage.busy !== null}
+                onClick={() => manage.run('delete', app.id, app.id)}>确认删除？</button>
+            ) : (
+              <button type="button" className="d2-ghost-btn danger" disabled={manage.busy !== null}
+                title="删除（级联清理组件与 API 资源）"
+                onClick={() => setConfirming(app.id)}>删除</button>
+            )}
+          </div>
+        ) : null}
       </header>
 
       <div className="d2-resource-groups">
@@ -537,9 +598,11 @@ export interface AppsTabProps {
   onOpenApp: (id: string) => void
   pinnedIds: ReadonlySet<string>
   onPin: (app: AppDescriptor, component: AppDescriptor['components'][number]) => void
+  /** 管理动作（断开/删除）后刷新 registry */
+  onManaged?: () => void
 }
 
-export function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin }: AppsTabProps): ReactNode {
+export function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin, onManaged }: AppsTabProps): ReactNode {
   const mcpStates = useMcpServerStates()
   const [selection, setSelection] = useState<ResourceSelection>({ kind: 'detail' })
   const app = apps.find(a => a.id === selectedAppId) ?? apps[0]
@@ -566,7 +629,7 @@ export function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin }: Ap
       <AppResourceList app={app} selection={selection} onSelect={setSelection} pinnedIds={pinnedIds} />
       <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
         {selection.kind === 'detail' ? (
-          <AppDetail app={app} pinnedIds={pinnedIds} onPin={onPin} onSelectComponent={c => setSelection({ kind: 'component', rid: c.id })} />
+          <AppDetail app={app} pinnedIds={pinnedIds} onPin={onPin} onSelectComponent={c => setSelection({ kind: 'component', rid: c.id })} onManaged={onManaged} />
         ) : null}
         {selection.kind === 'component' && selectedComp !== undefined ? (
           <ComponentPreview app={app} comp={selectedComp} pinned={pinnedIds.has(selectedComp.id)} onPin={() => onPin(app, selectedComp)} tone={toneOf(app)} />

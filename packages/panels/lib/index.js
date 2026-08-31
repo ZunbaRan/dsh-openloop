@@ -10,12 +10,48 @@ import { BUNDLED_SKILL_RANK } from "@deepseek-ai/dsh-skill";
 //#region \0rolldown/runtime.js
 var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 //#endregion
-//#region src/presets/accordion/schema.ts
+//#region src/api-usage-bridge.ts
+const GLOBAL_KEY = "__openloopApiUsage";
+const RECORDS_CAP = 50;
+/** 记一次面板数据绑定调用。失败静默——埋点永不影响数据解析主流程。 */
+function recordApiUsage(source, kind, ok, ms) {
+	try {
+		const g = globalThis;
+		let s = g[GLOBAL_KEY];
+		if (s === void 0) {
+			s = {
+				stats: /* @__PURE__ */ new Map(),
+				windowMs: 864e5
+			};
+			g[GLOBAL_KEY] = s;
+		}
+		let stat = s.stats.get(source);
+		if (stat === void 0) {
+			stat = {
+				source,
+				kind,
+				total: 0,
+				failures: 0,
+				records: []
+			};
+			s.stats.set(source, stat);
+		}
+		stat.total += 1;
+		if (!ok) stat.failures += 1;
+		stat.records.push({
+			at: Date.now(),
+			ok,
+			ms
+		});
+		if (stat.records.length > RECORDS_CAP) stat.records.splice(0, stat.records.length - RECORDS_CAP);
+	} catch {}
+}
+//#endregion
+//#region src/presets/agent-activity/schema.ts
 /**
-* accordion props JSON Schema。
-* items 1–20；展开状态为组件内本地 state（单开手风琴），defaultOpenIndex 可选。
+* agent-activity props JSON Schema：title ≤80 / autoRefreshMs（共享规则）
 */
-const accordionSchema = {
+const agentActivitySchema = {
 	$schema: "http://json-schema.org/draft-07/schema#",
 	type: "object",
 	additionalProperties: false,
@@ -23,39 +59,15 @@ const accordionSchema = {
 		title: {
 			type: "string",
 			maxLength: 80,
-			description: "可选的折叠区标题，≤80 字符"
+			description: "面板标题，≤80 字符，可省略（默认「Agent 行为流水」）"
 		},
-		defaultOpenIndex: {
+		autoRefreshMs: {
 			type: "integer",
-			minimum: 0,
-			description: "默认展开第几项（0 起）；省略默认展开第一项"
-		},
-		items: {
-			type: "array",
-			minItems: 1,
-			maxItems: 20,
-			description: "折叠项，1–20 个",
-			items: {
-				type: "object",
-				additionalProperties: false,
-				properties: {
-					label: {
-						type: "string",
-						minLength: 1,
-						maxLength: 80,
-						description: "折叠项标题，1–80 字符"
-					},
-					content: {
-						type: "string",
-						maxLength: 2e3,
-						description: "展开后的内容文本，≤2000 字符，保留换行"
-					}
-				},
-				required: ["label"]
-			}
+			minimum: 1e4,
+			maximum: 36e5,
+			description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
 		}
-	},
-	required: ["items"]
+	}
 };
 //#endregion
 //#region src/presets/common.ts
@@ -128,41 +140,12 @@ function formatValue(value, format) {
 	}
 }
 //#endregion
-//#region src/presets/accordion/validate.ts
+//#region src/presets/agent-activity/validate.ts
 /**
-* accordion 校验（fail-closed）。
-* - items 必填数组 1–20，每项 label 必填 1–80 字符，content ≤2000 字符
-* - defaultOpenIndex 非负整数（越界时渲染器自动收敛）
+* agent-activity 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
 */
-function validateAccordion(props) {
-	const root = asRecord(props);
-	if (!root) return validationFail([error("$", "accordion props 必须是 JSON 对象")]);
-	const errors = [];
-	if (root.title !== void 0 && (typeof root.title !== "string" || root.title.length > 80)) errors.push(error("title", "title 必须是 ≤80 字符的字符串"));
-	if (root.defaultOpenIndex !== void 0) {
-		if (typeof root.defaultOpenIndex !== "number" || !Number.isInteger(root.defaultOpenIndex)) errors.push(error("defaultOpenIndex", "defaultOpenIndex 必须是非负整数"));
-		else if (root.defaultOpenIndex < 0) errors.push(error("defaultOpenIndex", `defaultOpenIndex 不得为负，当前 ${root.defaultOpenIndex}`));
-	}
-	if (!Array.isArray(root.items)) {
-		errors.push(error("items", "items 必填，必须是 1–20 项的数组"));
-		return validationFail(errors);
-	}
-	if (root.items.length < 1 || root.items.length > 20) errors.push(error("items", `items 数量必须为 1–20，当前 ${root.items.length}`));
-	root.items.forEach((raw, index) => {
-		const path = `items[${index}]`;
-		const item = asRecord(raw);
-		if (!item) {
-			errors.push(error(path, "每一项必须是 JSON 对象"));
-			return;
-		}
-		if (!isNonEmptyString(item.label)) errors.push(error(`${path}.label`, "label 必填，必须是非空字符串（1–80 字符）"));
-		else if (item.label.length > 80) errors.push(error(`${path}.label`, `label 长度不得超过 80 字符，当前 ${item.label.length}`));
-		if (item.content !== void 0) {
-			if (typeof item.content !== "string") errors.push(error(`${path}.content`, "content 必须是字符串"));
-			else if (item.content.length > 2e3) errors.push(error(`${path}.content`, `content 长度不得超过 2000 字符，当前 ${item.content.length}`));
-		}
-	});
-	return errors.length > 0 ? validationFail(errors) : validationOk();
+function validateAgentActivity(props) {
+	return validateLocalPresetProps("agent-activity", props);
 }
 //#endregion
 //#region src/presets/style.ts
@@ -305,6 +288,1343 @@ function toneColors(tone) {
 			border: `var(--openloop-${tone}-border)`
 		};
 	}
+}
+//#endregion
+//#region src/presets/local-backend.ts
+/**
+* 本地后端预设族共享基建：
+* - useAppEndpoint：同源 fetch /openloop/app/*（或既有 MCP admin 路由），带
+*   content-type 守卫（DSH webServer 对未知路径回落 SPA 200+HTML——非 JSON 应答
+*   判 unavailable 而非报错）+ 可选自动刷新（≥10s）
+* - formatBytes / formatDuration / relativeTime：展示格式化纯函数
+* 颜色纪律：本文件不产出色值（token 由消费方 Render 内联）。
+*/
+const MIN_REFRESH_MS = 1e4;
+function useAppEndpoint(path, autoRefreshMs) {
+	const [state, setState] = useState({
+		loading: path !== null,
+		unavailable: false
+	});
+	useEffect(() => {
+		if (path === null) {
+			setState({
+				loading: false,
+				unavailable: true
+			});
+			return;
+		}
+		let cancelled = false;
+		let timer;
+		const load = async () => {
+			try {
+				const controller = new AbortController();
+				const to = setTimeout(() => controller.abort(), 5e3);
+				try {
+					const res = await fetch(path, { signal: controller.signal });
+					if (!(res.headers.get("content-type") ?? "").includes("application/json")) {
+						if (!cancelled) setState({
+							loading: false,
+							unavailable: true
+						});
+						return;
+					}
+					const body = await res.json();
+					if (!cancelled) {
+						if (!res.ok) setState({
+							loading: false,
+							unavailable: false,
+							error: typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
+						});
+						else setState({
+							loading: false,
+							unavailable: false,
+							data: body
+						});
+					}
+				} finally {
+					clearTimeout(to);
+				}
+			} catch (error) {
+				if (!cancelled) setState({
+					loading: false,
+					unavailable: false,
+					error: error instanceof Error ? error.message : String(error)
+				});
+			}
+		};
+		load();
+		if (typeof autoRefreshMs === "number" && autoRefreshMs >= MIN_REFRESH_MS) timer = setInterval(() => {
+			load();
+		}, autoRefreshMs);
+		return () => {
+			cancelled = true;
+			if (timer !== void 0) clearInterval(timer);
+		};
+	}, [path, autoRefreshMs]);
+	return state;
+}
+function formatBytes(bytes) {
+	if (!Number.isFinite(bytes) || bytes < 0) return "—";
+	if (bytes < 1024) return `${Math.round(bytes)} B`;
+	const one = (n) => String(n >= 100 ? Math.round(n) : Math.round(n * 10) / 10);
+	const kb = bytes / 1024;
+	if (kb < 1024) return `${one(kb)} KB`;
+	const mb = kb / 1024;
+	if (mb < 1024) return `${one(mb)} MB`;
+	return `${(Math.round(mb / 1024 * 100) / 100).toString()} GB`;
+}
+function formatDuration(ms) {
+	if (!Number.isFinite(ms) || ms < 0) return "—";
+	const s = Math.floor(ms / 1e3);
+	if (s < 60) return `${s}s`;
+	const m = Math.floor(s / 60);
+	if (m < 60) return `${m}m ${s % 60}s`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h}h ${m % 60}m`;
+	return `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+/** 相对时间（"3 分钟前"）；空/非法返回 '—' */
+function relativeTime(iso) {
+	if (typeof iso !== "string" || iso.length === 0) return "—";
+	const t = Date.parse(iso);
+	if (!Number.isFinite(t)) return "—";
+	const diff = Date.now() - t;
+	if (diff < 0) return new Date(t).toLocaleString();
+	const m = Math.floor(diff / 6e4);
+	if (m < 1) return "刚刚";
+	if (m < 60) return `${m} 分钟前`;
+	const h = Math.floor(m / 60);
+	if (h < 24) return `${h} 小时前`;
+	return `${Math.floor(h / 24)} 天前`;
+}
+/** 长字符串截断（表格单元格用） */
+function truncate(text, max = 60) {
+	return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+//#endregion
+//#region src/presets/agent-activity/Render.tsx
+const headerStyle$14 = {
+	display: "flex",
+	alignItems: "baseline",
+	justifyContent: "space-between",
+	gap: 8,
+	padding: "10px 14px",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const colsStyle = {
+	display: "grid",
+	gridTemplateColumns: "1.6fr 1fr",
+	minHeight: 0
+};
+const sectionLabelStyle = {
+	fontSize: 10.5,
+	fontWeight: 600,
+	letterSpacing: ".05em",
+	color: "var(--openloop-muted-foreground)",
+	padding: "9px 14px 5px"
+};
+const listStyle$2 = {
+	maxHeight: 340,
+	overflowY: "auto"
+};
+const actionRowStyle = {
+	display: "flex",
+	alignItems: "baseline",
+	gap: 9,
+	padding: "6px 14px",
+	fontSize: 12,
+	color: "var(--openloop-foreground)",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const monoStyle$6 = {
+	fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+	fontSize: 11.5
+};
+const heatRowStyle = {
+	display: "flex",
+	alignItems: "center",
+	gap: 8,
+	padding: "5px 14px",
+	fontSize: 11.5,
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const placeholderStyle$12 = {
+	padding: "22px 14px",
+	textAlign: "center",
+	color: "var(--openloop-muted-foreground)",
+	fontSize: 12,
+	lineHeight: 1.7
+};
+function AgentActivityRender({ props }) {
+	const record = asRecord(props) ?? {};
+	const state = useAppEndpoint("/openloop/app/agent-activity", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+	const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "Agent 行为流水";
+	const actions = (state.data?.actions ?? []).filter((a) => typeof a.tool === "string");
+	const heat = (state.data?.toolHeat ?? []).filter((h) => typeof h.tool === "string");
+	const scanned = typeof state.data?.sessionsScanned === "number" ? state.data.sessionsScanned : 0;
+	const maxHeat = Math.max(1, ...heat.map((h) => typeof h.count === "number" ? h.count : 0));
+	return /* @__PURE__ */ jsxs("div", {
+		style: panel,
+		"data-openloop-preset": "agent-activity",
+		children: [/* @__PURE__ */ jsxs("div", {
+			style: headerStyle$14,
+			children: [/* @__PURE__ */ jsx("span", {
+				style: title,
+				children: headerTitle
+			}), /* @__PURE__ */ jsx("span", {
+				style: meta,
+				children: scanned > 0 ? `扫描 ${scanned} 个会话 · ${actions.length} 动作` : ""
+			})]
+		}), state.unavailable ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$12,
+			children: [
+				"应用后端未启用",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "安装并激活 @openloop/dsh-app 后可查看 Agent 行为"
+				})
+			]
+		}) : actions.length === 0 ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$12,
+			children: [
+				"尚无 Agent 活动记录",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "Agent 调用工具的动作会实时出现在此（基于会话日志聚合）"
+				})
+			]
+		}) : /* @__PURE__ */ jsxs("div", {
+			style: colsStyle,
+			children: [/* @__PURE__ */ jsxs("div", { children: [/* @__PURE__ */ jsx("div", {
+				style: sectionLabelStyle,
+				children: "最近动作"
+			}), /* @__PURE__ */ jsx("div", {
+				style: listStyle$2,
+				children: actions.map((a, i) => {
+					const at = typeof a.at === "number" ? a.at : null;
+					const ws = typeof a.workspace === "string" ? a.workspace : "";
+					return /* @__PURE__ */ jsxs("div", {
+						style: actionRowStyle,
+						children: [
+							/* @__PURE__ */ jsx("span", {
+								style: {
+									...monoStyle$6,
+									color: "var(--openloop-primary)",
+									flexShrink: 0
+								},
+								children: String(a.tool)
+							}),
+							/* @__PURE__ */ jsx("span", {
+								style: {
+									...meta,
+									minWidth: 0,
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap"
+								},
+								title: ws,
+								children: truncate(ws, 34)
+							}),
+							/* @__PURE__ */ jsx("span", {
+								style: {
+									...meta,
+									marginLeft: "auto",
+									flexShrink: 0
+								},
+								children: at !== null ? relativeTime(new Date(at).toISOString()) : "—"
+							})
+						]
+					}, i);
+				})
+			})] }), /* @__PURE__ */ jsxs("div", {
+				style: {
+					borderLeft: "1px solid var(--openloop-border)",
+					minWidth: 0
+				},
+				children: [/* @__PURE__ */ jsx("div", {
+					style: sectionLabelStyle,
+					children: "工具热度"
+				}), /* @__PURE__ */ jsx("div", {
+					style: listStyle$2,
+					children: heat.map((h, i) => {
+						const count = typeof h.count === "number" ? h.count : 0;
+						return /* @__PURE__ */ jsxs("div", {
+							style: heatRowStyle,
+							children: [
+								/* @__PURE__ */ jsx("span", {
+									style: {
+										...monoStyle$6,
+										color: "var(--openloop-foreground)",
+										minWidth: 0,
+										overflow: "hidden",
+										textOverflow: "ellipsis",
+										whiteSpace: "nowrap",
+										flex: 1
+									},
+									children: String(h.tool)
+								}),
+								/* @__PURE__ */ jsx("div", {
+									style: {
+										width: 64,
+										height: 6,
+										borderRadius: 3,
+										background: "var(--openloop-surface-muted)",
+										overflow: "hidden",
+										flexShrink: 0
+									},
+									children: /* @__PURE__ */ jsx("div", { style: {
+										width: `${Math.max(4, count / maxHeat * 100)}%`,
+										height: "100%",
+										background: "var(--openloop-primary)"
+									} })
+								}),
+								/* @__PURE__ */ jsx("span", {
+									style: {
+										...meta,
+										flexShrink: 0,
+										fontVariantNumeric: "tabular-nums",
+										width: 28,
+										textAlign: "right"
+									},
+									children: count
+								})
+							]
+						}, i);
+					})
+				})]
+			})]
+		})]
+	});
+}
+//#endregion
+//#region src/presets/agent-activity/index.ts
+const agentActivityPreset = {
+	kind: "agent-activity",
+	schema: agentActivitySchema,
+	validate: validateAgentActivity,
+	Render: AgentActivityRender
+};
+//#endregion
+//#region src/presets/api-usage-monitor/schema.ts
+/**
+* api-usage-monitor props JSON Schema：title ≤80 / autoRefreshMs（共享规则）
+*/
+const apiUsageMonitorSchema = {
+	$schema: "http://json-schema.org/draft-07/schema#",
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		title: {
+			type: "string",
+			maxLength: 80,
+			description: "面板标题，≤80 字符，可省略（默认「API 资源调用监控」）"
+		},
+		autoRefreshMs: {
+			type: "integer",
+			minimum: 1e4,
+			maximum: 36e5,
+			description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+		}
+	}
+};
+//#endregion
+//#region src/presets/api-usage-monitor/validate.ts
+/**
+* api-usage-monitor 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+*/
+function validateApiUsageMonitor(props) {
+	return validateLocalPresetProps("api-usage-monitor", props);
+}
+//#endregion
+//#region src/presets/api-usage-monitor/Render.tsx
+const headerStyle$13 = {
+	display: "flex",
+	alignItems: "baseline",
+	justifyContent: "space-between",
+	gap: 8,
+	padding: "10px 14px",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const scrollStyle$6 = { overflowX: "auto" };
+const tableStyle$9 = {
+	width: "100%",
+	borderCollapse: "collapse",
+	fontSize: 12
+};
+const thStyle$4 = {
+	padding: "7px 12px",
+	color: "var(--openloop-muted-foreground)",
+	fontWeight: 600,
+	textAlign: "left",
+	whiteSpace: "nowrap",
+	borderBottom: "1px solid var(--openloop-border)",
+	background: "var(--openloop-surface-muted)"
+};
+const tdStyle$6 = {
+	padding: "7px 12px",
+	color: "var(--openloop-foreground)",
+	borderBottom: "1px solid var(--openloop-border)",
+	verticalAlign: "top"
+};
+const monoStyle$5 = {
+	fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+	fontSize: 11.5
+};
+const placeholderStyle$11 = {
+	padding: "22px 14px",
+	textAlign: "center",
+	color: "var(--openloop-muted-foreground)",
+	fontSize: 12,
+	lineHeight: 1.7
+};
+const KIND_LABEL$1 = {
+	"panel-binding": "面板绑定",
+	"mcp-call": "MCP 调用"
+};
+function ApiUsageMonitorRender({ props }) {
+	const record = asRecord(props) ?? {};
+	const state = useAppEndpoint("/openloop/app/api-usage", typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0);
+	const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "API 资源调用监控";
+	const sources = (state.data?.sources ?? []).filter((s) => typeof s.source === "string");
+	const totalCalls = sources.reduce((n, s) => n + (typeof s.total === "number" ? s.total : 0), 0);
+	const totalFailures = sources.reduce((n, s) => n + (typeof s.failures === "number" ? s.failures : 0), 0);
+	const maxTotal = Math.max(1, ...sources.map((s) => typeof s.total === "number" ? s.total : 0));
+	return /* @__PURE__ */ jsxs("div", {
+		style: panel,
+		"data-openloop-preset": "api-usage-monitor",
+		children: [/* @__PURE__ */ jsxs("div", {
+			style: headerStyle$13,
+			children: [/* @__PURE__ */ jsx("span", {
+				style: title,
+				children: headerTitle
+			}), /* @__PURE__ */ jsx("span", {
+				style: meta,
+				children: sources.length > 0 ? `${totalCalls} 次调用 · ${totalFailures} 失败 · 近 24h` : ""
+			})]
+		}), state.unavailable ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$11,
+			children: [
+				"应用后端未启用",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "安装并激活 @openloop/dsh-app 后可查看调用统计"
+				})
+			]
+		}) : sources.length === 0 ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$11,
+			children: [
+				"尚无调用记录",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "面板数据绑定与 MCP 工具调用会在此累计（重启后清零）"
+				})
+			]
+		}) : /* @__PURE__ */ jsx("div", {
+			style: scrollStyle$6,
+			children: /* @__PURE__ */ jsxs("table", {
+				style: tableStyle$9,
+				children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", { children: [
+					/* @__PURE__ */ jsx("th", {
+						style: thStyle$4,
+						children: "来源"
+					}),
+					/* @__PURE__ */ jsx("th", {
+						style: thStyle$4,
+						children: "类型"
+					}),
+					/* @__PURE__ */ jsx("th", {
+						style: thStyle$4,
+						children: "调用"
+					}),
+					/* @__PURE__ */ jsx("th", {
+						style: thStyle$4,
+						children: "失败"
+					}),
+					/* @__PURE__ */ jsx("th", {
+						style: thStyle$4,
+						children: "均耗"
+					}),
+					/* @__PURE__ */ jsx("th", {
+						style: {
+							...thStyle$4,
+							width: "30%"
+						},
+						children: "频度"
+					})
+				] }) }), /* @__PURE__ */ jsx("tbody", { children: sources.map((s) => {
+					const total = typeof s.total === "number" ? s.total : 0;
+					const failures = typeof s.failures === "number" ? s.failures : 0;
+					const kind = typeof s.kind === "string" ? s.kind : "";
+					return /* @__PURE__ */ jsxs("tr", { children: [
+						/* @__PURE__ */ jsx("td", {
+							style: {
+								...tdStyle$6,
+								...monoStyle$5
+							},
+							children: truncate(String(s.source), 44)
+						}),
+						/* @__PURE__ */ jsx("td", {
+							style: tdStyle$6,
+							children: KIND_LABEL$1[kind] ?? kind
+						}),
+						/* @__PURE__ */ jsx("td", {
+							style: {
+								...tdStyle$6,
+								fontVariantNumeric: "tabular-nums"
+							},
+							children: total
+						}),
+						/* @__PURE__ */ jsx("td", {
+							style: {
+								...tdStyle$6,
+								fontVariantNumeric: "tabular-nums",
+								color: failures > 0 ? "var(--openloop-error)" : "var(--openloop-muted-foreground)"
+							},
+							children: failures
+						}),
+						/* @__PURE__ */ jsx("td", {
+							style: {
+								...tdStyle$6,
+								fontVariantNumeric: "tabular-nums"
+							},
+							children: typeof s.avgMs === "number" ? `${s.avgMs}ms` : "—"
+						}),
+						/* @__PURE__ */ jsx("td", {
+							style: tdStyle$6,
+							children: /* @__PURE__ */ jsx("div", {
+								style: {
+									height: 6,
+									borderRadius: 3,
+									background: "var(--openloop-surface-muted)",
+									overflow: "hidden"
+								},
+								children: /* @__PURE__ */ jsx("div", { style: {
+									width: `${Math.max(3, total / maxTotal * 100)}%`,
+									height: "100%",
+									background: failures > 0 ? "var(--openloop-warning)" : "var(--openloop-primary)"
+								} })
+							})
+						})
+					] }, String(s.source));
+				}) })]
+			})
+		})]
+	});
+}
+//#endregion
+//#region src/presets/api-usage-monitor/index.ts
+const apiUsageMonitorPreset = {
+	kind: "api-usage-monitor",
+	schema: apiUsageMonitorSchema,
+	validate: validateApiUsageMonitor,
+	Render: ApiUsageMonitorRender
+};
+//#endregion
+//#region src/presets/app-manager/schema.ts
+/**
+* app-manager props JSON Schema：title ≤80 / autoRefreshMs（共享规则）
+*/
+const appManagerSchema = {
+	$schema: "http://json-schema.org/draft-07/schema#",
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		title: {
+			type: "string",
+			maxLength: 80,
+			description: "面板标题，≤80 字符，可省略（默认「APP 管理」）"
+		},
+		autoRefreshMs: {
+			type: "integer",
+			minimum: 1e4,
+			maximum: 36e5,
+			description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+		}
+	}
+};
+//#endregion
+//#region src/presets/app-manager/validate.ts
+/**
+* app-manager 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+*/
+function validateAppManager(props) {
+	return validateLocalPresetProps("app-manager", props);
+}
+//#endregion
+//#region src/presets/app-manager/Render.tsx
+/**
+* app-manager 渲染器（自管理四件套之一）：全部 APP 的管理面板——
+* 「系统能管理自己」的具象。行 = APP（来源徽标/资源计数/连接态），行尾动作：
+* 第三方 → 断开（mcp.json 条目保留，重连即恢复）/ 重连；任意 → 删除（级联清资源）。
+* 写通道 = app 包受控路由（POST /openloop/app/manage/*，门面化，不直连 PB）。
+* 二次确认同 dock 清空的既有模式（3s 超时复位）。
+* 样式 100% var(--openloop-*)。
+*/
+const headerStyle$12 = {
+	display: "flex",
+	alignItems: "baseline",
+	justifyContent: "space-between",
+	gap: 8,
+	padding: "10px 14px",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const scrollStyle$5 = { overflowX: "auto" };
+const tableStyle$8 = {
+	width: "100%",
+	borderCollapse: "collapse",
+	fontSize: 12
+};
+const thStyle$3 = {
+	padding: "7px 12px",
+	color: "var(--openloop-muted-foreground)",
+	fontWeight: 600,
+	textAlign: "left",
+	whiteSpace: "nowrap",
+	borderBottom: "1px solid var(--openloop-border)",
+	background: "var(--openloop-surface-muted)"
+};
+const tdStyle$5 = {
+	padding: "7px 12px",
+	color: "var(--openloop-foreground)",
+	borderBottom: "1px solid var(--openloop-border)",
+	verticalAlign: "top"
+};
+const monoStyle$4 = {
+	fontFamily: "var(--openloop-font-mono, ui-monospace, \"SF Mono\", Menlo, monospace)",
+	fontSize: 11.5
+};
+const placeholderStyle$10 = {
+	padding: "22px 14px",
+	textAlign: "center",
+	color: "var(--openloop-muted-foreground)",
+	fontSize: 12,
+	lineHeight: 1.7
+};
+const KIND_LABEL = {
+	builtin: "内置",
+	thirdparty: "第三方",
+	local: "自研"
+};
+const btnStyle = {
+	padding: "2px 9px",
+	borderRadius: 7,
+	border: "1px solid var(--openloop-border)",
+	background: "transparent",
+	color: "var(--openloop-muted-foreground)",
+	fontSize: 11,
+	cursor: "pointer",
+	fontFamily: "inherit"
+};
+const dangerBtnStyle = {
+	...btnStyle,
+	color: "var(--openloop-error)",
+	borderColor: "var(--openloop-error-border)"
+};
+const confirmBtnStyle = {
+	...dangerBtnStyle,
+	background: "var(--openloop-error-background)",
+	color: "var(--openloop-error)",
+	fontWeight: 600
+};
+/** 写动作（受控路由）；返回错误文本（无错 undefined）。3s 后清提示。 */
+function useManageAction(onDone) {
+	const [busy, setBusy] = useState(null);
+	const [message, setMessage] = useState(null);
+	useEffect(() => {
+		if (message === null) return;
+		const timer = setTimeout(() => setMessage(null), 3e3);
+		return () => clearTimeout(timer);
+	}, [message]);
+	const run = (path, body, label) => {
+		if (busy !== null) return;
+		setBusy(label);
+		fetch(`/openloop/app/${path}`, {
+			method: "POST",
+			credentials: "same-origin",
+			headers: {
+				"Content-Type": "application/json",
+				Accept: "application/json"
+			},
+			body: JSON.stringify(body)
+		}).then(async (res) => {
+			if (!(res.headers.get("content-type") ?? "").includes("application/json")) throw new Error(`HTTP ${res.status}`);
+			const payload = await res.json();
+			if (!res.ok || payload.ok !== true) throw new Error(typeof payload.error === "string" ? payload.error : `HTTP ${res.status}`);
+			setMessage(`${label}完成`);
+			onDone();
+		}).catch((error) => {
+			setMessage(`${label}失败：${error instanceof Error ? error.message : String(error)}`);
+		}).finally(() => setBusy(null));
+	};
+	return {
+		run,
+		busy,
+		message
+	};
+}
+function AppManagerRender({ props }) {
+	const record = asRecord(props) ?? {};
+	const autoRefreshMs = typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0;
+	const [reloadNonce, setReloadNonce] = useState(0);
+	const registry = useAppEndpoint("/openloop/app/registry", autoRefreshMs);
+	const mcp = useAppEndpoint("/openloop/mcp/servers", autoRefreshMs);
+	const { run, busy, message } = useManageAction(() => setReloadNonce((n) => n + 1));
+	useEffect(() => {}, [reloadNonce]);
+	const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "APP 管理";
+	const confirmKey = typeof record.confirm === "string" ? record.confirm : null;
+	const [confirming, setConfirming] = useState(null);
+	useEffect(() => {
+		if (confirming === null) return;
+		const timer = setTimeout(() => setConfirming(null), 3e3);
+		return () => clearTimeout(timer);
+	}, [confirming]);
+	const mcpStateOf = (name) => {
+		const hit = (mcp.data?.servers ?? []).find((s) => s.id === name);
+		return typeof hit?.state === "string" ? hit.state : void 0;
+	};
+	const apps = (registry.data?.apps ?? []).filter((a) => typeof a.app?.name === "string");
+	const onAction = (action, name) => {
+		if (action === "delete") {
+			if (confirmKey !== name) {
+				setConfirming(name);
+				return;
+			}
+			setConfirming(null);
+		}
+		if (action === "disconnect") {
+			run("manage/disconnect", { serverId: name }, `断开 ${name}`);
+			return;
+		}
+		if (action === "reconnect") {
+			run("manage/reconnect", { serverId: name }, `重连 ${name}`);
+			return;
+		}
+		run("manage/delete", { appName: name }, `删除 ${name}`);
+	};
+	return /* @__PURE__ */ jsxs("div", {
+		style: panel,
+		"data-openloop-preset": "app-manager",
+		children: [
+			/* @__PURE__ */ jsxs("div", {
+				style: headerStyle$12,
+				children: [/* @__PURE__ */ jsx("span", {
+					style: title,
+					children: headerTitle
+				}), /* @__PURE__ */ jsxs("span", {
+					style: meta,
+					children: [apps.length > 0 ? `${apps.length} 个应用` : "", busy !== null ? " · 处理中…" : ""]
+				})]
+			}),
+			message !== null ? /* @__PURE__ */ jsx("div", {
+				style: {
+					padding: "6px 14px",
+					fontSize: 11.5,
+					color: "var(--openloop-muted-foreground)",
+					borderBottom: "1px solid var(--openloop-border)"
+				},
+				children: message
+			}) : null,
+			registry.unavailable ? /* @__PURE__ */ jsxs("div", {
+				style: placeholderStyle$10,
+				children: [
+					"应用后端未启用",
+					/* @__PURE__ */ jsx("br", {}),
+					/* @__PURE__ */ jsx("span", {
+						style: meta,
+						children: "安装并激活 @openloop/dsh-app 后可管理 APP"
+					})
+				]
+			}) : apps.length === 0 ? /* @__PURE__ */ jsx("div", {
+				style: placeholderStyle$10,
+				children: "暂无注册 APP"
+			}) : /* @__PURE__ */ jsx("div", {
+				style: scrollStyle$5,
+				children: /* @__PURE__ */ jsxs("table", {
+					style: tableStyle$8,
+					children: [/* @__PURE__ */ jsx("thead", { children: /* @__PURE__ */ jsxs("tr", { children: [
+						/* @__PURE__ */ jsx("th", {
+							style: thStyle$3,
+							children: "应用"
+						}),
+						/* @__PURE__ */ jsx("th", {
+							style: thStyle$3,
+							children: "资源"
+						}),
+						/* @__PURE__ */ jsx("th", {
+							style: thStyle$3,
+							children: "连接"
+						}),
+						/* @__PURE__ */ jsx("th", {
+							style: thStyle$3,
+							children: "操作"
+						})
+					] }) }), /* @__PURE__ */ jsx("tbody", { children: apps.map((a) => {
+						const name = String(a.app?.name);
+						const kind = typeof a.app?.kind === "string" ? a.app.kind : "local";
+						const state = mcpStateOf(name);
+						const displayName = typeof a.app?.displayName === "string" && a.app.displayName.length > 0 ? a.app.displayName : name;
+						const isThirdparty = kind === "thirdparty";
+						const isBuiltin = kind === "builtin";
+						return /* @__PURE__ */ jsxs("tr", { children: [
+							/* @__PURE__ */ jsxs("td", {
+								style: tdStyle$5,
+								children: [
+									/* @__PURE__ */ jsx("span", {
+										style: { fontWeight: 600 },
+										children: truncate(displayName, 24)
+									}),
+									/* @__PURE__ */ jsx("span", {
+										style: {
+											...meta,
+											marginLeft: 7
+										},
+										children: KIND_LABEL[kind] ?? kind
+									}),
+									/* @__PURE__ */ jsx("div", {
+										style: {
+											...monoStyle$4,
+											...meta,
+											marginTop: 2
+										},
+										children: name
+									})
+								]
+							}),
+							/* @__PURE__ */ jsxs("td", {
+								style: {
+									...tdStyle$5,
+									whiteSpace: "nowrap"
+								},
+								children: [
+									(a.components ?? []).length,
+									" 组件 · ",
+									(a.apis ?? []).length,
+									" API"
+								]
+							}),
+							/* @__PURE__ */ jsxs("td", {
+								style: tdStyle$5,
+								children: [state === void 0 ? /* @__PURE__ */ jsx("span", {
+									style: meta,
+									children: "—"
+								}) : /* @__PURE__ */ jsx("span", { style: {
+									display: "inline-block",
+									width: 8,
+									height: 8,
+									borderRadius: "50%",
+									marginRight: 6,
+									background: state === "running" ? "var(--openloop-success)" : state === "error" ? "var(--openloop-error)" : "var(--openloop-muted-foreground)"
+								} }), state ?? "本地"]
+							}),
+							/* @__PURE__ */ jsx("td", {
+								style: {
+									...tdStyle$5,
+									whiteSpace: "nowrap"
+								},
+								children: isBuiltin ? /* @__PURE__ */ jsx("span", {
+									style: meta,
+									children: "系统保留"
+								}) : /* @__PURE__ */ jsxs(Fragment, { children: [isThirdparty ? state === "running" || state === "connecting" ? /* @__PURE__ */ jsx("button", {
+									type: "button",
+									style: btnStyle,
+									disabled: busy !== null,
+									onClick: () => onAction("disconnect", name),
+									children: "断开"
+								}) : /* @__PURE__ */ jsx("button", {
+									type: "button",
+									style: btnStyle,
+									disabled: busy !== null,
+									onClick: () => onAction("reconnect", name),
+									children: "重连"
+								}) : null, confirming === name ? /* @__PURE__ */ jsx("button", {
+									type: "button",
+									style: confirmBtnStyle,
+									disabled: busy !== null,
+									onClick: () => onAction("delete", name),
+									children: "确认删除？"
+								}) : /* @__PURE__ */ jsx("button", {
+									type: "button",
+									style: dangerBtnStyle,
+									disabled: busy !== null,
+									onClick: () => onAction("delete", name),
+									children: "删除"
+								})] })
+							})
+						] }, name);
+					}) })]
+				})
+			})
+		]
+	});
+}
+//#endregion
+//#region src/presets/app-manager/index.ts
+const appManagerPreset = {
+	kind: "app-manager",
+	schema: appManagerSchema,
+	validate: validateAppManager,
+	Render: AppManagerRender
+};
+//#endregion
+//#region src/presets/event-log/schema.ts
+/**
+* event-log props JSON Schema：title ≤80 / autoRefreshMs（共享规则） / limit
+*/
+const eventLogSchema = {
+	$schema: "http://json-schema.org/draft-07/schema#",
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		title: {
+			type: "string",
+			maxLength: 80,
+			description: "面板标题，≤80 字符，可省略（默认「系统事件流」）"
+		},
+		autoRefreshMs: {
+			type: "integer",
+			minimum: 1e4,
+			maximum: 36e5,
+			description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+		},
+		limit: {
+			type: "integer",
+			minimum: 1,
+			maximum: 200,
+			description: "最多显示的事件条数，1-200，缺省 50"
+		}
+	}
+};
+//#endregion
+//#region src/presets/event-log/validate.ts
+/**
+* event-log 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs / limit）。
+*/
+function validateEventLog(props) {
+	return validateLocalPresetProps("event-log", props);
+}
+//#endregion
+//#region src/presets/event-log/Render.tsx
+const headerStyle$11 = {
+	display: "flex",
+	alignItems: "baseline",
+	justifyContent: "space-between",
+	gap: 8,
+	padding: "10px 14px",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const listStyle$1 = {
+	maxHeight: 320,
+	overflowY: "auto"
+};
+const rowStyle$2 = {
+	display: "flex",
+	alignItems: "baseline",
+	gap: 9,
+	padding: "7px 14px",
+	fontSize: 12,
+	color: "var(--openloop-foreground)",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const timeStyle$1 = {
+	fontSize: 11,
+	color: "var(--openloop-muted-foreground)",
+	flexShrink: 0,
+	minWidth: 64,
+	fontVariantNumeric: "tabular-nums"
+};
+const kindBadgeStyle = {
+	fontSize: 10,
+	padding: "1px 7px",
+	borderRadius: 999,
+	border: "1px solid var(--openloop-border)",
+	color: "var(--openloop-muted-foreground)",
+	flexShrink: 0
+};
+const placeholderStyle$9 = {
+	padding: "22px 14px",
+	textAlign: "center",
+	color: "var(--openloop-muted-foreground)",
+	fontSize: 12,
+	lineHeight: 1.7
+};
+const dotStyle$3 = (level) => ({
+	width: 7,
+	height: 7,
+	borderRadius: "50%",
+	flexShrink: 0,
+	alignSelf: "center",
+	background: level === "error" ? "var(--openloop-error)" : level === "warn" ? "var(--openloop-warning)" : "var(--openloop-success)"
+});
+function EventLogRender({ props }) {
+	const record = asRecord(props) ?? {};
+	const autoRefreshMs = typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0;
+	const state = useAppEndpoint(`/openloop/app/events?limit=${typeof record.limit === "number" ? Math.max(1, Math.min(200, Math.round(record.limit))) : 50}`, autoRefreshMs);
+	const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "系统事件流";
+	const events = (state.data?.events ?? []).filter((e) => typeof e.text === "string");
+	return /* @__PURE__ */ jsxs("div", {
+		style: panel,
+		"data-openloop-preset": "event-log",
+		children: [/* @__PURE__ */ jsxs("div", {
+			style: headerStyle$11,
+			children: [/* @__PURE__ */ jsx("span", {
+				style: title,
+				children: headerTitle
+			}), /* @__PURE__ */ jsx("span", {
+				style: meta,
+				children: events.length > 0 ? `${events.length} 条 · 新→旧` : ""
+			})]
+		}), state.unavailable ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$9,
+			children: [
+				"应用后端未启用",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "安装并激活 @openloop/dsh-app 后可查看系统事件"
+				})
+			]
+		}) : events.length === 0 ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$9,
+			children: [
+				"暂无事件",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "接入/断开第三方包、删除 APP、后端重启等动作会记录在此"
+				})
+			]
+		}) : /* @__PURE__ */ jsx("div", {
+			style: listStyle$1,
+			children: events.map((e, i) => {
+				const kind = typeof e.kind === "string" ? e.kind : "";
+				const level = typeof e.level === "string" ? e.level : "info";
+				const at = typeof e.at === "number" ? e.at : null;
+				return /* @__PURE__ */ jsxs("div", {
+					style: rowStyle$2,
+					children: [
+						/* @__PURE__ */ jsx("span", {
+							style: timeStyle$1,
+							children: at !== null ? relativeTime(new Date(at).toISOString()) : "—"
+						}),
+						/* @__PURE__ */ jsx("span", { style: dotStyle$3(level) }),
+						/* @__PURE__ */ jsx("span", {
+							style: kindBadgeStyle,
+							children: kind
+						}),
+						/* @__PURE__ */ jsx("span", {
+							style: { minWidth: 0 },
+							children: String(e.text)
+						})
+					]
+				}, i);
+			})
+		})]
+	});
+}
+//#endregion
+//#region src/presets/event-log/index.ts
+const eventLogPreset = {
+	kind: "event-log",
+	schema: eventLogSchema,
+	validate: validateEventLog,
+	Render: EventLogRender
+};
+//#endregion
+//#region src/presets/system-overview/schema.ts
+/**
+* system-overview props JSON Schema：title ≤80 / autoRefreshMs（共享规则）
+*/
+const systemOverviewSchema = {
+	$schema: "http://json-schema.org/draft-07/schema#",
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		title: {
+			type: "string",
+			maxLength: 80,
+			description: "面板标题，≤80 字符，可省略（默认「系统总览」）"
+		},
+		autoRefreshMs: {
+			type: "integer",
+			minimum: 1e4,
+			maximum: 36e5,
+			description: "自动刷新间隔（毫秒），≥10000，缺省不自动刷新"
+		}
+	}
+};
+//#endregion
+//#region src/presets/system-overview/validate.ts
+/**
+* system-overview 校验（fail-closed）：共享规则（title ≤80 / autoRefreshMs）。
+*/
+function validateSystemOverview(props) {
+	return validateLocalPresetProps("system-overview", props);
+}
+//#endregion
+//#region src/presets/system-overview/Render.tsx
+const headerStyle$10 = {
+	display: "flex",
+	alignItems: "baseline",
+	justifyContent: "space-between",
+	gap: 8,
+	padding: "10px 14px",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const gridStyle$1 = {
+	display: "grid",
+	gridTemplateColumns: "repeat(4, 1fr)",
+	gap: 1,
+	background: "var(--openloop-border)"
+};
+const cellStyle$3 = {
+	padding: "12px 14px",
+	background: "var(--openloop-surface)"
+};
+const cellLabelStyle = {
+	fontSize: 11,
+	color: "var(--openloop-muted-foreground)"
+};
+const cellValueStyle = {
+	fontSize: 17,
+	fontWeight: 700,
+	marginTop: 3,
+	fontVariantNumeric: "tabular-nums"
+};
+const placeholderStyle$8 = {
+	padding: "22px 14px",
+	textAlign: "center",
+	color: "var(--openloop-muted-foreground)",
+	fontSize: 12,
+	lineHeight: 1.7
+};
+const warnRowStyle = {
+	display: "flex",
+	alignItems: "center",
+	gap: 8,
+	padding: "7px 14px",
+	fontSize: 12,
+	color: "var(--openloop-foreground)",
+	borderBottom: "1px solid var(--openloop-border)"
+};
+const dotStyle$2 = (tone) => ({
+	width: 8,
+	height: 8,
+	borderRadius: "50%",
+	flexShrink: 0,
+	background: tone === "ok" ? "var(--openloop-success)" : tone === "warn" ? "var(--openloop-warning)" : "var(--openloop-error)"
+});
+function SystemOverviewRender({ props }) {
+	const record = asRecord(props) ?? {};
+	const autoRefreshMs = typeof record.autoRefreshMs === "number" ? record.autoRefreshMs : void 0;
+	const status = useAppEndpoint("/openloop/app/status", autoRefreshMs);
+	const mcp = useAppEndpoint("/openloop/mcp/servers", autoRefreshMs);
+	const storage = useAppEndpoint("/openloop/app/storage-usage", autoRefreshMs);
+	const sessions = useAppEndpoint("/openloop/app/sessions-stats", autoRefreshMs);
+	const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "系统总览";
+	const backendState = typeof status.data?.state === "string" ? status.data.state : "unknown";
+	const servers = (mcp.data?.servers ?? []).filter((s) => typeof s.id === "string");
+	const mcpRunning = servers.filter((s) => s.state === "running").length;
+	const mcpDead = servers.filter((s) => s.state === "error" || s.state === "disconnected");
+	const totalBytes = typeof storage.data?.totalBytes === "number" ? storage.data.totalBytes : null;
+	const sessionsTotal = typeof sessions.data?.total === "number" ? sessions.data.total : null;
+	const restarts = typeof status.data?.restarts === "number" ? status.data.restarts : 0;
+	const warnings = [];
+	if (backendState !== "running") warnings.push({
+		tone: "error",
+		text: `应用后端 ${backendState}——面板看板已降级本地存储`
+	});
+	if (restarts > 0) warnings.push({
+		tone: "warn",
+		text: `后端自上次启动已自动重启 ${restarts} 次（watchdog 守护）`
+	});
+	for (const s of mcpDead) warnings.push({
+		tone: "warn",
+		text: `MCP server「${String(s.id)}」不可达（惰性重连中）`
+	});
+	return /* @__PURE__ */ jsxs("div", {
+		style: panel,
+		"data-openloop-preset": "system-overview",
+		children: [/* @__PURE__ */ jsxs("div", {
+			style: headerStyle$10,
+			children: [/* @__PURE__ */ jsx("span", {
+				style: title,
+				children: headerTitle
+			}), /* @__PURE__ */ jsx("span", {
+				style: meta,
+				children: backendState === "running" && servers.length > 0 ? `运行中 · ${typeof status.data?.version === "string" ? status.data.version : ""} · ${mcpRunning}/${servers.length} MCP` : ""
+			})]
+		}), status.unavailable ? /* @__PURE__ */ jsxs("div", {
+			style: placeholderStyle$8,
+			children: [
+				"应用后端未启用",
+				/* @__PURE__ */ jsx("br", {}),
+				/* @__PURE__ */ jsx("span", {
+					style: meta,
+					children: "安装并激活 @openloop/dsh-app 后可查看系统总览"
+				})
+			]
+		}) : /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsxs("div", {
+			style: gridStyle$1,
+			children: [
+				/* @__PURE__ */ jsxs("div", {
+					style: cellStyle$3,
+					children: [/* @__PURE__ */ jsx("div", {
+						style: cellLabelStyle,
+						children: "应用后端"
+					}), /* @__PURE__ */ jsx("div", {
+						style: {
+							...cellValueStyle,
+							color: backendState === "running" ? "var(--openloop-success)" : "var(--openloop-error)"
+						},
+						children: backendState === "running" ? "正常" : backendState === "starting" ? "启动中" : "异常"
+					})]
+				}),
+				/* @__PURE__ */ jsxs("div", {
+					style: cellStyle$3,
+					children: [/* @__PURE__ */ jsx("div", {
+						style: cellLabelStyle,
+						children: "MCP 服务"
+					}), /* @__PURE__ */ jsxs("div", {
+						style: cellValueStyle,
+						children: [mcpRunning, /* @__PURE__ */ jsxs("span", {
+							style: meta,
+							children: [" / ", servers.length]
+						})]
+					})]
+				}),
+				/* @__PURE__ */ jsxs("div", {
+					style: cellStyle$3,
+					children: [/* @__PURE__ */ jsx("div", {
+						style: cellLabelStyle,
+						children: "磁盘占用"
+					}), /* @__PURE__ */ jsx("div", {
+						style: cellValueStyle,
+						children: totalBytes !== null ? formatBytes(totalBytes) : "—"
+					})]
+				}),
+				/* @__PURE__ */ jsxs("div", {
+					style: cellStyle$3,
+					children: [/* @__PURE__ */ jsx("div", {
+						style: cellLabelStyle,
+						children: "会话总数"
+					}), /* @__PURE__ */ jsx("div", {
+						style: cellValueStyle,
+						children: sessionsTotal !== null ? sessionsTotal : "—"
+					})]
+				})
+			]
+		}), warnings.length > 0 ? /* @__PURE__ */ jsx("div", { children: warnings.map((w, i) => /* @__PURE__ */ jsxs("div", {
+			style: {
+				...warnRowStyle,
+				borderTop: i === 0 ? "1px solid var(--openloop-border)" : void 0
+			},
+			children: [/* @__PURE__ */ jsx("span", { style: dotStyle$2(w.tone) }), w.text]
+		}, i)) }) : /* @__PURE__ */ jsxs("div", {
+			style: {
+				...warnRowStyle,
+				color: "var(--openloop-muted-foreground)",
+				borderBottom: 0
+			},
+			children: [/* @__PURE__ */ jsx("span", { style: dotStyle$2("ok") }), " 全部子系统正常"]
+		})] })]
+	});
+}
+//#endregion
+//#region src/presets/system-overview/index.ts
+const systemOverviewPreset = {
+	kind: "system-overview",
+	schema: systemOverviewSchema,
+	validate: validateSystemOverview,
+	Render: SystemOverviewRender
+};
+//#endregion
+//#region src/presets/accordion/schema.ts
+/**
+* accordion props JSON Schema。
+* items 1–20；展开状态为组件内本地 state（单开手风琴），defaultOpenIndex 可选。
+*/
+const accordionSchema = {
+	$schema: "http://json-schema.org/draft-07/schema#",
+	type: "object",
+	additionalProperties: false,
+	properties: {
+		title: {
+			type: "string",
+			maxLength: 80,
+			description: "可选的折叠区标题，≤80 字符"
+		},
+		defaultOpenIndex: {
+			type: "integer",
+			minimum: 0,
+			description: "默认展开第几项（0 起）；省略默认展开第一项"
+		},
+		items: {
+			type: "array",
+			minItems: 1,
+			maxItems: 20,
+			description: "折叠项，1–20 个",
+			items: {
+				type: "object",
+				additionalProperties: false,
+				properties: {
+					label: {
+						type: "string",
+						minLength: 1,
+						maxLength: 80,
+						description: "折叠项标题，1–80 字符"
+					},
+					content: {
+						type: "string",
+						maxLength: 2e3,
+						description: "展开后的内容文本，≤2000 字符，保留换行"
+					}
+				},
+				required: ["label"]
+			}
+		}
+	},
+	required: ["items"]
+};
+//#endregion
+//#region src/presets/accordion/validate.ts
+/**
+* accordion 校验（fail-closed）。
+* - items 必填数组 1–20，每项 label 必填 1–80 字符，content ≤2000 字符
+* - defaultOpenIndex 非负整数（越界时渲染器自动收敛）
+*/
+function validateAccordion(props) {
+	const root = asRecord(props);
+	if (!root) return validationFail([error("$", "accordion props 必须是 JSON 对象")]);
+	const errors = [];
+	if (root.title !== void 0 && (typeof root.title !== "string" || root.title.length > 80)) errors.push(error("title", "title 必须是 ≤80 字符的字符串"));
+	if (root.defaultOpenIndex !== void 0) {
+		if (typeof root.defaultOpenIndex !== "number" || !Number.isInteger(root.defaultOpenIndex)) errors.push(error("defaultOpenIndex", "defaultOpenIndex 必须是非负整数"));
+		else if (root.defaultOpenIndex < 0) errors.push(error("defaultOpenIndex", `defaultOpenIndex 不得为负，当前 ${root.defaultOpenIndex}`));
+	}
+	if (!Array.isArray(root.items)) {
+		errors.push(error("items", "items 必填，必须是 1–20 项的数组"));
+		return validationFail(errors);
+	}
+	if (root.items.length < 1 || root.items.length > 20) errors.push(error("items", `items 数量必须为 1–20，当前 ${root.items.length}`));
+	root.items.forEach((raw, index) => {
+		const path = `items[${index}]`;
+		const item = asRecord(raw);
+		if (!item) {
+			errors.push(error(path, "每一项必须是 JSON 对象"));
+			return;
+		}
+		if (!isNonEmptyString(item.label)) errors.push(error(`${path}.label`, "label 必填，必须是非空字符串（1–80 字符）"));
+		else if (item.label.length > 80) errors.push(error(`${path}.label`, `label 长度不得超过 80 字符，当前 ${item.label.length}`));
+		if (item.content !== void 0) {
+			if (typeof item.content !== "string") errors.push(error(`${path}.content`, "content 必须是字符串"));
+			else if (item.content.length > 2e3) errors.push(error(`${path}.content`, `content 长度不得超过 2000 字符，当前 ${item.content.length}`));
+		}
+	});
+	return errors.length > 0 ? validationFail(errors) : validationOk();
 }
 //#endregion
 //#region src/presets/accordion/Render.tsx
@@ -472,118 +1792,6 @@ const apiCredentialsSchema = {
 */
 function validateApiCredentials(props) {
 	return validateLocalPresetProps("api-credentials", props);
-}
-//#endregion
-//#region src/presets/local-backend.ts
-/**
-* 本地后端预设族共享基建：
-* - useAppEndpoint：同源 fetch /openloop/app/*（或既有 MCP admin 路由），带
-*   content-type 守卫（DSH webServer 对未知路径回落 SPA 200+HTML——非 JSON 应答
-*   判 unavailable 而非报错）+ 可选自动刷新（≥10s）
-* - formatBytes / formatDuration / relativeTime：展示格式化纯函数
-* 颜色纪律：本文件不产出色值（token 由消费方 Render 内联）。
-*/
-const MIN_REFRESH_MS = 1e4;
-function useAppEndpoint(path, autoRefreshMs) {
-	const [state, setState] = useState({
-		loading: path !== null,
-		unavailable: false
-	});
-	useEffect(() => {
-		if (path === null) {
-			setState({
-				loading: false,
-				unavailable: true
-			});
-			return;
-		}
-		let cancelled = false;
-		let timer;
-		const load = async () => {
-			try {
-				const controller = new AbortController();
-				const to = setTimeout(() => controller.abort(), 5e3);
-				try {
-					const res = await fetch(path, { signal: controller.signal });
-					if (!(res.headers.get("content-type") ?? "").includes("application/json")) {
-						if (!cancelled) setState({
-							loading: false,
-							unavailable: true
-						});
-						return;
-					}
-					const body = await res.json();
-					if (!cancelled) {
-						if (!res.ok) setState({
-							loading: false,
-							unavailable: false,
-							error: typeof body?.error === "string" ? body.error : `HTTP ${res.status}`
-						});
-						else setState({
-							loading: false,
-							unavailable: false,
-							data: body
-						});
-					}
-				} finally {
-					clearTimeout(to);
-				}
-			} catch (error) {
-				if (!cancelled) setState({
-					loading: false,
-					unavailable: false,
-					error: error instanceof Error ? error.message : String(error)
-				});
-			}
-		};
-		load();
-		if (typeof autoRefreshMs === "number" && autoRefreshMs >= MIN_REFRESH_MS) timer = setInterval(() => {
-			load();
-		}, autoRefreshMs);
-		return () => {
-			cancelled = true;
-			if (timer !== void 0) clearInterval(timer);
-		};
-	}, [path, autoRefreshMs]);
-	return state;
-}
-function formatBytes(bytes) {
-	if (!Number.isFinite(bytes) || bytes < 0) return "—";
-	if (bytes < 1024) return `${Math.round(bytes)} B`;
-	const one = (n) => String(n >= 100 ? Math.round(n) : Math.round(n * 10) / 10);
-	const kb = bytes / 1024;
-	if (kb < 1024) return `${one(kb)} KB`;
-	const mb = kb / 1024;
-	if (mb < 1024) return `${one(mb)} MB`;
-	return `${(Math.round(mb / 1024 * 100) / 100).toString()} GB`;
-}
-function formatDuration(ms) {
-	if (!Number.isFinite(ms) || ms < 0) return "—";
-	const s = Math.floor(ms / 1e3);
-	if (s < 60) return `${s}s`;
-	const m = Math.floor(s / 60);
-	if (m < 60) return `${m}m ${s % 60}s`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h}h ${m % 60}m`;
-	return `${Math.floor(h / 24)}d ${h % 24}h`;
-}
-/** 相对时间（"3 分钟前"）；空/非法返回 '—' */
-function relativeTime(iso) {
-	if (typeof iso !== "string" || iso.length === 0) return "—";
-	const t = Date.parse(iso);
-	if (!Number.isFinite(t)) return "—";
-	const diff = Date.now() - t;
-	if (diff < 0) return new Date(t).toLocaleString();
-	const m = Math.floor(diff / 6e4);
-	if (m < 1) return "刚刚";
-	if (m < 60) return `${m} 分钟前`;
-	const h = Math.floor(m / 60);
-	if (h < 24) return `${h} 小时前`;
-	return `${Math.floor(h / 24)} 天前`;
-}
-/** 长字符串截断（表格单元格用） */
-function truncate(text, max = 60) {
-	return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 //#endregion
 //#region src/presets/api-credentials/Render.tsx
@@ -6708,7 +7916,12 @@ const registry = {
 	"api-credentials": apiCredentialsPreset,
 	"sessions-stats": sessionsStatsPreset,
 	"mcp-status": mcpStatusPreset,
-	"plugin-registry": pluginRegistryPreset
+	"plugin-registry": pluginRegistryPreset,
+	"app-manager": appManagerPreset,
+	"api-usage-monitor": apiUsageMonitorPreset,
+	"system-overview": systemOverviewPreset,
+	"event-log": eventLogPreset,
+	"agent-activity": agentActivityPreset
 };
 /** 取预设模块；未实现/未知 kind 返回 undefined */
 function getPreset(kind) {
@@ -7123,6 +8336,8 @@ async function resolveWidgetData(binding, ctx = {}) {
 	const url = buildApiUrl(source.url, source.query);
 	const doFetch = ctx.fetchFn ?? fetch;
 	const abort = createAbortHandle(timeoutMs, ctx.signal);
+	const startedAt = Date.now();
+	const record = (ok) => recordApiUsage(source.url, "panel-binding", ok, Date.now() - startedAt);
 	try {
 		const init = {
 			method: source.method ?? "GET",
@@ -7141,17 +8356,23 @@ async function resolveWidgetData(binding, ctx = {}) {
 		try {
 			response = await doFetch(url, init);
 		} catch (error) {
+			record(false);
 			if (abort.signal.aborted) throw new Error(`api source timed out after ${timeoutMs}ms: ${url}`);
 			throw new Error(`api source fetch failed: ${errorMessage$1(error)} (${url})`);
 		}
 		if (!response.ok) {
+			record(false);
 			const statusText = response.statusText ? ` ${response.statusText}` : "";
 			throw new Error(`api source returned HTTP ${response.status}${statusText} for ${url}`);
 		}
 		const contentType = response.headers.get("content-type");
 		const { bytes, truncated } = await readBodyBytes(response.body ?? new ReadableStream(), MAX_RESPONSE_BYTES);
-		if (truncated) throw new Error(`api source response exceeds the ${MAX_RESPONSE_BYTES} byte limit: ${url}`);
+		if (truncated) {
+			record(false);
+			throw new Error(`api source response exceeds the ${MAX_RESPONSE_BYTES} byte limit: ${url}`);
+		}
 		const parsed = parseJsonResponse(contentType, new TextDecoder().decode(bytes));
+		record(true);
 		return binding.pick !== void 0 ? pickValue(parsed, binding.pick) : parsed;
 	} finally {
 		abort.dispose();

@@ -20,6 +20,7 @@ import {
   validateUiBinding,
   type RawMcpResourceContents,
 } from './validation.ts'
+import { recordApiUsage } from './api-usage-bridge.ts'
 import type {
   JsonObject,
   McpCallResult,
@@ -278,6 +279,24 @@ export class McpRuntime {
   }
 
   async callTool(
+    serverId: string,
+    toolName: string,
+    args: JsonObject,
+    options: { readonly signal?: AbortSignal; readonly binding?: McpUiBinding; readonly hydrateApp?: boolean } = {},
+  ): Promise<McpCallResult> {
+    const usageStartedAt = Date.now()
+    const usageKey = `${serverId}:${toolName}`
+    try {
+      const result = await this.callToolInner(serverId, toolName, args, options)
+      recordApiUsage(usageKey, 'mcp-call', true, Date.now() - usageStartedAt)
+      return result
+    } catch (error) {
+      recordApiUsage(usageKey, 'mcp-call', false, Date.now() - usageStartedAt)
+      throw error
+    }
+  }
+
+  private async callToolInner(
     serverId: string,
     toolName: string,
     args: JsonObject,

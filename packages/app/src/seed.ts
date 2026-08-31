@@ -14,13 +14,14 @@
  */
 import type { AppFacade } from './facade.ts'
 
-/** 与 panels 0.4.0 allPresetKinds() 对齐（33 个） */
+/** 与 panels allPresetKinds() 对齐（38 个：33 + 自管理四件套 5） */
 export const BUILTIN_KINDS: readonly string[] = [
-  'accordion', 'api-credentials', 'avatar', 'badge', 'callout', 'card', 'chart',
-  'comparison', 'data-table', 'db-browser', 'divider', 'flow', 'funnel', 'gauge',
+  'accordion', 'agent-activity', 'api-credentials', 'api-usage-monitor', 'app-manager',
+  'avatar', 'badge', 'callout', 'card', 'chart',
+  'comparison', 'data-table', 'db-browser', 'divider', 'event-log', 'flow', 'funnel', 'gauge',
   'grid', 'heading', 'heatmap', 'markdown', 'mcp-status', 'metric-grid',
   'pb-stats', 'plugin-registry', 'progress', 'row', 'section', 'sessions-stats',
-  'sparkline', 'split', 'stack', 'storage-usage', 'tag', 'text', 'timeline',
+  'sparkline', 'split', 'stack', 'storage-usage', 'system-overview', 'tag', 'text', 'timeline',
 ]
 
 const BUILTIN_APIS = [
@@ -39,6 +40,8 @@ const KIND_TITLES: Record<string, string> = {
   'pb-stats': '后端状态', 'plugin-registry': '插件清单', progress: '进度条', row: '横向行',
   section: '分区', 'sessions-stats': '会话统计', sparkline: '迷你走势', split: '分栏',
   stack: '纵向堆叠', 'storage-usage': '存储占用', tag: '标签', text: '文本', timeline: '时间线',
+  'app-manager': 'APP 管理', 'api-usage-monitor': '调用监控', 'system-overview': '系统总览',
+  'event-log': '系统事件流', 'agent-activity': 'Agent 行为',
 }
 
 /** 极简合法 PanelDefinition（单 widget 平铺 entry）——保证目录条目「可固定」 */

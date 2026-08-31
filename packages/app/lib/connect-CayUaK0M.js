@@ -1,3 +1,5 @@
+import { recordSystemEvent } from "./event-log-B7kLpBeW.js";
+import { readFileSync } from "node:fs";
 import { parseServerEntry, scopedFilePath, upsertServerToFile } from "@openloop/dsh-mcp-runtime";
 //#region src/connect.ts
 /** MCP 工具名（可含下划线/大写）→ rid 段（kebab 词法，RID_RE 兼容） */
@@ -17,6 +19,50 @@ function toolSummary(tool) {
 		hasUi: Boolean(tool.ui),
 		...tool.ui ? { resourceUri: tool.ui.resourceUri } : {}
 	};
+}
+/**
+* disconnect_server / reconnect_server —— app-manager 的受控管理动作（2026-08-31）。
+*
+* 断开 = 热移除 runtime server（工具随之清掉）+ 保留 mcp.json 条目（下次重连即用）
+*   + 删除 registry 壳与组件（APP 页/看板 pin 目录不再显示）。
+* 重连 = 等价于 connect_server 的 mcp.json 已有条目（热激活 + 探活 + 引用组件落库）。
+* 纪律同 connect：错误消息面向 Agent；凭据零接触（条目只是 transport 描述）。
+*/
+async function disconnectServer(options) {
+	const { serverId, dshHome, backend, mcpRuntime } = options;
+	const facade = await backend.ready();
+	const detail = await facade.getAppDetail(serverId);
+	if (detail === void 0) throw new Error(`app "${serverId}" is not registered. Call list_apps to see what exists.`);
+	let removed = false;
+	if (mcpRuntime !== void 0 && mcpRuntime.serverIds().includes(serverId)) removed = await mcpRuntime.removeServer(serverId);
+	const mcpJsonPath = scopedFilePath("user", { dshHome });
+	await facade.deleteApp(serverId);
+	backend.invalidateRegistry();
+	recordSystemEvent("registry", "info", `断开第三方包 ${serverId}（保留配置，可重连）`);
+	return {
+		ok: true,
+		serverId,
+		runtimeRemoved: removed,
+		mcpJsonEntry: "kept (reconnect to re-activate)",
+		mcpJsonPath,
+		removedComponents: detail.components.length,
+		removedApis: detail.apis.length
+	};
+}
+async function reconnectServer(options) {
+	const { serverId, dshHome, backend, mcpRuntime } = options;
+	const mcpJsonPath = scopedFilePath("user", { dshHome });
+	let entry;
+	try {
+		entry = JSON.parse(readFileSync(mcpJsonPath, "utf8")).servers?.[serverId];
+	} catch {
+		entry = void 0;
+	}
+	if (entry === void 0) throw new Error(`no mcp.json entry for "${serverId}" — disconnected apps keep their entry; if it is gone, use connect_server with a fresh entry`);
+	return connectServer({
+		...options,
+		entry
+	});
 }
 async function connectServer(options) {
 	const { serverId, entry, dshHome, backend, mcpRuntime } = options;
@@ -65,6 +111,7 @@ async function connectServer(options) {
 		});
 		components.push(row);
 	}
+	recordSystemEvent("registry", state === "disconnected" ? "warn" : "info", `接入第三方包 ${serverId}${activated ? `（${state}，${tools.length} 工具）` : "（已保存，重启后激活）"}`);
 	return {
 		ok: true,
 		serverId,
@@ -85,4 +132,4 @@ async function connectServer(options) {
 	};
 }
 //#endregion
-export { connectServer };
+export { connectServer, disconnectServer, reconnectServer };
