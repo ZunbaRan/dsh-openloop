@@ -101,7 +101,10 @@ export function sourceIdOf(source: DockTileSource): string | null {
     if (source.meta.rid !== undefined && source.meta.rid.length > 0) return source.meta.rid
     return `${source.meta.serverId}:${source.meta.toolName.toLowerCase().replace(/[^a-z0-9-]+/g, '-')}`
   }
-  const path = (source.meta as { path?: unknown } | null)?.path
+  // artifact：meta.rid 优先（与 col2 资源列表 c.id 同命名空间）；无 rid 时退化到 path 文件名
+  const meta = source.meta as { rid?: unknown; path?: unknown } | null
+  if (typeof meta?.rid === 'string' && meta.rid.length > 0) return meta.rid
+  const path = meta?.path
   if (typeof path !== 'string' || path.length === 0) return null
   const base = path.split('/').pop() ?? path
   return base.length > 0 ? `openloop:${base}` : null

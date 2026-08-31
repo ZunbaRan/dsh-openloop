@@ -97,36 +97,34 @@ function readArtifactExampleAssets(): Map<string, string> {
 export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boolean; components: number; apis: number }> {
   const existing = await facade.listApps()
   if (existing.some(a => a.name === 'openloop')) {
-    // 升级补种：few-shot artifact 范例（0.5.2 新增）缺席时补上
-    const detail = await facade.getAppDetail('openloop')
-    const hasExamples = (detail?.components ?? []).some(c => c.rid === 'openloop:example-system-map')
-    if (!hasExamples) {
-      let patched = 0
-      const exampleHtml = readArtifactExampleAssets()
-      for (const example of ARTIFACT_EXAMPLES) {
-        const html = exampleHtml.get(example.rid.split(':')[1] ?? '')
-        if (html === undefined) continue
-        await facade.registerComponent('openloop', {
-          rid: example.rid,
-          kind: 'artifact',
-          title: example.title,
-          description: example.description,
-          entry: {
-            artifact: {
-              kind: 'openloop.html-artifact',
-              version: 1,
-              title: example.title,
-              runtime: example.runtime,
-              html,
-              path: `openloop-examples/${example.rid.split(':')[1]}.html`,
-            },
+    // 升级覆盖：few-shot artifact 范例的 title/description/runtime/html
+    // 全部 upsert（registerComponent 是 rid upsert——用户自定义组件同名 rid
+    // 不会被覆盖；范例内容始终是「最新版的正确形态」，包括 0.5.3 network 档
+    // 修订）。用户组件完全无副作用。
+    let patched = 0
+    const exampleHtml = readArtifactExampleAssets()
+    for (const example of ARTIFACT_EXAMPLES) {
+      const html = exampleHtml.get(example.rid.split(':')[1] ?? '')
+      if (html === undefined) continue
+      await facade.registerComponent('openloop', {
+        rid: example.rid,
+        kind: 'artifact',
+        title: example.title,
+        description: example.description,
+        entry: {
+          artifact: {
+            kind: 'openloop.html-artifact',
+            version: 1,
+            title: example.title,
+            runtime: example.runtime,
+            html,
+            path: `openloop-examples/${example.rid.split(':')[1]}.html`,
           },
-        })
-        patched++
-      }
-      return { seeded: false, components: patched, apis: 0 }
+        },
+      })
+      patched++
     }
-    return { seeded: false, components: 0, apis: 0 }
+    return { seeded: false, components: patched, apis: 0 }
   }
   await facade.upsertApp({
     name: 'openloop',
@@ -165,6 +163,7 @@ export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boole
           runtime: example.runtime,
           html,
           path: `openloop-examples/${example.rid.split(':')[1]}.html`,
+          rid: example.rid,
         },
       },
     })

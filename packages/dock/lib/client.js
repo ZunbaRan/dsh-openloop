@@ -5127,7 +5127,9 @@ window.__ModuleLoader__.load({
 				if (source.meta.rid !== void 0 && source.meta.rid.length > 0) return source.meta.rid;
 				return `${source.meta.serverId}:${source.meta.toolName.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
 			}
-			const path = source.meta?.path;
+			const meta = source.meta;
+			if (typeof meta?.rid === "string" && meta.rid.length > 0) return meta.rid;
+			const path = meta?.path;
 			if (typeof path !== "string" || path.length === 0) return null;
 			const base = path.split("/").pop() ?? path;
 			return base.length > 0 ? `openloop:${base}` : null;

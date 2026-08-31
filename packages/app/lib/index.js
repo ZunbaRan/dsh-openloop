@@ -2072,37 +2072,30 @@ function readArtifactExampleAssets() {
 */
 async function seedBuiltinApp(facade) {
 	if ((await facade.listApps()).some((a) => a.name === "openloop")) {
-		if (!((await facade.getAppDetail("openloop"))?.components ?? []).some((c) => c.rid === "openloop:example-system-map")) {
-			let patched = 0;
-			const exampleHtml = readArtifactExampleAssets();
-			for (const example of ARTIFACT_EXAMPLES) {
-				const html = exampleHtml.get(example.rid.split(":")[1] ?? "");
-				if (html === void 0) continue;
-				await facade.registerComponent("openloop", {
-					rid: example.rid,
-					kind: "artifact",
+		let patched = 0;
+		const exampleHtml = readArtifactExampleAssets();
+		for (const example of ARTIFACT_EXAMPLES) {
+			const html = exampleHtml.get(example.rid.split(":")[1] ?? "");
+			if (html === void 0) continue;
+			await facade.registerComponent("openloop", {
+				rid: example.rid,
+				kind: "artifact",
+				title: example.title,
+				description: example.description,
+				entry: { artifact: {
+					kind: "openloop.html-artifact",
+					version: 1,
 					title: example.title,
-					description: example.description,
-					entry: { artifact: {
-						kind: "openloop.html-artifact",
-						version: 1,
-						title: example.title,
-						runtime: example.runtime,
-						html,
-						path: `openloop-examples/${example.rid.split(":")[1]}.html`
-					} }
-				});
-				patched++;
-			}
-			return {
-				seeded: false,
-				components: patched,
-				apis: 0
-			};
+					runtime: example.runtime,
+					html,
+					path: `openloop-examples/${example.rid.split(":")[1]}.html`
+				} }
+			});
+			patched++;
 		}
 		return {
 			seeded: false,
-			components: 0,
+			components: patched,
 			apis: 0
 		};
 	}
@@ -2140,7 +2133,8 @@ async function seedBuiltinApp(facade) {
 				title: example.title,
 				runtime: example.runtime,
 				html,
-				path: `openloop-examples/${example.rid.split(":")[1]}.html`
+				path: `openloop-examples/${example.rid.split(":")[1]}.html`,
+				rid: example.rid
 			} }
 		});
 		components++;
