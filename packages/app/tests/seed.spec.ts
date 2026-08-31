@@ -20,22 +20,36 @@ beforeEach(async () => {
 })
 
 describe('seedBuiltinApp', () => {
-  it('空库 seed：openloop + 38 组件（全部可 pin 的合法 entry）+ 3 API', async () => {
+  it('空库 seed：openloop + 42 组件（38 预设 + 4 artifact 范例，全部可 pin 的合法 entry）+ 3 API', async () => {
     const result = await seedBuiltinApp(facade)
-    expect(result).toEqual({ seeded: true, components: 38, apis: 3 })
+    expect(result).toEqual({ seeded: true, components: 42, apis: 3 })
 
     const detail = await facade.getAppDetail('openloop')
     expect(detail).toBeDefined()
-    expect(detail!.components).toHaveLength(38)
+    expect(detail!.components).toHaveLength(42)
     expect(detail!.apis).toHaveLength(3)
-    // 全部 entry 形状合法（平铺 PanelDefinition：id/title/widgets）
+    // 全部 entry 形状合法：panel = 平铺 PanelDefinition（id/title/widgets）；
+    // artifact = { artifact: ArtifactMeta }（few-shot 范例，0.5.2 起）
     for (const c of detail!.components) {
+      if (c.kind === 'artifact') {
+        const meta = (c.entry as { artifact?: { kind?: unknown; html?: unknown; runtime?: unknown } }).artifact
+        expect(meta?.kind).toBe('openloop.html-artifact')
+        expect(typeof meta?.html).toBe('string')
+        expect(['static', 'scripts', 'network']).toContain(meta?.runtime)
+        continue
+      }
       const entry = c.entry as { id?: unknown; title?: unknown; widgets?: unknown }
       expect(typeof entry.id).toBe('string')
       expect(typeof entry.title).toBe('string')
       expect(Array.isArray(entry.widgets)).toBe(true)
       expect((entry.widgets as unknown[]).length).toBeGreaterThan(0)
     }
+    // few-shot 范例四件齐
+    const exampleRids = detail!.components.filter(c => c.kind === 'artifact').map(c => c.rid).sort()
+    expect(exampleRids).toEqual([
+      'openloop:example-agent-dashboard', 'openloop:example-backend-console',
+      'openloop:example-system-map', 'openloop:example-usage-report',
+    ])
     // API 形态
     expect(detail!.apis.map(a => a.rid).sort()).toEqual(['openloop:apis', 'openloop:boards', 'openloop:components'])
   })
@@ -48,8 +62,8 @@ describe('seedBuiltinApp', () => {
     const again = await seedBuiltinApp(facade)
     expect(again.seeded).toBe(false)
     const detail = await facade.getAppDetail('openloop')
-    // 用户加的还在，仍是 39 个组件
-    expect(detail!.components).toHaveLength(39)
+    // 用户加的还在，仍是 43 个组件
+    expect(detail!.components).toHaveLength(43)
     expect(detail!.components.some(c => c.rid === 'openloop:my-custom')).toBe(true)
   })
 
@@ -59,7 +73,7 @@ describe('seedBuiltinApp', () => {
     expect(await facade.getAppDetail('openloop')).toBeUndefined()
     const reseed = await seedBuiltinApp(facade)
     expect(reseed.seeded).toBe(true)
-    expect((await facade.getAppDetail('openloop'))!.components).toHaveLength(38)
+    expect((await facade.getAppDetail('openloop'))!.components).toHaveLength(42)
   })
 })
 

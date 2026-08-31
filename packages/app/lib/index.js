@@ -1,4 +1,4 @@
-import { n as createPbEventReader, r as createPbEventWriter, t as createEventRecorder } from "./event-log-DTt4Ki23.js";
+import { n as createPbEventReader, o as __commonJSMin, r as createPbEventWriter, s as __require, t as createEventRecorder } from "./event-log-BXAbL1aZ.js";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -1814,6 +1814,86 @@ var PbWatchdog = class {
 	}
 };
 //#endregion
+//#region ../artifact/package.json
+var require_package = /* @__PURE__ */ __commonJSMin(((exports, module) => {
+	module.exports = {
+		"name": "@openloop/dsh-html-artifact",
+		"version": "0.5.0",
+		"description": "Replayable static or scripted fullscreen HTML artifacts for DeepSeek Harness.",
+		"private": true,
+		"type": "module",
+		"main": "lib/index.js",
+		"types": "lib/index.d.ts",
+		"exports": {
+			".": {
+				"types": "./lib/index.d.ts",
+				"default": "./lib/index.js"
+			},
+			"./client": {
+				"types": "./src/client/index.tsx",
+				"default": "./lib/client.js"
+			},
+			"./cordis.patch.yml": "./cordis.patch.yml",
+			"./package.json": "./package.json"
+		},
+		"files": [
+			"lib",
+			"src",
+			"assets",
+			"cordis.patch.yml",
+			"README.md"
+		],
+		"scripts": {
+			"build": "tsdown",
+			"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+			"test": "vitest run",
+			"check": "pnpm typecheck && pnpm test && pnpm build"
+		},
+		"dsh": {
+			"bundle": { "patch": "./cordis.patch.yml" },
+			"client": {
+				"inject": [
+					"@deepseek-ai/dsh-client-runtime",
+					"@deepseek-ai/dsh-client-ui-tool",
+					"@deepseek-ai/dsh-client-ui-primitives",
+					"@deepseek-ai/dsh-client-ui-settings"
+				],
+				"platform": "web",
+				"external": ["@openloop/dsh-base/client"]
+			}
+		},
+		"peerDependencies": {
+			"@deepseek-ai/cordis": "^4.0.1",
+			"@deepseek-ai/dsh-fs": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-sandbox-policy": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-skill": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-tools": "^0.1.1-rc.2",
+			"@deepseek-ai/schemastery": "^3.18.1",
+			"react": "^18.2.0 || ^19.0.0"
+		},
+		"devDependencies": {
+			"@deepseek-ai/cordis": "4.0.1",
+			"@deepseek-ai/dsh-client-runtime": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-client-ui-settings": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-client-ui-primitives": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-client-ui-tool": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-fs": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-sandbox-policy": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-skill": "^0.1.1-rc.2",
+			"@deepseek-ai/dsh-tools": "^0.1.1-rc.2",
+			"@deepseek-ai/schemastery": "3.18.1",
+			"@openloop/dsh-base": "workspace:*",
+			"@types/node": "^22.0.0",
+			"@types/react": "~18.3.1",
+			"react": "^18.2.0 || ^19.0.0",
+			"react-dom": "^18.2.0",
+			"tsdown": "^0.22.2",
+			"typescript": "^5.9.3",
+			"vitest": "^4.1.1"
+		}
+	};
+}));
+//#endregion
 //#region src/seed.ts
 /** 与 panels allPresetKinds() 对齐（38 个：33 + 自管理四件套 5） */
 const BUILTIN_KINDS = [
@@ -1936,16 +2016,96 @@ function minimalEntry(kind) {
 		}]
 	};
 }
+/** few-shot 库（0.5.2）：artifact 范例组件——HTML 来自 @openloop/dsh-html-artifact 的 skill 资产 */
+const ARTIFACT_EXAMPLES = [
+	{
+		rid: "openloop:example-system-map",
+		title: "系统地图",
+		description: "生态系统拓扑大屏（可拖节点；static 档范例）",
+		runtime: "static"
+	},
+	{
+		rid: "openloop:example-agent-dashboard",
+		title: "Agent 工作台",
+		description: "Agent 活动脉冲 · 10s 轮询（scripts 档范例）",
+		runtime: "scripts"
+	},
+	{
+		rid: "openloop:example-usage-report",
+		title: "调用监控报表",
+		description: "24h API 调用图表（network 档 + Chart.js 范例）",
+		runtime: "network"
+	},
+	{
+		rid: "openloop:example-backend-console",
+		title: "后端控制台",
+		description: "状态轮询与受控操作（scripts 档范例）",
+		runtime: "scripts"
+	}
+];
+/**
+* 读 artifact 包的范例资产（@openloop/dsh-html-artifact/assets/*.html）。
+* 包缺失/文件缺失返回空 map——few-shot 组件静默缺席（不阻塞 seed 主流程）。
+*/
+function readArtifactExampleAssets() {
+	const out = /* @__PURE__ */ new Map();
+	try {
+		require_package();
+		const base = __require.resolve("@openloop/dsh-html-artifact/package.json");
+		const dir = base.slice(0, base.lastIndexOf("/"));
+		for (const [rid, file] of [
+			["example-system-map", "system-map-example.html"],
+			["example-agent-dashboard", "agent-dashboard-example.html"],
+			["example-usage-report", "usage-report-example.html"],
+			["example-backend-console", "backend-console-example.html"]
+		]) try {
+			out.set(rid, __require("node:fs").readFileSync(`${dir}/assets/${file}`, "utf8"));
+		} catch {}
+	} catch {}
+	return out;
+}
 /**
 * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
 * 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
+* 0.5.2 升级路径：旧 seed（无 artifact 范例）检测到缺失时**只补注册范例组件**
+* （不动用户已有组件——registerComponent 是按 rid upsert，幂等安全）。
 */
 async function seedBuiltinApp(facade) {
-	if ((await facade.listApps()).some((a) => a.name === "openloop")) return {
-		seeded: false,
-		components: 0,
-		apis: 0
-	};
+	if ((await facade.listApps()).some((a) => a.name === "openloop")) {
+		if (!((await facade.getAppDetail("openloop"))?.components ?? []).some((c) => c.rid === "openloop:example-system-map")) {
+			let patched = 0;
+			const exampleHtml = readArtifactExampleAssets();
+			for (const example of ARTIFACT_EXAMPLES) {
+				const html = exampleHtml.get(example.rid.split(":")[1] ?? "");
+				if (html === void 0) continue;
+				await facade.registerComponent("openloop", {
+					rid: example.rid,
+					kind: "artifact",
+					title: example.title,
+					description: example.description,
+					entry: { artifact: {
+						kind: "openloop.html-artifact",
+						version: 1,
+						title: example.title,
+						runtime: example.runtime,
+						html,
+						path: `openloop-examples/${example.rid.split(":")[1]}.html`
+					} }
+				});
+				patched++;
+			}
+			return {
+				seeded: false,
+				components: patched,
+				apis: 0
+			};
+		}
+		return {
+			seeded: false,
+			components: 0,
+			apis: 0
+		};
+	}
 	await facade.upsertApp({
 		name: "openloop",
 		displayName: "OpenLoop",
@@ -1962,6 +2122,26 @@ async function seedBuiltinApp(facade) {
 			title: KIND_TITLES[kind] ?? kind,
 			description: "panels 预设组件（内置）",
 			entry: minimalEntry(kind)
+		});
+		components++;
+	}
+	const exampleHtml = readArtifactExampleAssets();
+	for (const example of ARTIFACT_EXAMPLES) {
+		const html = exampleHtml.get(example.rid.split(":")[1] ?? "");
+		if (html === void 0) continue;
+		await facade.registerComponent("openloop", {
+			rid: example.rid,
+			kind: "artifact",
+			title: example.title,
+			description: example.description,
+			entry: { artifact: {
+				kind: "openloop.html-artifact",
+				version: 1,
+				title: example.title,
+				runtime: example.runtime,
+				html,
+				path: `openloop-examples/${example.rid.split(":")[1]}.html`
+			} }
 		});
 		components++;
 	}
@@ -6456,7 +6636,7 @@ function createAppBackendTool(backend, options = {}) {
 			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
 			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
 			if (action === "connect_server" || action === "disconnect_server" || action === "reconnect_server") {
-				const { connectServer, disconnectServer, reconnectServer } = await import("./connect-yELOuS68.js");
+				const { connectServer, disconnectServer, reconnectServer } = await import("./connect-CmTvIpKq.js");
 				const result = await (action === "connect_server" ? () => connectServer({
 					serverId: expectString(a, "serverId", action),
 					entry: expectObject(a, "server", action),
@@ -7280,7 +7460,7 @@ async function handle(req, res, backend, options) {
 		const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.round(limitRaw))) : 100;
 		if (options.listEvents !== void 0) json(res, 200, { events: await options.listEvents(limit) });
 		else {
-			const { ringSnapshot } = await import("./event-log-DTt4Ki23.js").then((n) => n.i);
+			const { ringSnapshot } = await import("./event-log-BXAbL1aZ.js").then((n) => n.i);
 			json(res, 200, { events: ringSnapshot(limit) });
 		}
 		return;
@@ -7324,7 +7504,7 @@ async function handle(req, res, backend, options) {
 			json(res, 400, { error: "serverId is required" });
 			return;
 		}
-		const { disconnectServer } = await import("./connect-yELOuS68.js");
+		const { disconnectServer } = await import("./connect-CmTvIpKq.js");
 		json(res, 200, await disconnectServer({
 			serverId: body.serverId,
 			dshHome: backend.dshHome(),
@@ -7339,7 +7519,7 @@ async function handle(req, res, backend, options) {
 			json(res, 400, { error: "serverId is required" });
 			return;
 		}
-		const { reconnectServer } = await import("./connect-yELOuS68.js");
+		const { reconnectServer } = await import("./connect-CmTvIpKq.js");
 		json(res, 200, await reconnectServer({
 			serverId: body.serverId,
 			dshHome: backend.dshHome(),

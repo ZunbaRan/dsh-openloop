@@ -12,9 +12,16 @@ import type { AppDescriptor, AppComponentDescriptor } from './app-registry.ts'
 import { buildTileSourceForComponent } from './app-registry.ts'
 import { AppIcon, KindBadge, TypeBadge } from './badges.tsx'
 import { icons } from './icons.tsx'
-import { DependencyMissing } from './base-bridge.tsx'
-import { getPanelsClient, getMcpAppsClient } from './openloop-clients.ts'
+import { DependencyMissing, getBaseClient } from './base-bridge.tsx'
+import { getPanelsClient, getMcpAppsClient, getArtifactClient } from './openloop-clients.ts'
 import { dragResize } from './drag-resize.ts'
+
+/** scope 惰性单例（ArtifactFrame 主题注入；与 DockBoardView 同款） */
+let appListScopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>['createOpenLoopSettingsScope']> | undefined
+function getScope() {
+  if (appListScopeCache === undefined) appListScopeCache = getBaseClient()?.createOpenLoopSettingsScope()
+  return appListScopeCache
+}
 
 /** col 缩略/拖宽常量（0.8.2 恢复旧侧栏能力：缩略 48px 图标条；拖到 <120px 松手自动缩略） */
 const COL_COLLAPSED_WIDTH = 48
@@ -523,6 +530,7 @@ function ComponentPreview({ app, comp, pinned, onPin, tone }: ComponentPreviewPr
             <div className="d2-frame-body">
               {source.kind === 'panel' ? <PanelPreviewBody meta={source.meta} /> : null}
               {source.kind === 'mcp-app' ? <McpAppPreviewBody comp={comp} /> : null}
+              {source.kind === 'artifact' ? <ArtifactPreviewBody meta={source.meta} /> : null}
             </div>
           </div>
         )}
@@ -536,6 +544,14 @@ function PanelPreviewBody({ meta }: { meta: unknown }): ReactNode {
   if (panels === undefined) return <DependencyMissing what="APP 组件预览" dep="@openloop/dsh-panels" />
   const PanelSurface = panels.PanelSurface
   return <PanelSurface meta={meta as never} />
+}
+
+/** artifact 预览（0.5.2 few-shot 库）：复用 tile 渲染链的 ArtifactFrame */
+function ArtifactPreviewBody({ meta }: { meta: unknown }): ReactNode {
+  const artifact = getArtifactClient()
+  if (artifact === undefined) return <DependencyMissing what="APP Artifact 预览" dep="@openloop/dsh-html-artifact" />
+  const ArtifactFrame = artifact.ArtifactFrame
+  return <ArtifactFrame meta={meta as never} token="app-artifact-preview" fullscreen={false} scope={getScope()} />
 }
 
 function McpAppPreviewBody({ comp }: { comp: AppComponentDescriptor }): ReactNode {

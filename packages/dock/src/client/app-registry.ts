@@ -270,7 +270,7 @@ function remoteAppToDescriptor(detail: RemoteAppDetail): AppDescriptor | null {
         type: c?.kind === 'artifact' ? 'artifact' : 'panel',
         desc: str(c?.description),
         kind: '',
-        pinnable: entryPanelOf(entry) !== null,
+        pinnable: entryPanelOf(entry) !== null || entryArtifactOf(entry) !== null,
         entry,
       }
     })
@@ -350,6 +350,26 @@ export function mergeApps(builtin: AppDescriptor[], remote: AppDescriptor[]): Ap
 }
 
 /**
+ * artifact entry 提取（0.5.2 few-shot 库）：entry = { artifact: ArtifactMeta }
+ * （kind 'openloop.html-artifact' + title + runtime + html + path——与
+ * html_artifact 工具产出的 ArtifactMeta 同构）。合法即 pinnable/可预览。
+ */
+export function entryArtifactOf(entry: unknown): Record<string, unknown> | null {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null
+  const wrapped = (entry as { artifact?: unknown }).artifact
+  const meta = typeof entry === 'object' && (entry as Record<string, unknown>).kind === 'openloop.html-artifact'
+    ? entry
+    : wrapped
+  if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) return null
+  const record = meta as Record<string, unknown>
+  if (record.kind !== 'openloop.html-artifact') return null
+  if (typeof record.html !== 'string' || record.html.length === 0) return null
+  if (record.runtime !== 'static' && record.runtime !== 'scripts' && record.runtime !== 'network') return null
+  if (typeof record.title !== 'string' || record.title.length === 0) return null
+  return record
+}
+
+/**
  * entry 面板提取（v1 渲染闭环契约——宽松形态）：
  * - 规范形态：`{ panel: <完整 PanelDefinition> }`（v1 文档原写法）
  * - 宽松形态：直接是 `PanelDefinition`（agent 实际写法——平铺更直觉，免一层套娃）
@@ -408,6 +428,11 @@ export function buildTileSourceForComponent(component: AppComponentDescriptor): 
       kind: 'mcp-app',
       meta: { ...reference, ...(component.id ? { rid: component.id } : {}) },
     }
+  }
+  if (component.type === 'artifact') {
+    const meta = entryArtifactOf(component.entry)
+    if (meta === null) return null
+    return { kind: 'artifact', meta }
   }
   return buildPanelMetaForComponent(component)
 }

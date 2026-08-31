@@ -44,6 +44,9 @@ importers:
       '@deepseek-ai/schemastery':
         specifier: ^3.18.1
         version: 3.18.1
+      '@openloop/dsh-html-artifact':
+        specifier: workspace:*
+        version: link:../artifact
       '@openloop/dsh-mcp-runtime':
         specifier: workspace:*
         version: link:../mcp-runtime

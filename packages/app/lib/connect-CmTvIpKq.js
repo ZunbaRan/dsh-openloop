@@ -1,4 +1,4 @@
-import { a as ringAppend } from "./event-log-DTt4Ki23.js";
+import { a as ringAppend } from "./event-log-BXAbL1aZ.js";
 import { readFileSync } from "node:fs";
 import { parseServerEntry, scopedFilePath, upsertServerToFile } from "@openloop/dsh-mcp-runtime";
 //#region src/connect.ts

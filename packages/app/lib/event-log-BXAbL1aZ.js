@@ -1,6 +1,7 @@
-import "node:module";
+import { createRequire } from "node:module";
 //#region \0rolldown/runtime.js
 var __defProp = Object.defineProperty;
+var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).exports, mod), cb = null), mod.exports);
 var __exportAll = (all, no_symbols) => {
 	let target = {};
 	for (var name in all) __defProp(target, name, {
@@ -10,6 +11,7 @@ var __exportAll = (all, no_symbols) => {
 	if (!no_symbols) __defProp(target, Symbol.toStringTag, { value: "Module" });
 	return target;
 };
+var __require = /* #__PURE__ */ (() => createRequire(import.meta.url))();
 //#endregion
 //#region src/event-log.ts
 var event_log_exports = /* @__PURE__ */ __exportAll({
@@ -111,4 +113,4 @@ function createPbEventReader(getPb) {
 	} };
 }
 //#endregion
-export { ringAppend as a, event_log_exports as i, createPbEventReader as n, createPbEventWriter as r, createEventRecorder as t };
+export { ringAppend as a, event_log_exports as i, createPbEventReader as n, __commonJSMin as o, createPbEventWriter as r, __require as s, createEventRecorder as t };

@@ -54,13 +54,78 @@ function minimalEntry(kind: string): Record<string, unknown> {
   }
 }
 
+/** few-shot 库（0.5.2）：artifact 范例组件——HTML 来自 @openloop/dsh-html-artifact 的 skill 资产 */
+const ARTIFACT_EXAMPLES: ReadonlyArray<{ rid: string; title: string; description: string; runtime: 'static' | 'scripts' | 'network' }> = [
+  { rid: 'openloop:example-system-map', title: '系统地图', description: '生态系统拓扑大屏（可拖节点；static 档范例）', runtime: 'static' },
+  { rid: 'openloop:example-agent-dashboard', title: 'Agent 工作台', description: 'Agent 活动脉冲 · 10s 轮询（scripts 档范例）', runtime: 'scripts' },
+  { rid: 'openloop:example-usage-report', title: '调用监控报表', description: '24h API 调用图表（network 档 + Chart.js 范例）', runtime: 'network' },
+  { rid: 'openloop:example-backend-console', title: '后端控制台', description: '状态轮询与受控操作（scripts 档范例）', runtime: 'scripts' },
+]
+
+/**
+ * 读 artifact 包的范例资产（@openloop/dsh-html-artifact/assets/*.html）。
+ * 包缺失/文件缺失返回空 map——few-shot 组件静默缺席（不阻塞 seed 主流程）。
+ */
+function readArtifactExampleAssets(): Map<string, string> {
+  const out = new Map<string, string>()
+  try {
+    const artifactPkg = require('@openloop/dsh-html-artifact/package.json') as { version?: string }
+    const base = require.resolve('@openloop/dsh-html-artifact/package.json') as string
+    const dir = base.slice(0, base.lastIndexOf('/'))
+    const files: Array<[string, string]> = [
+      ['example-system-map', 'system-map-example.html'],
+      ['example-agent-dashboard', 'agent-dashboard-example.html'],
+      ['example-usage-report', 'usage-report-example.html'],
+      ['example-backend-console', 'backend-console-example.html'],
+    ]
+    void artifactPkg
+    for (const [rid, file] of files) {
+      try {
+        out.set(rid, require('node:fs').readFileSync(`${dir}/assets/${file}`, 'utf8') as string)
+      } catch { /* 单文件缺失跳过 */ }
+    }
+  } catch { /* artifact 包未装：few-shot 库缺席 */ }
+  return out
+}
+
 /**
  * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
  * 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
+ * 0.5.2 升级路径：旧 seed（无 artifact 范例）检测到缺失时**只补注册范例组件**
+ * （不动用户已有组件——registerComponent 是按 rid upsert，幂等安全）。
  */
 export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boolean; components: number; apis: number }> {
   const existing = await facade.listApps()
   if (existing.some(a => a.name === 'openloop')) {
+    // 升级补种：few-shot artifact 范例（0.5.2 新增）缺席时补上
+    const detail = await facade.getAppDetail('openloop')
+    const hasExamples = (detail?.components ?? []).some(c => c.rid === 'openloop:example-system-map')
+    if (!hasExamples) {
+      let patched = 0
+      const exampleHtml = readArtifactExampleAssets()
+      for (const example of ARTIFACT_EXAMPLES) {
+        const html = exampleHtml.get(example.rid.split(':')[1] ?? '')
+        if (html === undefined) continue
+        await facade.registerComponent('openloop', {
+          rid: example.rid,
+          kind: 'artifact',
+          title: example.title,
+          description: example.description,
+          entry: {
+            artifact: {
+              kind: 'openloop.html-artifact',
+              version: 1,
+              title: example.title,
+              runtime: example.runtime,
+              html,
+              path: `openloop-examples/${example.rid.split(':')[1]}.html`,
+            },
+          },
+        })
+        patched++
+      }
+      return { seeded: false, components: patched, apis: 0 }
+    }
     return { seeded: false, components: 0, apis: 0 }
   }
   await facade.upsertApp({
@@ -79,6 +144,29 @@ export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boole
       title: KIND_TITLES[kind] ?? kind,
       description: 'panels 预设组件（内置）',
       entry: minimalEntry(kind),
+    })
+    components++
+  }
+  // few-shot 库（0.5.2）：artifact 范例注册为 artifact 组件（entry 内联 ArtifactMeta）
+  const exampleHtml = readArtifactExampleAssets()
+  for (const example of ARTIFACT_EXAMPLES) {
+    const html = exampleHtml.get(example.rid.split(':')[1] ?? '')
+    if (html === undefined) continue
+    await facade.registerComponent('openloop', {
+      rid: example.rid,
+      kind: 'artifact',
+      title: example.title,
+      description: example.description,
+      entry: {
+        artifact: {
+          kind: 'openloop.html-artifact',
+          version: 1,
+          title: example.title,
+          runtime: example.runtime,
+          html,
+          path: `openloop-examples/${example.rid.split(':')[1]}.html`,
+        },
+      },
     })
     components++
   }

@@ -5052,7 +5052,7 @@ window.__ModuleLoader__.load({
 		*/
 		/** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
 		let scopeCache;
-		function getScope() {
+		function getScope$1() {
 			if (scopeCache === void 0) scopeCache = getBaseClient()?.createOpenLoopSettingsScope();
 			return scopeCache;
 		}
@@ -5299,7 +5299,7 @@ window.__ModuleLoader__.load({
 				meta: tile.source.meta,
 				token: `dock-${tile.tileId}`,
 				fullscreen: false,
-				scope: getScope()
+				scope: getScope$1()
 			});
 		}
 		function DockBoardView() {
@@ -6027,7 +6027,7 @@ window.__ModuleLoader__.load({
 					type: c?.kind === "artifact" ? "artifact" : "panel",
 					desc: str(c?.description),
 					kind: "",
-					pinnable: entryPanelOf(entry) !== null,
+					pinnable: entryPanelOf(entry) !== null || entryArtifactOf(entry) !== null,
 					entry
 				};
 			}).filter((c) => c !== null);
@@ -6094,6 +6094,23 @@ window.__ModuleLoader__.load({
 			return [...builtin, ...remote.filter((a) => !seen.has(a.id))];
 		}
 		/**
+		* artifact entry 提取（0.5.2 few-shot 库）：entry = { artifact: ArtifactMeta }
+		* （kind 'openloop.html-artifact' + title + runtime + html + path——与
+		* html_artifact 工具产出的 ArtifactMeta 同构）。合法即 pinnable/可预览。
+		*/
+		function entryArtifactOf(entry) {
+			if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+			const wrapped = entry.artifact;
+			const meta = typeof entry === "object" && entry.kind === "openloop.html-artifact" ? entry : wrapped;
+			if (typeof meta !== "object" || meta === null || Array.isArray(meta)) return null;
+			const record = meta;
+			if (record.kind !== "openloop.html-artifact") return null;
+			if (typeof record.html !== "string" || record.html.length === 0) return null;
+			if (record.runtime !== "static" && record.runtime !== "scripts" && record.runtime !== "network") return null;
+			if (typeof record.title !== "string" || record.title.length === 0) return null;
+			return record;
+		}
+		/**
 		* entry 面板提取（v1 渲染闭环契约——宽松形态）：
 		* - 规范形态：`{ panel: <完整 PanelDefinition> }`（v1 文档原写法）
 		* - 宽松形态：直接是 `PanelDefinition`（agent 实际写法——平铺更直觉，免一层套娃）
@@ -6152,6 +6169,14 @@ window.__ModuleLoader__.load({
 						...reference,
 						...component.id ? { rid: component.id } : {}
 					}
+				};
+			}
+			if (component.type === "artifact") {
+				const meta = entryArtifactOf(component.entry);
+				if (meta === null) return null;
+				return {
+					kind: "artifact",
+					meta
 				};
 			}
 			return buildPanelMetaForComponent(component);
@@ -6238,6 +6263,12 @@ window.__ModuleLoader__.load({
 		* 旧版（rail APP 分区 + 230px 侧栏 + 详情两列）废止：APP 入口收敛到 col1，
 		* rail 只留看板页；预览复用 tile 渲染链（PanelSurface / McpAppResourceView）。
 		*/
+		/** scope 惰性单例（ArtifactFrame 主题注入；与 DockBoardView 同款） */
+		let appListScopeCache;
+		function getScope() {
+			if (appListScopeCache === void 0) appListScopeCache = getBaseClient()?.createOpenLoopSettingsScope();
+			return appListScopeCache;
+		}
 		/** col 缩略/拖宽常量（0.8.2 恢复旧侧栏能力：缩略 48px 图标条；拖到 <120px 松手自动缩略） */
 		const COL_COLLAPSED_WIDTH = 48;
 		const COL_COLLAPSE_THRESHOLD = 120;
@@ -6913,7 +6944,11 @@ window.__ModuleLoader__.load({
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: source.kind === "mcp-app" ? "opaque-origin 沙箱 · AppBridge" : "panel 宿主车道" })]
 						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "d2-frame-body",
-							children: [source.kind === "panel" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelPreviewBody, { meta: source.meta }) : null, source.kind === "mcp-app" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppPreviewBody, { comp }) : null]
+							children: [
+								source.kind === "panel" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelPreviewBody, { meta: source.meta }) : null,
+								source.kind === "mcp-app" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppPreviewBody, { comp }) : null,
+								source.kind === "artifact" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactPreviewBody, { meta: source.meta }) : null
+							]
 						})]
 					})]
 				})]
@@ -6927,6 +6962,21 @@ window.__ModuleLoader__.load({
 			});
 			const PanelSurface = panels.PanelSurface;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta });
+		}
+		/** artifact 预览（0.5.2 few-shot 库）：复用 tile 渲染链的 ArtifactFrame */
+		function ArtifactPreviewBody({ meta }) {
+			const artifact = getArtifactClient();
+			if (artifact === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+				what: "APP Artifact 预览",
+				dep: "@openloop/dsh-html-artifact"
+			});
+			const ArtifactFrame = artifact.ArtifactFrame;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFrame, {
+				meta,
+				token: "app-artifact-preview",
+				fullscreen: false,
+				scope: getScope()
+			});
 		}
 		function McpAppPreviewBody({ comp }) {
 			const mcpApps = getMcpAppsClient();

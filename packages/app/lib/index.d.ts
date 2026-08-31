@@ -5204,6 +5204,8 @@ declare const BUILTIN_KINDS: readonly string[];
 /**
  * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
  * 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
+ * 0.5.2 升级路径：旧 seed（无 artifact 范例）检测到缺失时**只补注册范例组件**
+ * （不动用户已有组件——registerComponent 是按 rid upsert，幂等安全）。
  */
 declare function seedBuiltinApp(facade: AppFacade): Promise<{
   seeded: boolean;
