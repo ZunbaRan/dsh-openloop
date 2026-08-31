@@ -59,7 +59,7 @@ const ARTIFACT_EXAMPLES: ReadonlyArray<{ rid: string; title: string; description
   { rid: 'openloop:example-system-map', title: '系统地图', description: '生态系统拓扑大屏（可拖节点；static 档范例）', runtime: 'static' },
   { rid: 'openloop:example-agent-dashboard', title: 'Agent 工作台', description: 'Agent 活动脉冲 · 10s 轮询（scripts 档范例）', runtime: 'scripts' },
   { rid: 'openloop:example-usage-report', title: '调用监控报表', description: '24h API 调用图表（network 档 + Chart.js 范例）', runtime: 'network' },
-  { rid: 'openloop:example-backend-console', title: '后端控制台', description: '状态轮询与受控操作（scripts 档范例）', runtime: 'scripts' },
+  { rid: 'openloop:example-backend-console', title: '后端控制台', description: '同源 fetch + openloop.fetch 桥示范', runtime: 'network' },
 ]
 
 /**

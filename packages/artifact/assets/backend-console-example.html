@@ -12,11 +12,12 @@
   .dot.ok { background: #3ecf8e; } .dot.warn { background: #f5a623; } .dot.err { background: #e5564d; }
   .btn { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: 12px; cursor: pointer; }
   .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .err { color: #e5564d; }
   #out { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); font-family: ui-monospace, Menlo, monospace; font-size: 11px; display: none; white-space: pre-wrap; }
 </style>
 
 <h1>本地后端控制台</h1>
-<div class="sub">scripts 档：同源 fetch 我们自己的门面 API ——「系统操作自己」的最小示范</div>
+<div class="sub">network 档：同源 fetch + openloop.fetch 桥——「系统操作自己」的最小示范。0.5.3 修订（之前用 scripts 档 + 原生 fetch 撞沙箱 CSP=401）</div>
 <div class="panel" id="status"></div>
 <div class="panel">
   <button class="btn" id="btn-invalidate">刷新 registry（POST /invalidate）</button>
@@ -28,10 +29,37 @@
 (function () {
   var out = document.getElementById('out')
   function show(text) { out.style.display = 'block'; out.textContent = text }
-  function get(path) {
-    return fetch(path, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
-      .then(function (r) { return r.json() })
+  function showErr(label, e) { show(label + ' 失败：' + (e && e.message ? e.message : e) + (e && e.status ? '（HTTP ' + e.status + '）' : '')) }
+
+  // network 档正确形态：openloop.fetch 桥走服务端代理（https+SSRF+鉴权），
+  // 不要用原生 fetch 撞沙箱 CSP。get 路径 = status 公开端点不需要鉴权；
+  // POST 路径不要带 credentials: 'same-origin'（会触发 cookie 鉴权失败——我们的
+  // routes 不做 cookie 鉴权）。
+  async function getJson(path) {
+    const res = await openloop.fetch(path, { headers: { Accept: 'application/json' } })
+    if (!res.ok) {
+      const body = await res.text().catch(() => '')
+      const e = new Error(`${res.status} ${res.statusText} — ${body.slice(0, 200)}`)
+      e.status = res.status
+      throw e
+    }
+    return res.json()
   }
+  async function postJson(path, body) {
+    const res = await openloop.fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const t = await res.text().catch(() => '')
+      const e = new Error(`${res.status} ${res.statusText} — ${t.slice(0, 200)}`)
+      e.status = res.status
+      throw e
+    }
+    return res.json()
+  }
+
   function renderStatus(s) {
     var tone = s.state === 'running' ? 'ok' : s.state === 'starting' ? 'warn' : 'err'
     document.getElementById('status').innerHTML =
@@ -40,19 +68,25 @@
       + '<div class="row"><span class="k">自动重启</span><span class="v">' + (s.restarts || 0) + ' 次</span></div>'
       + '<div class="row"><span class="k">registryRev</span><span class="v">' + (s.registryRev != null ? s.registryRev : '—') + '</span></div>'
   }
-  get('/openloop/app/status').then(renderStatus).catch(function () {})
-  setInterval(function () { get('/openloop/app/status').then(renderStatus).catch(function () {}) }, 15000)
+  function refreshStatus() {
+    getJson('/openloop/app/status').then(renderStatus).catch(function (e) { showErr('status', e) })
+  }
+  refreshStatus()
+  setInterval(refreshStatus, 15000)
 
   document.getElementById('btn-invalidate').addEventListener('click', function () {
-    fetch('/openloop/app/invalidate', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' })
-      .then(function (r) { return r.json() })
+    postJson('/openloop/app/invalidate', {})
       .then(function (d) { show('invalidate → ' + JSON.stringify(d, null, 2)) })
-      .catch(function (e) { show('失败：' + e) })
+      .catch(function (e) { showErr('invalidate', e) })
   })
   document.getElementById('btn-events').addEventListener('click', function () {
-    get('/openloop/app/events?limit=10')
-      .then(function (d) { show(d.events.map(function (e) { return '[' + e.level + '] ' + e.text }).join('\n') || '（暂无事件）') })
-      .catch(function (e) { show('失败：' + e) })
+    getJson('/openloop/app/events?limit=10')
+      .then(function (d) {
+        var events = (d.events || [])
+        if (events.length === 0) return show('（暂无事件——试着做一次 connect_server / manage/disconnect 等再回来看）')
+        show(events.map(function (e) { return '[' + e.level + '] ' + e.text }).join('\n'))
+      })
+      .catch(function (e) { showErr('events', e) })
   })
 })()
 </script>

@@ -2039,8 +2039,8 @@ const ARTIFACT_EXAMPLES = [
 	{
 		rid: "openloop:example-backend-console",
 		title: "后端控制台",
-		description: "状态轮询与受控操作（scripts 档范例）",
-		runtime: "scripts"
+		description: "同源 fetch + openloop.fetch 桥示范",
+		runtime: "network"
 	}
 ];
 /**
