@@ -10,7 +10,7 @@
  */
 import { Component, useEffect, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
 import { GridLayout, useContainerWidth } from 'react-grid-layout'
-import { GRID_COLUMNS, MAX_ROWS, toRglLayout } from './layout.ts'
+import { GRID_COLUMNS, STORAGE_MAX_COLUMNS, toRglLayout } from './layout.ts'
 import { dockStore, type DockTile, type DockTileSource } from './store.ts'
 import { icons } from './icons.tsx'
 
@@ -28,6 +28,13 @@ function getScope() {
 
 const ROW_HEIGHT = 48
 const GRID_MARGIN: readonly [number, number] = [12, 12]
+
+/**
+ * 0.9.1（用户拍板 A）：RGL 渲染列数与存储上限同源（视口/60px 格宽）——拖多大
+ * 松手稳定多大；GRID_COLUMNS 保留为 pin 落位与紧凑的参考网格。maxRows 不再
+ * 硬限（行高自由，容器滚动）。
+ */
+const RGL_COLS = (): number => STORAGE_MAX_COLUMNS()
 
 /**
  * RGL 运行必需 CSS + dock 主题化覆写（注入一次）。
@@ -315,7 +322,7 @@ export function DockBoardView(): ReactNode {
                   <GridLayout
                     width={width}
                     layout={layout}
-                    gridConfig={{ cols: GRID_COLUMNS, rowHeight: ROW_HEIGHT, margin: GRID_MARGIN, maxRows: MAX_ROWS }}
+                    gridConfig={{ cols: RGL_COLS(), rowHeight: ROW_HEIGHT, margin: GRID_MARGIN }}
                     dragConfig={{ enabled: true, handle: '.dock-tile-handle', cancel: '.dock-tile-cancel, .d2-title-edit' }}
                     resizeConfig={{ enabled: true, handles: ['se', 'e', 's'] }}
                     onLayoutChange={items => dockStore.applyLayout(items)}

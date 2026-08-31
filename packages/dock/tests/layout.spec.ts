@@ -2,8 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { clampLayout, compactTiles, findNearestSlot, toRglLayout, fromRglLayout } from '../src/client/layout.ts'
 
 describe('dock 布局坐标层（RGL v2 时代，2026-08-24）', () => {
-  it('clamp：宽 1-12、不越右缘', () => {
-    expect(clampLayout({ column: 11, columns: 4, row: -1, rows: 99 })).toEqual({ column: 8, row: 0, columns: 4, rows: 24 })
+  it('clamp：宽 1–动态上限（测试环境无视口→48）、右缘仅按动态上限钳（0.9.1 A 方案）', () => {
+    // 旧 12 列下 column 11+4 会越缘被压到 8；动态 48 列下 15 ≤ 48 → column 保持
+    expect(clampLayout({ column: 11, columns: 4, row: -1, rows: 99 })).toEqual({ column: 11, row: 0, columns: 4, rows: 24 })
+    // 大列宽不再被砍回 12——存储上限动态（48 = 测试回落值）
+    expect(clampLayout({ column: 0, columns: 40, row: 0, rows: 4 })).toEqual({ column: 0, row: 0, columns: 40, rows: 4 })
+    expect(clampLayout({ column: 0, columns: 99, row: 0, rows: 1 })).toEqual({ column: 0, row: 0, columns: 48, rows: 1 })
+    // 越动态右缘仍钳（44+8 > 48 → column 压到 40）
+    expect(clampLayout({ column: 44, columns: 8, row: 0, rows: 1 })).toEqual({ column: 40, row: 0, columns: 8, rows: 1 })
   })
 
   it('findNearestSlot：首个可放空位（紧凑下落）——pin 落位语义', () => {
@@ -23,7 +29,7 @@ describe('dock 布局坐标层（RGL v2 时代，2026-08-24）', () => {
       { i: '', x: 0, y: 0, w: 1, h: 1 },
     ])
     expect(map.get('a')).toEqual({ column: 2, row: 1, columns: 4, rows: 3 })
-    expect(map.get('b')).toEqual({ column: 0, row: 0, columns: 12, rows: 24 })
+    expect(map.get('b')).toEqual({ column: 0, row: 0, columns: 48, rows: 24 })
     expect(map.has('')).toBe(false)
   })
 

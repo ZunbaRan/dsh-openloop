@@ -17,6 +17,19 @@ export const MIN_COLUMNS = 2
 export const MIN_ROWS = 2
 export const MAX_ROWS = 24
 
+/**
+ * 0.9.1（2026-08-31 用户拍板 A 方案）：tile 列宽上限不再固定 12——跟随视口
+ * 「能装下多少格」，拖多大松手就稳定多大（与 dock 面板「无上限拖宽」同精神）。
+ * GRID_COLUMNS 仍是 RGL 显示网格与 pin 落位的参考值；存储层上限动态放宽。
+ * SSR/测试环境（无 innerWidth）回落 48 列（超宽屏也够用）。
+ */
+export const STORAGE_MAX_COLUMNS = (): number => {
+  const viewport = (globalThis as { innerWidth?: unknown }).innerWidth
+  return typeof viewport === 'number' && Number.isFinite(viewport) && viewport > 0
+    ? Math.ceil(viewport / 60)
+    : 48
+}
+
 export interface TileLayout {
   column: number
   row: number
@@ -36,11 +49,12 @@ export interface RglItem {
 const int = (value: number, fallback: number): number =>
   Number.isFinite(value) ? Math.round(value) : fallback
 
-/** 钳制布局到合法边界（宽 1-12 列 / 高 1-24 行 / 不越出右缘） */
+/** 钳制布局到合法边界（宽 1–视口上限列 / 高 1-24 行 / 不越出右缘） */
 export function clampLayout(layout: Partial<TileLayout>): TileLayout {
-  const columns = Math.min(GRID_COLUMNS, Math.max(1, int(layout.columns ?? DEFAULT_COLUMNS, DEFAULT_COLUMNS)))
+  const maxColumns = STORAGE_MAX_COLUMNS()
+  const columns = Math.min(maxColumns, Math.max(1, int(layout.columns ?? DEFAULT_COLUMNS, DEFAULT_COLUMNS)))
   const rows = Math.min(MAX_ROWS, Math.max(1, int(layout.rows ?? DEFAULT_ROWS, DEFAULT_ROWS)))
-  const column = Math.min(GRID_COLUMNS - columns, Math.max(0, int(layout.column ?? 0, 0)))
+  const column = Math.min(Math.max(0, maxColumns - columns), Math.max(0, int(layout.column ?? 0, 0)))
   const row = Math.max(0, int(layout.row ?? 0, 0))
   return { column, row, columns, rows }
 }

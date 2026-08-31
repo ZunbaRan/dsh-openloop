@@ -4430,13 +4430,24 @@ window.__ModuleLoader__.load({
 				]
 			});
 		}
+		/**
+		* 0.9.1（2026-08-31 用户拍板 A 方案）：tile 列宽上限不再固定 12——跟随视口
+		* 「能装下多少格」，拖多大松手就稳定多大（与 dock 面板「无上限拖宽」同精神）。
+		* GRID_COLUMNS 仍是 RGL 显示网格与 pin 落位的参考值；存储层上限动态放宽。
+		* SSR/测试环境（无 innerWidth）回落 48 列（超宽屏也够用）。
+		*/
+		const STORAGE_MAX_COLUMNS = () => {
+			const viewport = globalThis.innerWidth;
+			return typeof viewport === "number" && Number.isFinite(viewport) && viewport > 0 ? Math.ceil(viewport / 60) : 48;
+		};
 		const int = (value, fallback) => Number.isFinite(value) ? Math.round(value) : fallback;
-		/** 钳制布局到合法边界（宽 1-12 列 / 高 1-24 行 / 不越出右缘） */
+		/** 钳制布局到合法边界（宽 1–视口上限列 / 高 1-24 行 / 不越出右缘） */
 		function clampLayout(layout) {
-			const columns = Math.min(12, Math.max(1, int(layout.columns ?? 6, 6)));
+			const maxColumns = STORAGE_MAX_COLUMNS();
+			const columns = Math.min(maxColumns, Math.max(1, int(layout.columns ?? 6, 6)));
 			const rows = Math.min(24, Math.max(1, int(layout.rows ?? 4, 4)));
 			return {
-				column: Math.min(12 - columns, Math.max(0, int(layout.column ?? 0, 0))),
+				column: Math.min(Math.max(0, maxColumns - columns), Math.max(0, int(layout.column ?? 0, 0))),
 				row: Math.max(0, int(layout.row ?? 0, 0)),
 				columns,
 				rows
@@ -5048,6 +5059,12 @@ window.__ModuleLoader__.load({
 		const ROW_HEIGHT = 48;
 		const GRID_MARGIN = [12, 12];
 		/**
+		* 0.9.1（用户拍板 A）：RGL 渲染列数与存储上限同源（视口/60px 格宽）——拖多大
+		* 松手稳定多大；GRID_COLUMNS 保留为 pin 落位与紧凑的参考网格。maxRows 不再
+		* 硬限（行高自由，容器滚动）。
+		*/
+		const RGL_COLS = () => STORAGE_MAX_COLUMNS();
+		/**
 		* RGL 运行必需 CSS + dock 主题化覆写（注入一次）。
 		* 必需部分等价于官方 styles.css 的核心规则（容器 transition / item 定位过渡 /
 		* placeholder / resize 手柄）；主题化部分：placeholder 虚线框、手柄隐藏至 hover、
@@ -5393,10 +5410,9 @@ window.__ModuleLoader__.load({
 							width,
 							layout,
 							gridConfig: {
-								cols: 12,
+								cols: RGL_COLS(),
 								rowHeight: ROW_HEIGHT,
-								margin: GRID_MARGIN,
-								maxRows: 24
+								margin: GRID_MARGIN
 							},
 							dragConfig: {
 								enabled: true,
