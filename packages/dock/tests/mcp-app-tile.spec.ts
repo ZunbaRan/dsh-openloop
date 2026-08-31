@@ -6,7 +6,7 @@
  * - sourceIdOf：rid 优先、(serverId, toolName) 兜底推导
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { buildTileSourceForComponent, entryMcpAppOf, type AppComponentDescriptor } from '../src/client/app-registry.ts'
+import { buildTileSourceForComponent, entryMcpAppOf, entryArtifactOf, mergeApps, type AppComponentDescriptor, type AppDescriptor } from '../src/client/app-registry.ts'
 import { sourceIdOf } from '../src/client/DockBoardView.tsx'
 import { DockStore, type DockTileSource } from '../src/client/store.ts'
 
@@ -98,5 +98,40 @@ describe('sourceIdOf for mcp-app tiles', () => {
       .toBe('tldraw:tldraw-create-view')
     expect(sourceIdOf({ kind: 'mcp-app', meta: { serverId: 'tldraw', toolName: 'tldraw_create_view', resourceUri: 'ui://x' } }))
       .toBe('tldraw:tldraw-create-view')
+  })
+})
+
+describe('mergeApps component-level merge（0.5.3 真机事故回归）', () => {
+  const mkApp = (id: string, components: AppComponentDescriptor[]): AppDescriptor => ({
+    id, name: id, kind: 'builtin', version: '1.0.0', desc: '', components, apis: [],
+  })
+  const mkComp = (rid: string, type: AppComponentDescriptor['type']): AppComponentDescriptor => ({
+    id: rid, title: rid, type, desc: '', kind: '', pinnable: true,
+  })
+
+  it('merges same-id apps at the COMPONENT level: builtin panels + remote artifacts both visible', () => {
+    const builtin = [mkApp('openloop', [mkComp('openloop:metric-grid', 'panel'), mkComp('openloop:chart', 'panel')])]
+    const remote = [mkApp('openloop', [mkComp('openloop:example-system-map', 'artifact'), mkComp('openloop:metric-grid', 'panel')])]
+    const merged = mergeApps(builtin, remote)
+    expect(merged).toHaveLength(1)
+    const rids = merged[0]!.components.map(c => c.id).sort()
+    // artifact 范例不被 builtin 吞掉（旧实现整个 remote openloop 被丢弃）
+    expect(rids).toEqual(['openloop:chart', 'openloop:example-system-map', 'openloop:metric-grid'])
+    // 同 rid：remote 条目覆盖（registry 权威）
+    expect(merged[0]!.components.find(c => c.id === 'openloop:metric-grid')).toEqual(remote[0]!.components[1])
+  })
+
+  it('disjoint ids pass through unchanged', () => {
+    const builtin = [mkApp('openloop', [mkComp('openloop:a', 'panel')])]
+    const remote = [mkApp('excalidraw', [mkComp('excalidraw:b', 'mcp-app')])]
+    const merged = mergeApps(builtin, remote)
+    expect(merged.map(a => a.id).sort()).toEqual(['excalidraw', 'openloop'])
+  })
+
+  it('entryArtifactOf accepts wrapped and flat ArtifactMeta shapes', () => {
+    const meta = { kind: 'openloop.html-artifact', version: 1, title: 't', runtime: 'static', html: '<div>x</div>', path: 'p.html' }
+    expect(entryArtifactOf({ artifact: meta })).not.toBeNull()
+    expect(entryArtifactOf(meta)).not.toBeNull()
+    expect(entryArtifactOf({ artifact: { kind: 'openloop.html-artifact' } })).toBeNull() // 缺 html
   })
 })

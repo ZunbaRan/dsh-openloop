@@ -345,8 +345,38 @@ export async function fetchRegistryRev(): Promise<number | null> {
  * 门面里重复注册的 openloop 不产生第二个条目）。
  */
 export function mergeApps(builtin: AppDescriptor[], remote: AppDescriptor[]): AppDescriptor[] {
-  const seen = new Set(builtin.map(a => a.id))
-  return [...builtin, ...remote.filter(a => !seen.has(a.id))]
+  const seen = new Set<string>()
+  const merged: AppDescriptor[] = []
+  // 0.5.3 组件级合并（真机事故修复）：openloop 同时存在于 builtin（panels 预设本地
+  // 清单）与 remote（PB registry——artifact 范例 / mcp-app / agent 注册物）。旧「同 id
+  // 整 APP 去重、本地优先」会把 remote 的 openloop 整个吞掉——artifact 范例永远
+  // 不可见。改为：同 id 的 APP 组件按 rid 合并去重（remote 条目覆盖同 rid 的本地
+  // 条目——registry 是权威；纯本地的 panels 预设保留），apis 取并集。
+  for (const app of builtin) {
+    const remoteApp = remote.find(r => r.id === app.id)
+    if (remoteApp === undefined) {
+      merged.push(app)
+      continue
+    }
+    const byRid = new Map<string, AppDescriptor['components'][number]>()
+    for (const c of app.components) byRid.set(c.id, c)
+    for (const c of remoteApp.components) byRid.set(c.id, c) // remote 覆盖同 rid
+    const apisById = new Map<string, AppDescriptor['apis'][number]>()
+    for (const a of app.apis) apisById.set(a.id, a)
+    for (const a of remoteApp.apis) apisById.set(a.id, a)
+    merged.push({
+      ...app,
+      version: remoteApp.version !== '0.0.0' ? remoteApp.version : app.version,
+      desc: remoteApp.desc.length > 0 ? remoteApp.desc : app.desc,
+      components: [...byRid.values()].sort((a, b) => a.id.localeCompare(b.id)),
+      apis: [...apisById.values()],
+    })
+    seen.add(app.id)
+  }
+  for (const r of remote) {
+    if (!seen.has(r.id)) merged.push(r)
+  }
+  return merged
 }
 
 /**

@@ -6090,8 +6090,31 @@ window.__ModuleLoader__.load({
 		* 门面里重复注册的 openloop 不产生第二个条目）。
 		*/
 		function mergeApps(builtin, remote) {
-			const seen = new Set(builtin.map((a) => a.id));
-			return [...builtin, ...remote.filter((a) => !seen.has(a.id))];
+			const seen = /* @__PURE__ */ new Set();
+			const merged = [];
+			for (const app of builtin) {
+				const remoteApp = remote.find((r) => r.id === app.id);
+				if (remoteApp === void 0) {
+					merged.push(app);
+					continue;
+				}
+				const byRid = /* @__PURE__ */ new Map();
+				for (const c of app.components) byRid.set(c.id, c);
+				for (const c of remoteApp.components) byRid.set(c.id, c);
+				const apisById = /* @__PURE__ */ new Map();
+				for (const a of app.apis) apisById.set(a.id, a);
+				for (const a of remoteApp.apis) apisById.set(a.id, a);
+				merged.push({
+					...app,
+					version: remoteApp.version !== "0.0.0" ? remoteApp.version : app.version,
+					desc: remoteApp.desc.length > 0 ? remoteApp.desc : app.desc,
+					components: [...byRid.values()].sort((a, b) => a.id.localeCompare(b.id)),
+					apis: [...apisById.values()]
+				});
+				seen.add(app.id);
+			}
+			for (const r of remote) if (!seen.has(r.id)) merged.push(r);
+			return merged;
 		}
 		/**
 		* artifact entry 提取（0.5.2 few-shot 库）：entry = { artifact: ArtifactMeta }
