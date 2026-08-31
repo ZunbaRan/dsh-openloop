@@ -1,0 +1,56 @@
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.5 -apple-system, "PingFang SC", sans-serif; background: var(--background); color: var(--foreground); padding: 18px; }
+  h1 { font-size: 15px; margin-bottom: 2px; }
+  .sub { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+  .pulse-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; margin-bottom: 6px; background: var(--surface); }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; animation: pulse 2.4s ease infinite; }
+  @keyframes pulse { 0%,100% { opacity: .35; transform: scale(.85);} 50% { opacity: 1; transform: scale(1.15);} }
+  .tool { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent); flex-shrink: 0; }
+  .ws { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .time { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+  .heat { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .heat .bar { height: 6px; border-radius: 3px; background: var(--accent); opacity: .8; }
+  .stats { display: flex; gap: 18px; margin: 12px 0; font-size: 11px; color: var(--muted); }
+</style>
+
+<h1>Agent 工作台</h1>
+<div class="sub">最近动作实时脉冲 · 每 10 秒刷新（scripts 档：本地计算 + 定时取数）</div>
+<div class="stats"><span id="stat-sessions">—</span><span id="stat-actions">—</span></div>
+<div id="feed"></div>
+
+<script>
+(function () {
+  function render(data) {
+    document.getElementById('stat-sessions').textContent = data.sessionsScanned + ' 个会话被扫描'
+    document.getElementById('stat-actions').textContent = data.actions.length + ' 个最近动作'
+    var feed = document.getElementById('feed')
+    feed.innerHTML = ''
+    data.actions.slice(0, 12).forEach(function (a, i) {
+      var row = document.createElement('div')
+      row.className = 'pulse-row'
+      var ago = Math.max(0, Math.round((Date.now() - a.at) / 60000))
+      row.innerHTML = '<span class="pulse-dot" style="animation-delay:' + (i * 0.2) + 's"></span>'
+        + '<span class="tool">' + a.tool + '</span>'
+        + '<span class="ws">' + a.workspace + '</span>'
+        + '<span class="time">' + (ago < 1 ? '刚刚' : ago + ' 分钟前') + '</span>'
+      feed.appendChild(row)
+    })
+    data.toolHeat.slice(0, 5).forEach(function (h) {
+      var row = document.createElement('div')
+      row.className = 'heat'
+      row.innerHTML = '<span class="tool">' + h.tool + '</span><span class="bar" style="width:' + Math.max(6, h.count * 3) + 'px"></span><span class="time">×' + h.count + '</span>'
+      feed.appendChild(row)
+    })
+  }
+  function load() {
+    fetch('/openloop/app/agent-activity', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.json() })
+      .then(render)
+      .catch(function () {})
+  }
+  load()
+  setInterval(load, 10000)
+})()
+</script>

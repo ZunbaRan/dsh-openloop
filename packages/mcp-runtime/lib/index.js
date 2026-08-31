@@ -159,7 +159,7 @@ function validateAppResource(serverId, requestedUri, contents, options = {}) {
 //#region src/api-usage-bridge.ts
 const GLOBAL_KEY = "__openloopApiUsage";
 const RECORDS_CAP = 50;
-/** 记一次 MCP 工具调用。失败静默——埋点永不影响工具调用主流程。 */
+/** 记一次 MCP 工具调用（每条都记——工具调用频率远低于面板刷新，无需去重）。 */
 function recordApiUsage(source, kind, ok, ms) {
 	try {
 		const g = globalThis;

@@ -5173,6 +5173,28 @@ declare const APP_ROUTE = "/openloop/app";
 interface AppRouteOptions {
   /** web profile 的活动 mcpRuntime（管理端点的热移除/热激活通道；headless 缺省） */
   getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined;
+  /** 事件写入通道（PB 权威 + ring 降级；0.5.0 持久化） */
+  recordEvent?: (kind: 'registry' | 'backend' | 'mcp' | 'dock', level: 'info' | 'warn' | 'error', text: string) => void;
+  /** 事件读取通道（PB 查询；未注入回落 ring——单测） */
+  listEvents?: (limit: number) => Promise<Array<{
+    at: number;
+    kind: string;
+    level: string;
+    text: string;
+  }>>;
+  /** usage 写入通道（PB 合批） */
+  recordUsage?: (source: string, kind: 'panel-binding' | 'mcp-call', ok: boolean, ms: number) => void;
+  /** usage 聚合读取（PB 窗口聚合；未注入返回空——单测） */
+  readUsage?: () => Promise<{
+    windowMs: number;
+    sources: Array<{
+      source: string;
+      kind: string;
+      total: number;
+      failures: number;
+      avgMs: number | null;
+    }>;
+  }>;
 }
 declare function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend, options?: AppRouteOptions): () => void;
 //#endregion

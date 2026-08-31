@@ -18,6 +18,8 @@ import { createAppBackendTool } from './tool.ts'
 import { appBackendSkillProvider } from './skill.ts'
 import { appDoctorSkillProvider } from './skill-doctor.ts'
 import { registerAppRoutes } from './routes.ts'
+import { createEventRecorder, createPbEventWriter, createPbEventReader } from './event-log.ts'
+import { createPbUsageWriter, readApiUsageFromPb } from './api-usage.ts'
 
 export * from './facade.ts'
 export * from './schema.ts'
@@ -90,13 +92,25 @@ export function apply(ctx: Context, config: Config = {}): void {
 
   // webServer 条件注入（panels 同款模式）：web 环境注册 UI 路由；headless 跳过。
   // mcpRuntime 同款条件捕获（2026-08-30 事故教训：必须经回调参数 ctx 读服务）。
-  ctx.inject(['webServer'], (routeCtx, routeConfig) => {
-    void routeConfig
+  // 0.5.0：事件/usage 持久化通道（PB 权威 + ring 降级）一并装配进 routes。
+  ctx.inject(['webServer'], (routeCtx) => {
     let routeMcpRuntime: import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined
     routeCtx.inject(['mcpRuntime'], (rc) => {
       routeMcpRuntime = rc.mcpRuntime
     })
-    registerAppRoutes(routeCtx, routeCtx.webServer, backend, { getMcpRuntime: () => routeMcpRuntime })
+    const eventWriter = createPbEventWriter(() => backend.pbClient())
+    const recordEvent = createEventRecorder(() => eventWriter)
+    const eventReader = createPbEventReader(() => backend.pbClient())
+    const usageWriter = createPbUsageWriter(() => backend.pbClient())
+    registerAppRoutes(routeCtx, routeCtx.webServer, backend, {
+      getMcpRuntime: () => routeMcpRuntime,
+      recordEvent,
+      listEvents: limit => eventReader.list(limit),
+      recordUsage: (source, kind, ok, ms) => { void usageWriter.append(source, kind, ok, ms) },
+      readUsage: () => readApiUsageFromPb(backend.pbClient() as never).catch(() => ({ windowMs: 24 * 60 * 60 * 1000, sources: [] })),
+    })
+    // app 内部钩子共享同一 recorder（connect/disconnect 等经此引用写事件）
+    ;(globalThis as unknown as Record<string, unknown>).__openloopRecordEvent = recordEvent
   })
 
   ctx.effect(() => () => {

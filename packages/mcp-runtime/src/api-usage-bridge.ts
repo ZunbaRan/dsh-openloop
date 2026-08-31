@@ -1,8 +1,9 @@
 /**
- * api-usage 埋点桥（mcp-runtime 侧，2026-08-31 自管理四件套）。
- *
- * 与 app 包的 api-usage.ts / panels 的 api-usage-bridge.ts 共享
- * globalThis.__openloopApiUsage 单例——三包零依赖。契约见 panels 侧注释。
+ * api-usage 埋点桥（mcp-runtime 侧，0.5.0）：
+ * 服务端 Node 包——不绕 HTTP 自调（app 的端点在本进程的 webserver 上），
+ * 改回 globalThis.__openloopApiUsage 内存单例，由 app 包的聚合端点**合并读取**
+ * （单例 = 服务端写通道，app 同进程直接读；panels 浏览器侧则走 POST）。
+ * 失败静默：埋点永不影响工具调用主流程。
  */
 
 interface UsageStat {
@@ -21,7 +22,7 @@ interface UsageStore {
 const GLOBAL_KEY = '__openloopApiUsage'
 const RECORDS_CAP = 50
 
-/** 记一次 MCP 工具调用。失败静默——埋点永不影响工具调用主流程。 */
+/** 记一次 MCP 工具调用（每条都记——工具调用频率远低于面板刷新，无需去重）。 */
 export function recordApiUsage(source: string, kind: 'panel-binding' | 'mcp-call', ok: boolean, ms: number): void {
   try {
     const g = globalThis as Record<string, unknown>

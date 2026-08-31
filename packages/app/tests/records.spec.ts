@@ -67,7 +67,7 @@ describe('listRecordsPaged（FakePb）', () => {
     pb.seed('apps', [{ name: 'a', displayName: 'A' }])
     pb.seed('boards', [{ bid: 'b1' }, { bid: 'b2' }])
     const counts = await collectionCounts(pb)
-    expect(counts).toHaveLength(6)
+    expect(counts).toHaveLength(8)
     expect(counts.find(c => c.name === 'apps')?.count).toBe(1)
     expect(counts.find(c => c.name === 'boards')?.count).toBe(2)
     expect(counts.find(c => c.name === 'tiles')?.count).toBe(0)

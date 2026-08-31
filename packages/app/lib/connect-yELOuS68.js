@@ -1,7 +1,23 @@
-import { recordSystemEvent } from "./event-log-B7kLpBeW.js";
+import { a as ringAppend } from "./event-log-DTt4Ki23.js";
 import { readFileSync } from "node:fs";
 import { parseServerEntry, scopedFilePath, upsertServerToFile } from "@openloop/dsh-mcp-runtime";
 //#region src/connect.ts
+/**
+* 0.5.0 事件写入：routes 装配后经 globalThis.__openloopRecordEvent（PB 权威 +
+* ring 降级）；装配前（早期 connect）直接 ring。两路都不阻塞主流程。
+*/
+function recordSystemEvent(kind, level, text) {
+	const recorder = globalThis.__openloopRecordEvent;
+	if (recorder !== void 0) recorder(kind, level, text);
+	else try {
+		ringAppend({
+			at: Date.now(),
+			kind,
+			level,
+			text
+		});
+	} catch {}
+}
 /** MCP 工具名（可含下划线/大写）→ rid 段（kebab 词法，RID_RE 兼容） */
 function ridSegment(name) {
 	return name.toLowerCase().replace(/[^a-z0-9-]+/g, "-");

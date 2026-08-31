@@ -130,14 +130,35 @@ export function DbBrowserRender({ props }: PresetRenderProps) {
   const collections = (collectionsState.data?.collections ?? [])
     .filter((c): c is { name: string; count: number } => typeof c.name === 'string' && typeof c.count === 'number')
 
-  const [collection, setCollection] = useState<string | null>(collectionProp)
-  const [queryInput, setQueryInput] = useState('')
-  const [query, setQuery] = useState('')
+  // 浏览态持久化（0.5.1：刷新/重启不丢浏览位置——UI 态走 localStorage，
+  // 对齐「UI 态不进 PB」纪律；per-instance key 避免多张浏览卡互相覆盖）
+  const browserKey = `openloop.dock.db-browser.${typeof record.browserId === 'string' && record.browserId.length > 0 ? record.browserId : 'default'}`
+  const readBrowserState = (): { collection: string | null; query: string } => {
+    try {
+      const raw = localStorage.getItem(browserKey)
+      if (raw === null) return { collection: collectionProp, query: '' }
+      const p = JSON.parse(raw) as { collection?: unknown; query?: unknown }
+      return {
+        collection: typeof p.collection === 'string' ? p.collection : collectionProp,
+        query: typeof p.query === 'string' ? p.query : '',
+      }
+    } catch {
+      return { collection: collectionProp, query: '' }
+    }
+  }
+  const [browserState, setBrowserState] = useState(readBrowserState)
+  const collection = browserState.collection
+  const query = browserState.query
+  const [queryInput, setQueryInput] = useState(query)
   const [page, setPage] = useState(1)
+  const persistBrowserState = (next: { collection: string | null; query: string }): void => {
+    setBrowserState(next)
+    try { localStorage.setItem(browserKey, JSON.stringify(next)) } catch { /* ignore */ }
+  }
 
-  // 初始集合：prop > 第一个表
+  // 初始集合：持久态 > prop > 第一个表
   useEffect(() => {
-    if (collection === null && collections.length > 0) setCollection(collections[0]?.name ?? null)
+    if (collection === null && collections.length > 0) persistBrowserState({ collection: collections[0]?.name ?? null, query })
   }, [collection, collections])
 
   // 切换集合/关键词重置页码
@@ -157,7 +178,7 @@ export function DbBrowserRender({ props }: PresetRenderProps) {
   const currentPage = typeof recordsState.data?.page === 'number' ? recordsState.data.page : page
 
   const onSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter') setQuery(e.currentTarget.value.trim())
+    if (e.key === 'Enter') persistBrowserState({ collection, query: e.currentTarget.value.trim() })
   }
 
   const unavailable = collectionsState.unavailable
@@ -183,7 +204,7 @@ export function DbBrowserRender({ props }: PresetRenderProps) {
               style={selectStyle}
               value={collection ?? ''}
               aria-label="选择集合"
-              onChange={e => setCollection(e.target.value)}
+              onChange={e => persistBrowserState({ collection: e.target.value, query })}
             >
               {collections.map(c => (
                 <option key={c.name} value={c.name}>{c.name}（{c.count}）</option>
@@ -200,14 +221,14 @@ export function DbBrowserRender({ props }: PresetRenderProps) {
             <button
               type="button"
               style={buttonStyle}
-              onClick={() => setQuery(queryInput.trim())}
+              onClick={() => persistBrowserState({ collection, query: queryInput.trim() })}
             >查询</button>
             {query !== '' ? (
               <button
                 type="button"
                 style={buttonStyle}
                 title="清除关键词"
-                onClick={() => { setQueryInput(''); setQuery('') }}
+                onClick={() => { setQueryInput(''); persistBrowserState({ collection, query: '' }) }}
               >✕</button>
             ) : null}
           </div>

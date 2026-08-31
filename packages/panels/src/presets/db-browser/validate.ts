@@ -20,6 +20,9 @@ export function validateDbBrowser(props: unknown): PresetValidation {
   if (root.collection !== undefined && (typeof root.collection !== 'string' || root.collection.length > 40)) {
     errors.push(error('collection', 'collection 必须是 ≤40 字符的字符串'))
   }
+  if (root.browserId !== undefined && (typeof root.browserId !== 'string' || root.browserId.length > 40)) {
+    errors.push(error('browserId', 'browserId 必须是 ≤40 字符的字符串'))
+  }
   if (root.perPage !== undefined) {
     const v = root.perPage
     if (typeof v !== 'number' || !Number.isInteger(v) || v < 5 || v > 100) {

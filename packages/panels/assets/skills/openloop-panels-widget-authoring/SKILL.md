@@ -130,7 +130,7 @@ write `panels/<id>.json`（单层编码无转义问题）→ `panel { "panelFile
 | kind | props | 要点 |
 |---|---|---|
 | `pb-stats` | `title`(≤80)；`autoRefreshMs`(10000–3600000) | PocketBase 门面运行状态：uptime / 集合计数 / 数据占用；dsh-app 未装显示占位 |
-| `db-browser` | `collection`(初始表)；`perPage`(5–100 默认 20)；`title` | **交互态**：选库 + 关键词筛选 + 分页浏览门面管理表 |
+| `db-browser` | `collection`(初始表)；`perPage`(5–100 默认 20)；`browserId`(浏览态持久化槽位——多卡各记各的)；`title` | **交互态**：选库 + 关键词筛选 + 分页浏览门面管理表 |
 | `storage-usage` | `title`；`autoRefreshMs` | DSH_HOME 磁盘占用分解（sessions/attachments/cache/data） |
 | `api-credentials` | `title`；`autoRefreshMs` | 全部 API 资源凭据配置状态（configured 状态点，key 永不回显） |
 | `sessions-stats` | `title`；`autoRefreshMs` | 会话总数/占用/按日柱状/最大占用 Top5 |

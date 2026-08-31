@@ -35,14 +35,22 @@ Reference them by the host runtime routes (offline, version-pinned, immutable ca
 - External CDNs are blocked. If a library you need is not preset, inline it or ask the user to preset it.
 - **React version rule (critical)**: one page = one React. Use the preset react18, OR inline your own react19 UMD — never both (two React instances = "Invalid hook call" and the page dies). React 18 libraries run on the preset; older libraries that need `ReactDOM.render`/`findDOMNode` will not work on 19.
 
-## Preset example: system map (the ecosystem at a glance)
+## Preset examples (narrative + few-shot library)
 
-`assets/system-map-example.html` in this skill's directory is a ready-made
-interactive topology (user → DSH host → built-in APP / third-party MCP /
-local backend → components & APIs; draggable nodes, dashed edges for
-unreachable servers). Pass its content as the `html` parameter with
-`runtime: "static"` and adjust labels freely — it consumes only the
-injected theme variables.
+Four ready-made pages live in this skill's `assets/` directory. Each
+demonstrates one runtime capability against **our own local backend
+APIs** — read them as few-shot examples of both artifact authoring and
+the `/openloop/app/*` API surface:
+
+| File | Runtime | Demonstrates |
+|---|---|---|
+| `system-map-example.html` | static | Interactive topology of the whole ecosystem; draggable nodes, dashed edges for unreachable servers; theme variables only |
+| `agent-dashboard-example.html` | scripts | Live Agent activity pulse — polls `/openloop/app/agent-activity` every 10s and renders an animated feed + tool heat |
+| `usage-report-example.html` | network | 24h API usage report — `openloop.fetch('/openloop/app/api-usage')` + the preset Chart.js library (stacked success/failure bars) |
+| `backend-console-example.html` | scripts | Minimal ops console — status polling, POST `/openloop/app/invalidate`, GET `/openloop/app/events`; the "system operates itself" one-liner |
+
+Pass a file's content as the `html` parameter with the matching
+`runtime` tier and adjust labels freely.
 
 ## Theming (two modes)
 

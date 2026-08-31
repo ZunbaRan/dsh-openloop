@@ -1,3 +1,4 @@
+import { n as createPbEventReader, r as createPbEventWriter, t as createEventRecorder } from "./event-log-DTt4Ki23.js";
 import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -1252,6 +1253,54 @@ const COLLECTIONS = [
 			type: "json"
 		}],
 		indexes: ["CREATE UNIQUE INDEX idx_meta_key ON meta (key)"]
+	},
+	{
+		name: "app_events",
+		fields: [
+			{
+				name: "at",
+				type: "number"
+			},
+			{
+				name: "kind",
+				type: "text"
+			},
+			{
+				name: "level",
+				type: "text"
+			},
+			{
+				name: "text",
+				type: "text"
+			}
+		],
+		indexes: ["CREATE INDEX idx_app_events_at ON app_events (at DESC)"]
+	},
+	{
+		name: "api_usage",
+		fields: [
+			{
+				name: "source",
+				type: "text"
+			},
+			{
+				name: "kind",
+				type: "text"
+			},
+			{
+				name: "at",
+				type: "number"
+			},
+			{
+				name: "ms",
+				type: "number"
+			},
+			{
+				name: "ok",
+				type: "bool"
+			}
+		],
+		indexes: ["CREATE INDEX idx_api_usage_at ON api_usage (at DESC)", "CREATE INDEX idx_api_usage_source ON api_usage (source)"]
 	}
 ];
 /**
@@ -6407,7 +6456,7 @@ function createAppBackendTool(backend, options = {}) {
 			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
 			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
 			if (action === "connect_server" || action === "disconnect_server" || action === "reconnect_server") {
-				const { connectServer, disconnectServer, reconnectServer } = await import("./connect-CayUaK0M.js");
+				const { connectServer, disconnectServer, reconnectServer } = await import("./connect-yELOuS68.js");
 				const result = await (action === "connect_server" ? () => connectServer({
 					serverId: expectString(a, "serverId", action),
 					entry: expectObject(a, "server", action),
@@ -7228,13 +7277,45 @@ async function handle(req, res, backend, options) {
 	if (sub === "events" && method === "GET") {
 		const url = new URL(req.url ?? "/", "http://loopback.invalid");
 		const limitRaw = Number(url.searchParams.get("limit") ?? "100");
-		const { snapshotSystemEvents } = await import("./event-log-B7kLpBeW.js");
-		json(res, 200, { events: snapshotSystemEvents(Number.isFinite(limitRaw) ? limitRaw : 100) });
+		const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.round(limitRaw))) : 100;
+		if (options.listEvents !== void 0) json(res, 200, { events: await options.listEvents(limit) });
+		else {
+			const { ringSnapshot } = await import("./event-log-DTt4Ki23.js").then((n) => n.i);
+			json(res, 200, { events: ringSnapshot(limit) });
+		}
+		return;
+	}
+	if (sub === "events" && method === "POST") {
+		const body = JSON.parse(await readBody(req));
+		const text = typeof body.text === "string" ? body.text.trim() : "";
+		if (text.length === 0) {
+			json(res, 400, { error: "text is required" });
+			return;
+		}
+		const kind = body.kind === "backend" || body.kind === "mcp" || body.kind === "dock" ? body.kind : "registry";
+		const level = body.level === "warn" || body.level === "error" ? body.level : "info";
+		options.recordEvent?.(kind, level, text.slice(0, 500));
+		json(res, 200, { ok: true });
 		return;
 	}
 	if (sub === "api-usage" && method === "GET") {
-		const { snapshotApiUsage } = await import("./api-usage-C6dj2Dal.js");
-		json(res, 200, snapshotApiUsage());
+		if (options.readUsage !== void 0) json(res, 200, await options.readUsage());
+		else json(res, 200, {
+			windowMs: 864e5,
+			sources: []
+		});
+		return;
+	}
+	if (sub === "api-usage" && method === "POST") {
+		const body = JSON.parse(await readBody(req));
+		const source = typeof body.source === "string" ? body.source.trim() : "";
+		if (source.length === 0) {
+			json(res, 400, { error: "source is required" });
+			return;
+		}
+		const kind = body.kind === "mcp-call" ? "mcp-call" : "panel-binding";
+		options.recordUsage?.(source, kind, body.ok !== false, typeof body.ms === "number" && Number.isFinite(body.ms) ? Math.max(0, Math.round(body.ms)) : 0);
+		json(res, 200, { ok: true });
 		return;
 	}
 	if (sub === "manage/disconnect" && method === "POST") {
@@ -7243,7 +7324,7 @@ async function handle(req, res, backend, options) {
 			json(res, 400, { error: "serverId is required" });
 			return;
 		}
-		const { disconnectServer } = await import("./connect-CayUaK0M.js");
+		const { disconnectServer } = await import("./connect-yELOuS68.js");
 		json(res, 200, await disconnectServer({
 			serverId: body.serverId,
 			dshHome: backend.dshHome(),
@@ -7258,7 +7339,7 @@ async function handle(req, res, backend, options) {
 			json(res, 400, { error: "serverId is required" });
 			return;
 		}
-		const { reconnectServer } = await import("./connect-CayUaK0M.js");
+		const { reconnectServer } = await import("./connect-yELOuS68.js");
 		json(res, 200, await reconnectServer({
 			serverId: body.serverId,
 			dshHome: backend.dshHome(),
@@ -7274,8 +7355,7 @@ async function handle(req, res, backend, options) {
 			return;
 		}
 		const result = await (await backend.ready()).deleteApp(body.appName);
-		const { recordSystemEvent } = await import("./event-log-B7kLpBeW.js");
-		recordSystemEvent("registry", "warn", `删除 APP「${body.appName}」（级联清理 ${result.removedComponents ?? 0} 组件）`);
+		options.recordEvent?.("registry", "warn", `删除 APP「${body.appName}」（级联清理 ${result.removedComponents ?? 0} 组件）`);
 		backend.invalidateRegistry();
 		json(res, 200, {
 			ok: true,
@@ -7373,6 +7453,116 @@ async function handle(req, res, backend, options) {
 	json(res, 404, { error: `unknown app route: ${method} /openloop/app/${sub}` });
 }
 //#endregion
+//#region src/api-usage.ts
+const WINDOW_MS_DEFAULT = 864e5;
+function createPbUsageWriter(getPb) {
+	let buffer = [];
+	let flushing = false;
+	const flush = async () => {
+		if (flushing || buffer.length === 0) return;
+		flushing = true;
+		const batch = buffer;
+		buffer = [];
+		try {
+			const pb = getPb();
+			if (pb === void 0) return;
+			for (const r of batch) await pb.request("POST", "/api/collections/api_usage/records", {
+				source: r.source.slice(0, 500),
+				kind: r.kind,
+				at: r.at,
+				ms: Math.round(r.ms),
+				ok: r.ok
+			});
+		} catch {} finally {
+			flushing = false;
+			if (buffer.length > 0) flush();
+		}
+	};
+	return { append(source, kind, ok, ms) {
+		buffer.push({
+			source,
+			kind,
+			at: Date.now(),
+			ms,
+			ok
+		});
+		if (buffer.length >= 16) return flush();
+		return new Promise((resolve) => {
+			setTimeout(() => {
+				flush().finally(resolve);
+			}, 100);
+		});
+	} };
+}
+/** PB 聚合读取（窗口内 records → 每 source 的 totals/failures/avg；总条数上限防大库）。
+*  0.5.0 合并语义：PB（持久化——浏览器侧 panels 埋点经 POST 落库）+
+*  globalThis.__openloopApiUsage 单例（服务端 mcp-runtime callTool 埋点——同进程
+*  内存写通道，避免 HTTP 自绕），两路按 source 合并输出。 */
+async function readApiUsageFromPb(pb, windowMs = WINDOW_MS_DEFAULT) {
+	const since = Date.now() - windowMs;
+	const all = [];
+	for (let page = 1; page <= 10; page++) {
+		const params = new URLSearchParams({
+			page: String(page),
+			perPage: "200",
+			sort: "-at",
+			filter: `at > ${since}`
+		});
+		const res = await pb.request("GET", `/api/collections/api_usage/records?${params.toString()}`);
+		const items = res?.items ?? [];
+		for (const r of items) all.push(r);
+		if (all.length >= (typeof res?.totalItems === "number" ? res.totalItems : 0) || items.length < 200) break;
+	}
+	const singleton = globalThis.__openloopApiUsage;
+	if (singleton?.stats !== void 0) {
+		for (const stat of singleton.stats.values()) for (const r of stat.records) if (r.at >= since) all.push({
+			source: stat.source,
+			kind: stat.kind,
+			at: r.at,
+			ms: r.ms,
+			ok: r.ok
+		});
+	}
+	const bySource = /* @__PURE__ */ new Map();
+	for (const r of all) {
+		const source = typeof r.source === "string" ? r.source : "";
+		if (source.length === 0) continue;
+		const kind = r.kind === "mcp-call" ? "mcp-call" : "panel-binding";
+		const at = typeof r.at === "number" ? r.at : 0;
+		const ms = typeof r.ms === "number" ? r.ms : 0;
+		const ok = r.ok !== false;
+		let stat = bySource.get(source);
+		if (stat === void 0) {
+			stat = {
+				source,
+				kind,
+				total: 0,
+				failures: 0,
+				records: []
+			};
+			bySource.set(source, stat);
+		}
+		stat.total += 1;
+		if (!ok) stat.failures += 1;
+		stat.records.push({
+			at,
+			ok,
+			ms
+		});
+	}
+	return {
+		windowMs,
+		sources: [...bySource.values()].map((stat) => ({
+			source: stat.source,
+			kind: stat.kind,
+			total: stat.total,
+			failures: stat.failures,
+			avgMs: stat.records.length > 0 ? Math.round(stat.records.reduce((n, r) => n + r.ms, 0) / stat.records.length) : null,
+			recent: stat.records.slice(0, 30)
+		})).sort((a, b) => b.total - a.total)
+	};
+}
+//#endregion
 //#region src/index.ts
 const name = "openloop-dsh-app";
 const inject = ["tools", "skills"];
@@ -7404,12 +7594,28 @@ function apply(ctx, config = {}) {
 	ctx.tools.register(createAppBackendTool(backend, { getMcpRuntime: () => mcpRuntime }));
 	ctx.skills.registerProvider(() => appBackendSkillProvider);
 	ctx.skills.registerProvider(() => appDoctorSkillProvider);
-	ctx.inject(["webServer"], (routeCtx, routeConfig) => {
+	ctx.inject(["webServer"], (routeCtx) => {
 		let routeMcpRuntime;
 		routeCtx.inject(["mcpRuntime"], (rc) => {
 			routeMcpRuntime = rc.mcpRuntime;
 		});
-		registerAppRoutes(routeCtx, routeCtx.webServer, backend, { getMcpRuntime: () => routeMcpRuntime });
+		const eventWriter = createPbEventWriter(() => backend.pbClient());
+		const recordEvent = createEventRecorder(() => eventWriter);
+		const eventReader = createPbEventReader(() => backend.pbClient());
+		const usageWriter = createPbUsageWriter(() => backend.pbClient());
+		registerAppRoutes(routeCtx, routeCtx.webServer, backend, {
+			getMcpRuntime: () => routeMcpRuntime,
+			recordEvent,
+			listEvents: (limit) => eventReader.list(limit),
+			recordUsage: (source, kind, ok, ms) => {
+				usageWriter.append(source, kind, ok, ms);
+			},
+			readUsage: () => readApiUsageFromPb(backend.pbClient()).catch(() => ({
+				windowMs: 864e5,
+				sources: []
+			}))
+		});
+		globalThis.__openloopRecordEvent = recordEvent;
 	});
 	ctx.effect(() => () => {
 		backend.stop();

@@ -1,48 +1,33 @@
 /**
- * api-usage 埋点桥（panels 侧，2026-08-31 自管理四件套）。
- *
- * 与 app 包的 api-usage.ts 共享 globalThis.__openloopApiUsage 单例——
- * 三包零依赖（panels 不 import app；同 window 直通桥纪律）。
- * 这里只放最小写入面（recordApiUsage）；聚合读取面在 app 包（端点输出）。
- *
- * 契约（与 app/src/api-usage.ts 保持一致）：
- * globalThis.__openloopApiUsage = { stats: Map<string, {source, kind, total,
- *   failures, records: {at, ok, ms}[]}>, windowMs }
+ * api-usage 埋点桥（panels 侧，0.5.0 持久化版）：
+ * 写经 POST /openloop/app/api-usage（app 包落 PB——重启保留），
+ * 不再共享 globalThis 单例（服务端权威，跨包耦合消失）。
+ * fire-and-forget + 失败静默：埋点永不影响数据解析主流程。
+ * 同 URL 短窗口内只发一条（防自动刷新面板高频重复上报同一 source）。
  */
 
-interface UsageStat {
-  source: string
-  kind: 'panel-binding' | 'mcp-call'
-  total: number
-  failures: number
-  records: Array<{ at: number; ok: boolean; ms: number }>
+const DEDUP_WINDOW_MS = 30_000
+const lastSent = new Map<string, number>()
+
+function shouldSend(source: string): boolean {
+  const now = Date.now()
+  const last = lastSent.get(source) ?? 0
+  if (now - last < DEDUP_WINDOW_MS) return false
+  lastSent.set(source, now)
+  if (lastSent.size > 500) lastSent.clear()
+  return true
 }
 
-interface UsageStore {
-  stats: Map<string, UsageStat>
-  windowMs: number
-}
-
-const GLOBAL_KEY = '__openloopApiUsage'
-const RECORDS_CAP = 50
-
-/** 记一次面板数据绑定调用。失败静默——埋点永不影响数据解析主流程。 */
+/** 记一次面板数据绑定调用（同 source 30s 内只上报一次成败汇总性质的记录）。 */
 export function recordApiUsage(source: string, kind: 'panel-binding' | 'mcp-call', ok: boolean, ms: number): void {
   try {
-    const g = globalThis as Record<string, unknown>
-    let s = g[GLOBAL_KEY] as UsageStore | undefined
-    if (s === undefined) {
-      s = { stats: new Map(), windowMs: 24 * 60 * 60 * 1000 }
-      g[GLOBAL_KEY] = s
-    }
-    let stat = s.stats.get(source)
-    if (stat === undefined) {
-      stat = { source, kind, total: 0, failures: 0, records: [] }
-      s.stats.set(source, stat)
-    }
-    stat.total += 1
-    if (!ok) stat.failures += 1
-    stat.records.push({ at: Date.now(), ok, ms })
-    if (stat.records.length > RECORDS_CAP) stat.records.splice(0, stat.records.length - RECORDS_CAP)
+    if (!shouldSend(source)) return
+    void fetch('/openloop/app/api-usage', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ source: source.slice(0, 500), kind, ok, ms: Math.round(ms) }),
+      keepalive: true,
+    }).catch(() => undefined)
   } catch { /* 静默 */ }
 }

@@ -105,6 +105,29 @@ export const COLLECTIONS: readonly PbCollectionDef[] = [
     ],
     indexes: ['CREATE UNIQUE INDEX idx_meta_key ON meta (key)'],
   },
+  // 自管理四件套持久化（0.5.0，2026-08-31）：事件史与调用记录此前是内存态，
+  // 重启即失——「系统行为历史」落库后跨重启保留。
+  {
+    name: 'app_events',
+    fields: [
+      { name: 'at', type: 'number' },        // 时间戳 ms
+      { name: 'kind', type: 'text' },        // registry | backend | mcp | dock
+      { name: 'level', type: 'text' },       // info | warn | error
+      { name: 'text', type: 'text' },
+    ],
+    indexes: ['CREATE INDEX idx_app_events_at ON app_events (at DESC)'],
+  },
+  {
+    name: 'api_usage',
+    fields: [
+      { name: 'source', type: 'text' },      // 面板绑定 URL / serverId:toolName
+      { name: 'kind', type: 'text' },        // panel-binding | mcp-call
+      { name: 'at', type: 'number' },        // 时间戳 ms
+      { name: 'ms', type: 'number' },        // 耗时
+      { name: 'ok', type: 'bool' },
+    ],
+    indexes: ['CREATE INDEX idx_api_usage_at ON api_usage (at DESC)', 'CREATE INDEX idx_api_usage_source ON api_usage (source)'],
+  },
 ]
 
 /**

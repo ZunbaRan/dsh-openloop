@@ -1,0 +1,58 @@
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.5 -apple-system, "PingFang SC", sans-serif; background: var(--background); color: var(--foreground); padding: 18px; }
+  h1 { font-size: 15px; margin-bottom: 2px; }
+  .sub { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+  .panel { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 14px; margin-bottom: 12px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 12px; }
+  .row .k { width: 90px; color: var(--muted); flex-shrink: 0; }
+  .row .v { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot.ok { background: #3ecf8e; } .dot.warn { background: #f5a623; } .dot.err { background: #e5564d; }
+  .btn { padding: 6px 14px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font-size: 12px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  #out { margin-top: 10px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); font-family: ui-monospace, Menlo, monospace; font-size: 11px; display: none; white-space: pre-wrap; }
+</style>
+
+<h1>本地后端控制台</h1>
+<div class="sub">scripts 档：同源 fetch 我们自己的门面 API ——「系统操作自己」的最小示范</div>
+<div class="panel" id="status"></div>
+<div class="panel">
+  <button class="btn" id="btn-invalidate">刷新 registry（POST /invalidate）</button>
+  <button class="btn" id="btn-events">读取系统事件（GET /events）</button>
+  <div id="out"></div>
+</div>
+
+<script>
+(function () {
+  var out = document.getElementById('out')
+  function show(text) { out.style.display = 'block'; out.textContent = text }
+  function get(path) {
+    return fetch(path, { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.json() })
+  }
+  function renderStatus(s) {
+    var tone = s.state === 'running' ? 'ok' : s.state === 'starting' ? 'warn' : 'err'
+    document.getElementById('status').innerHTML =
+      '<div class="row"><span class="k">状态</span><span class="v"><span class="dot ' + tone + '"></span>' + s.state + '</span></div>'
+      + '<div class="row"><span class="k">版本</span><span class="v">' + (s.version || '—') + '</span></div>'
+      + '<div class="row"><span class="k">自动重启</span><span class="v">' + (s.restarts || 0) + ' 次</span></div>'
+      + '<div class="row"><span class="k">registryRev</span><span class="v">' + (s.registryRev != null ? s.registryRev : '—') + '</span></div>'
+  }
+  get('/openloop/app/status').then(renderStatus).catch(function () {})
+  setInterval(function () { get('/openloop/app/status').then(renderStatus).catch(function () {}) }, 15000)
+
+  document.getElementById('btn-invalidate').addEventListener('click', function () {
+    fetch('/openloop/app/invalidate', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' })
+      .then(function (r) { return r.json() })
+      .then(function (d) { show('invalidate → ' + JSON.stringify(d, null, 2)) })
+      .catch(function (e) { show('失败：' + e) })
+  })
+  document.getElementById('btn-events').addEventListener('click', function () {
+    get('/openloop/app/events?limit=10')
+      .then(function (d) { show(d.events.map(function (e) { return '[' + e.level + '] ' + e.text }).join('\n') || '（暂无事件）') })
+      .catch(function (e) { show('失败：' + e) })
+  })
+})()
+</script>

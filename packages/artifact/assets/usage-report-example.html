@@ -1,0 +1,58 @@
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 13px/1.5 -apple-system, "PingFang SC", sans-serif; background: var(--background); color: var(--foreground); padding: 18px; }
+  h1 { font-size: 15px; margin-bottom: 2px; }
+  .sub { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .kpi { display: flex; gap: 24px; margin: 10px 0 16px; }
+  .kpi .k { font-size: 11px; color: var(--muted); }
+  .kpi .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .kpi .v.err { color: #e5564d; }
+  #chart { width: 100%; height: 200px; }
+</style>
+
+<h1>API 调用监控（近 24 小时）</h1>
+<div class="sub">network 档：openloop.fetch 桥 + Chart.js 预置库 · 数据来自本地后端</div>
+<div class="kpi">
+  <div><div class="k">调用来源</div><div class="v" id="k-sources">—</div></div>
+  <div><div class="k">总调用</div><div class="v" id="k-total">—</div></div>
+  <div><div class="k">失败</div><div class="v err" id="k-fail">—</div></div>
+</div>
+<canvas id="chart"></canvas>
+
+<script src="/openloop/runtime/chartjs.bce154080959c574.js"></script>
+<script>
+(async function () {
+  const res = await openloop.fetch('/openloop/app/api-usage')
+  const data = await res.json()
+  const sources = data.sources || []
+  document.getElementById('k-sources').textContent = sources.length
+  document.getElementById('k-total').textContent = sources.reduce((n, s) => n + s.total, 0)
+  document.getElementById('k-fail').textContent = sources.reduce((n, s) => n + s.failures, 0)
+
+  const labels = sources.slice(0, 8).map(s => s.source.length > 28 ? s.source.slice(0, 26) + '…' : s.source)
+  const totals = sources.slice(0, 8).map(s => s.total)
+  const failures = sources.slice(0, 8).map(s => s.failures)
+  const css = getComputedStyle(document.documentElement)
+  const fg = css.getPropertyValue('--muted').trim() || '#888'
+  const grid = 'rgba(127,127,127,.15)'
+  new Chart(document.getElementById('chart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: '成功', data: totals.map((t, i) => t - failures[i]), backgroundColor: 'rgba(91,140,255,.55)', borderRadius: 4 },
+        { label: '失败', data: failures, backgroundColor: 'rgba(229,86,77,.65)', borderRadius: 4 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: {
+        x: { stacked: true, ticks: { color: fg, font: { size: 10 } }, grid: { display: false } },
+        y: { stacked: true, beginAtZero: true, ticks: { color: fg }, grid: { color: grid } },
+      },
+      plugins: { legend: { labels: { color: fg, boxWidth: 10, font: { size: 11 } } } },
+    },
+  })
+})().catch(() => {})
+</script>

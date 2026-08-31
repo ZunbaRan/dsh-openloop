@@ -3857,7 +3857,8 @@ window.__ModuleLoader__.load({
 		//#region src/presets/db-browser/schema.ts
 		/**
 		* db-browser props JSON Schema。
-		* collection 初始表（可省略 = 第一个表）；perPage 5–100 默认 20；title ≤80。
+		* collection 初始表（可省略 = 第一个表）；perPage 5–100 默认 20；title ≤80；
+		* browserId 浏览态持久化键（0.5.1：多张浏览卡各自记住位置——UI 态 localStorage）。
 		*/
 		const dbBrowserSchema = {
 			$schema: "http://json-schema.org/draft-07/schema#",
@@ -3879,6 +3880,11 @@ window.__ModuleLoader__.load({
 					minimum: 5,
 					maximum: 100,
 					description: "每页行数 5–100，默认 20"
+				},
+				browserId: {
+					type: "string",
+					maxLength: 40,
+					description: "浏览态持久化标识（多张浏览卡各自记住「表 + 搜索词」，刷新/重启不丢；缺省共享 default 槽位）"
 				}
 			}
 		};
@@ -3894,6 +3900,7 @@ window.__ModuleLoader__.load({
 			if (root === null) return validationFail([error("$", "db-browser props 必须是 JSON 对象")]);
 			const errors = [];
 			if (root.collection !== void 0 && (typeof root.collection !== "string" || root.collection.length > 40)) errors.push(error("collection", "collection 必须是 ≤40 字符的字符串"));
+			if (root.browserId !== void 0 && (typeof root.browserId !== "string" || root.browserId.length > 40)) errors.push(error("browserId", "browserId 必须是 ≤40 字符的字符串"));
 			if (root.perPage !== void 0) {
 				const v = root.perPage;
 				if (typeof v !== "number" || !Number.isInteger(v) || v < 5 || v > 100) errors.push(error("perPage", "perPage 必须是 5–100 的整数"));
@@ -3999,12 +4006,42 @@ window.__ModuleLoader__.load({
 			const headerTitle = typeof record.title === "string" && record.title.length > 0 ? record.title : "数据库浏览";
 			const collectionsState = useAppEndpoint("/openloop/app/collections");
 			const collections = (collectionsState.data?.collections ?? []).filter((c) => typeof c.name === "string" && typeof c.count === "number");
-			const [collection, setCollection] = (0, react.useState)(collectionProp);
-			const [queryInput, setQueryInput] = (0, react.useState)("");
-			const [query, setQuery] = (0, react.useState)("");
+			const browserKey = `openloop.dock.db-browser.${typeof record.browserId === "string" && record.browserId.length > 0 ? record.browserId : "default"}`;
+			const readBrowserState = () => {
+				try {
+					const raw = localStorage.getItem(browserKey);
+					if (raw === null) return {
+						collection: collectionProp,
+						query: ""
+					};
+					const p = JSON.parse(raw);
+					return {
+						collection: typeof p.collection === "string" ? p.collection : collectionProp,
+						query: typeof p.query === "string" ? p.query : ""
+					};
+				} catch {
+					return {
+						collection: collectionProp,
+						query: ""
+					};
+				}
+			};
+			const [browserState, setBrowserState] = (0, react.useState)(readBrowserState);
+			const collection = browserState.collection;
+			const query = browserState.query;
+			const [queryInput, setQueryInput] = (0, react.useState)(query);
 			const [page, setPage] = (0, react.useState)(1);
+			const persistBrowserState = (next) => {
+				setBrowserState(next);
+				try {
+					localStorage.setItem(browserKey, JSON.stringify(next));
+				} catch {}
+			};
 			(0, react.useEffect)(() => {
-				if (collection === null && collections.length > 0) setCollection(collections[0]?.name ?? null);
+				if (collection === null && collections.length > 0) persistBrowserState({
+					collection: collections[0]?.name ?? null,
+					query
+				});
 			}, [collection, collections]);
 			(0, react.useEffect)(() => {
 				setPage(1);
@@ -4016,7 +4053,10 @@ window.__ModuleLoader__.load({
 			const totalPages = typeof recordsState.data?.totalPages === "number" ? recordsState.data.totalPages : 1;
 			const currentPage = typeof recordsState.data?.page === "number" ? recordsState.data.page : page;
 			const onSearchKeyDown = (e) => {
-				if (e.key === "Enter") setQuery(e.currentTarget.value.trim());
+				if (e.key === "Enter") persistBrowserState({
+					collection,
+					query: e.currentTarget.value.trim()
+				});
 			};
 			const unavailable = collectionsState.unavailable;
 			const error = collectionsState.error ?? recordsState.error;
@@ -4053,7 +4093,10 @@ window.__ModuleLoader__.load({
 								style: selectStyle,
 								value: collection ?? "",
 								"aria-label": "选择集合",
-								onChange: (e) => setCollection(e.target.value),
+								onChange: (e) => persistBrowserState({
+									collection: e.target.value,
+									query
+								}),
 								children: collections.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("option", {
 									value: c.name,
 									children: [
@@ -4075,7 +4118,10 @@ window.__ModuleLoader__.load({
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
 								style: buttonStyle,
-								onClick: () => setQuery(queryInput.trim()),
+								onClick: () => persistBrowserState({
+									collection,
+									query: queryInput.trim()
+								}),
 								children: "查询"
 							}),
 							query !== "" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
@@ -4084,7 +4130,10 @@ window.__ModuleLoader__.load({
 								title: "清除关键词",
 								onClick: () => {
 									setQueryInput("");
-									setQuery("");
+									persistBrowserState({
+										collection,
+										query: ""
+									});
 								},
 								children: "✕"
 							}) : null

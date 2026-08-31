@@ -49,7 +49,7 @@ describeReal('app backend e2e（真 PocketBase 子进程）', () => {
     pb = await startPocketBase(startOpts())
     const client = createPbClient(pb.baseUrl, pb.credentials)
     const ready = await initCollections(client)
-    expect(ready.sort()).toEqual(['apis', 'apps', 'boards', 'components', 'meta', 'tiles'])
+    expect(ready.sort()).toEqual(['api_usage', 'apis', 'app_events', 'apps', 'boards', 'components', 'meta', 'tiles'])
     facade = createAppFacade(client)
   }, 120_000)
 
@@ -67,7 +67,7 @@ describeReal('app backend e2e（真 PocketBase 子进程）', () => {
   it('collections 全部创建（幂等重跑不炸）', async () => {
     const client = createPbClient(pb.baseUrl, pb.credentials)
     const again = await initCollections(client)
-    expect(again).toHaveLength(6)
+    expect(again).toHaveLength(8)
   })
 
   it('Agent 全流程：注册 APP → 登记 API → 配凭据 → 状态只报 configured', async () => {

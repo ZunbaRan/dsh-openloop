@@ -15,7 +15,20 @@
 import type { McpRuntimeService, McpToolRecord } from '@openloop/dsh-mcp-runtime'
 import { parseServerEntry, scopedFilePath, upsertServerToFile } from '@openloop/dsh-mcp-runtime'
 import { readFileSync } from 'node:fs'
-import { recordSystemEvent } from './event-log.ts'
+import { ringAppend, type SystemEvent } from './event-log.ts'
+
+/**
+ * 0.5.0 事件写入：routes 装配后经 globalThis.__openloopRecordEvent（PB 权威 +
+ * ring 降级）；装配前（早期 connect）直接 ring。两路都不阻塞主流程。
+ */
+function recordSystemEvent(kind: SystemEvent['kind'], level: SystemEvent['level'], text: string): void {
+  const recorder = (globalThis as unknown as { __openloopRecordEvent?: (k: SystemEvent['kind'], l: SystemEvent['level'], t: string) => void }).__openloopRecordEvent
+  if (recorder !== undefined) {
+    recorder(kind, level, text)
+  } else {
+    try { ringAppend({ at: Date.now(), kind, level, text }) } catch { /* 静默 */ }
+  }
+}
 import type { AppBackend } from './backend.ts'
 import type { AppFacade, ComponentRow } from './facade.ts'
 

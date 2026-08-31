@@ -45,6 +45,14 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 export interface AppRouteOptions {
   /** web profile 的活动 mcpRuntime（管理端点的热移除/热激活通道；headless 缺省） */
   getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined
+  /** 事件写入通道（PB 权威 + ring 降级；0.5.0 持久化） */
+  recordEvent?: (kind: 'registry' | 'backend' | 'mcp' | 'dock', level: 'info' | 'warn' | 'error', text: string) => void
+  /** 事件读取通道（PB 查询；未注入回落 ring——单测） */
+  listEvents?: (limit: number) => Promise<Array<{ at: number; kind: string; level: string; text: string }>>
+  /** usage 写入通道（PB 合批） */
+  recordUsage?: (source: string, kind: 'panel-binding' | 'mcp-call', ok: boolean, ms: number) => void
+  /** usage 聚合读取（PB 窗口聚合；未注入返回空——单测） */
+  readUsage?: () => Promise<{ windowMs: number; sources: Array<{ source: string; kind: string; total: number; failures: number; avgMs: number | null }> }>
 }
 
 export function registerAppRoutes(ctx: Context, webServer: WebServer, backend: AppBackend, options: AppRouteOptions = {}): () => void {
@@ -82,19 +90,48 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBac
     return
   }
 
-  // ---- 系统事件流（自管理四件套；ring buffer 新→旧） ----
+  // ---- 系统事件流（0.5.0：PB 权威读取 + ring 降级；写经 POST /events 或内部钩子） ----
   if (sub === 'events' && method === 'GET') {
     const url = new URL(req.url ?? '/', 'http://loopback.invalid')
     const limitRaw = Number(url.searchParams.get('limit') ?? '100')
-    const { snapshotSystemEvents } = await import('./event-log.ts')
-    json(res, 200, { events: snapshotSystemEvents(Number.isFinite(limitRaw) ? limitRaw : 100) })
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, Math.round(limitRaw))) : 100
+    if (options.listEvents !== undefined) {
+      json(res, 200, { events: await options.listEvents(limit) })
+    } else {
+      const { ringSnapshot } = await import('./event-log.ts')
+      json(res, 200, { events: ringSnapshot(limit) })
+    }
+    return
+  }
+  // 事件写入（panels/mcp-runtime 埋点桥 → 此端点；PB 合批落库）
+  if (sub === 'events' && method === 'POST') {
+    const body = JSON.parse(await readBody(req)) as { kind?: unknown; level?: unknown; text?: unknown }
+    const text = typeof body.text === 'string' ? body.text.trim() : ''
+    if (text.length === 0) { json(res, 400, { error: 'text is required' }); return }
+    const kind = body.kind === 'backend' || body.kind === 'mcp' || body.kind === 'dock' ? body.kind : 'registry'
+    const level = body.level === 'warn' || body.level === 'error' ? body.level : 'info'
+    options.recordEvent?.(kind, level, text.slice(0, 500))
+    json(res, 200, { ok: true })
     return
   }
 
-  // ---- api-usage 聚合（自管理四件套：面板绑定 + MCP 调用监控；globalThis 单例读取） ----
+  // ---- api-usage 聚合（0.5.0：PB 窗口聚合权威；写经 POST /api-usage） ----
   if (sub === 'api-usage' && method === 'GET') {
-    const { snapshotApiUsage } = await import('./api-usage.ts')
-    json(res, 200, snapshotApiUsage())
+    if (options.readUsage !== undefined) {
+      json(res, 200, await options.readUsage())
+    } else {
+      json(res, 200, { windowMs: 24 * 60 * 60 * 1000, sources: [] })
+    }
+    return
+  }
+  // usage 写入（panels 数据绑定 / mcp-runtime callTool 埋点 → 此端点）
+  if (sub === 'api-usage' && method === 'POST') {
+    const body = JSON.parse(await readBody(req)) as { source?: unknown; kind?: unknown; ok?: unknown; ms?: unknown }
+    const source = typeof body.source === 'string' ? body.source.trim() : ''
+    if (source.length === 0) { json(res, 400, { error: 'source is required' }); return }
+    const kind = body.kind === 'mcp-call' ? 'mcp-call' : 'panel-binding'
+    options.recordUsage?.(source, kind, body.ok !== false, typeof body.ms === 'number' && Number.isFinite(body.ms) ? Math.max(0, Math.round(body.ms)) : 0)
+    json(res, 200, { ok: true })
     return
   }
 
@@ -142,8 +179,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBac
     }
     const deleteFacade = await backend.ready()
     const result = await deleteFacade.deleteApp(body.appName)
-    const { recordSystemEvent } = await import('./event-log.ts')
-    recordSystemEvent('registry', 'warn', `删除 APP「${body.appName}」（级联清理 ${(result as { removedComponents?: number }).removedComponents ?? 0} 组件）`)
+    options.recordEvent?.('registry', 'warn', `删除 APP「${body.appName}」（级联清理 ${(result as { removedComponents?: number }).removedComponents ?? 0} 组件）`)
     backend.invalidateRegistry()
     json(res, 200, { ok: true, appName: body.appName, ...result })
     return
