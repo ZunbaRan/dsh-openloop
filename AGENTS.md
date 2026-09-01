@@ -6,15 +6,17 @@
 
 ### 角色分工
 
-- **主会话（orchestrator）**：负责任务拆解、安排规划、验收把关。不直接写主要实现代码。
-- **子 agent（worker）**：通过 subagent / dynamic workflow / swarm 执行具体开发。
+- **主会话（orchestrator）**：负责任务拆解、安排规划、验收把关。不直接写主要实现代码。跑 **codebuddy provider 的 `glm-5.3`**。
+- **子 agent（worker）**：通过 subagent / dynamic workflow / swarm 执行具体开发。跑 **codebuddy provider 的 `glm-5.3-flash`**。
+
+> **硬前提**：整套模式建立在 codebuddy provider 上，因此 `patches/agent-sdk-teardown-crash.patch`（见下节）是模式可用的前置条件——不打补丁，provider 每回合结束就崩，orchestrator 与 worker 都活不过一个回合。
 
 ### 执行规则
 
 1. **默认走子 agent**：除「极小改动」外，一切开发事项都安排给子 agent 执行。
    - 极小改动的界定：编辑两行已知问题修复、纯文档编辑、单行配置变更。
-2. **worker 模型**：统一配置 `tokenhub/glm-5.3-flash`（Tier 1 日常主力，见全局 `~/.pi/agent/AGENTS.md` 分级）。
-   - subagent 调用：`model: "tokenhub/glm-5.3-flash"`（支持 thinking 后缀，如 `:high`）。
+2. **worker 模型**：统一配置 **codebuddy provider 的 `glm-5.3-flash`**（用户 2026-09-02 拍板；与 orchestrator 的 `glm-5.3` 同走 codebuddy 渠道——这正是必须花大功夫修复 agent-sdk teardown 崩溃的原因）。
+   - subagent 调用：`model: "codebuddy/glm-5.3-flash"`（支持 thinking 后缀，如 `:high`）。
    - workflow 子 agent：agent options 里同样传该 model 字符串。
 3. **验收责任在主会话**：子 agent 返回后必须实测验收（跑测试 / curl 真机 / bundle grep），不凭子 agent 自述放行。
 4. **并行优先**：可拆分、无依赖的子任务并行分发；有依赖的用 pipeline/lanes 串行。
@@ -22,7 +24,7 @@
 
 ### 首次验证
 
-2026-09-02 已跑通该链路：smoke test 子 agent（tokenhub/glm-5.3-flash）成功返回并写出验证文件，`patches/` + 本文件即该模式的第一个落地产物。
+2026-09-02 已跑通该链路：smoke test 子 agent 成功返回并写出验证文件，`patches/` + 本文件即该模式的第一个落地产物。
 
 ## 已知问题（环境级）
 
