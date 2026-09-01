@@ -16,7 +16,7 @@
 </style>
 
 <h1>Agent 工作台</h1>
-<div class="sub">最近动作实时脉冲 · 每 10 秒刷新（scripts 档：本地计算 + 定时取数）</div>
+<div class="sub">最近动作实时脉冲 · 每 10 秒刷新（network 档：本地计算 + 定时取数，0.5.2 修订 scripts→network）</div>
 <div class="stats"><span id="stat-sessions">—</span><span id="stat-actions">—</span></div>
 <div id="feed"></div>
 
@@ -45,7 +45,9 @@
     })
   }
   function load() {
-    fetch('/openloop/app/agent-activity', { credentials: 'same-origin', headers: { Accept: 'application/json' } })
+    // network 档正确形态：openloop.fetch 桥走宿主代理（scripts 档 CSP connect-src 'none'
+    // 会拦死原生 fetch——backend-console 0.5.3 修订同款教训）。
+    openloop.fetch('/openloop/app/agent-activity', { headers: { Accept: 'application/json' } })
       .then(function (r) { return r.json() })
       .then(render)
       .catch(function () {})

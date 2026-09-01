@@ -1818,7 +1818,7 @@ var PbWatchdog = class {
 var require_package = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	module.exports = {
 		"name": "@openloop/dsh-html-artifact",
-		"version": "0.5.1",
+		"version": "0.5.2",
 		"description": "Replayable static or scripted fullscreen HTML artifacts for DeepSeek Harness.",
 		"private": true,
 		"type": "module",
@@ -2028,8 +2028,8 @@ const ARTIFACT_EXAMPLES = [
 	{
 		rid: "openloop:agent-dashboard",
 		title: "Agent 工作台",
-		description: "Agent 活动脉冲 · 10s 轮询（scripts 档）",
-		runtime: "scripts"
+		description: "Agent 活动脉冲 · 10s 轮询（network 档）",
+		runtime: "network"
 	},
 	{
 		rid: "openloop:usage-report",

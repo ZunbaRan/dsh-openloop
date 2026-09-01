@@ -58,7 +58,7 @@ function minimalEntry(kind: string): Record<string, unknown> {
  *  HTML 来自 @openloop/dsh-html-artifact 的 skill 资产。 */
 const ARTIFACT_EXAMPLES: ReadonlyArray<{ rid: string; title: string; description: string; runtime: 'static' | 'scripts' | 'network' }> = [
   { rid: 'openloop:system-map', title: '系统地图', description: '生态系统拓扑大屏（可拖节点；static 档）', runtime: 'static' },
-  { rid: 'openloop:agent-dashboard', title: 'Agent 工作台', description: 'Agent 活动脉冲 · 10s 轮询（scripts 档）', runtime: 'scripts' },
+  { rid: 'openloop:agent-dashboard', title: 'Agent 工作台', description: 'Agent 活动脉冲 · 10s 轮询（network 档）', runtime: 'network' },
   { rid: 'openloop:usage-report', title: '调用监控报表', description: '24h API 调用图表（network 档 + Chart.js）', runtime: 'network' },
   { rid: 'openloop:backend-console', title: '后端控制台', description: '同源 fetch + openloop.fetch 桥', runtime: 'network' },
 ]
