@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-pack:
+    name: pnpm check + pack tarballs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm 版本自动读根 package.json 的 packageManager 字段（pnpm@10.28.2）
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 发布纪律第一步云端化：全仓 typecheck + test + build（scripts/check-all.mjs，串行）
+      - name: Check (typecheck + test + build)
+        run: pnpm check
+
+      # 产出 12 个 tarball（11 个插件包 + 1 个 fixture）到 dist/
+      - name: Pack tarballs
+        run: pnpm pack:all
+
+      - name: Upload tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: openloop-tarballs
+          path: dist/*.tgz
+          if-no-files-found: error
+          retention-days: 14
