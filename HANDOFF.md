@@ -83,38 +83,24 @@ DSH（DeepSeek Harness）插件 monorepo，pnpm workspace，11 个 `@openloop/ds
 - 启动注册 best-effort，连接失败停在 server 粒度不拖死 web
 - addServer / removeServer / onServersChanged + mcp-tools 动态订阅
 
-## 当前未解决的问题（优先级从高到低）
+## 当前未解决的问题（优先级从高到低；2026-09-02 刷新）
 
-### P0：backend-console 范例「TypeError: Failed to fetch」未修复
+### P0→P2：已全部修复并真机验收通过（2026-09-02 用户确认）
 
-- **数据层已生效**：curl 确认 registry 返回 `runtime: network`（PATCH seed 的 total-upsert 路径写了新值）
-- **用户报**：重启 + 硬刷后仍报错
-- **怀疑**：`openloop.fetch` 桥在 artifact 沙箱内可能未注入（需查 `packages/artifact/src/client/` 的 sandbox shell——`openloop.fetch` 只在 network 档注入，但 backend-console 范例的 HTML 里用的是 `openloop.fetch`——如果 ArtifactMeta 的 runtime 仍是旧值 `scripts`（PB 里缓存的旧 entry 没被 PATCH 覆盖？），沙箱 CSP 会拦 fetch）
-- **下一步**：① 查 3080 实际渲染的 artifact iframe CSP（`document.querySelector('iframe[data-openloop-mcp-call]')` → 看 srcdoc 或 src 的 CSP header）② 确认 PATCH seed 的 upsert 是否真的覆盖了 PB 里的旧 entry（可能 PB PATCH 路径只更新部分字段，没覆盖 `entry` JSON）③ 如果 entry 确实已更新，查 `openloop.fetch` 注入逻辑（`packages/artifact/src/client/` 里 sandbox shell 对 network 档的注入代码）
+- **P0 backend-console「Failed to fetch」**：双重根因均修复——① backend-console 档位 scripts→network + rid 进 ArtifactMeta（PATCH seed total-upsert 生效，curl 实测 registry 已是 `runtime: network`）② `openloop.fetch` 桥转发 method/body/headers（base 0.4.7 / artifact 0.5.3）。
+- **P1 artifact「已固定」徽章**：0.9.4 seed 写 rid 进 ArtifactMeta + `sourceIdOf` artifact 优先取 `meta.rid`，验收通过。
+- **P2 agent-dashboard / usage-report 范例**：agent-dashboard 0.5.2 scripts→network + `openloop.fetch`，四个范例统一审查后验收通过。
 
-### P1：artifact「已固定」徽章不显示
-
-- **已修代码**：seed 写 `rid` 进 ArtifactMeta + `sourceIdOf` artifact 优先取 `meta.rid`
-- **用户报**：pin 后不显示已固定
-- **怀疑**：同 P0——如果 PB 里 entry 没被 PATCH 覆盖，旧 entry 里没有 `rid` 字段，`sourceIdOf` 退化到 path 文件名（与 c.id 命名空间不匹配）
-- **下一步**：先确认 P0 的 PB entry 覆盖问题——如果 entry 确实已更新（含 rid），这个应该自动修复
-
-### P2：agent-dashboard / usage-report 范例未验证
-
-- agent-dashboard 用 `scripts` 档 + 原生 `fetch`（应该改 network + openloop.fetch，同 backend-console 的问题）
-- usage-report 用 `network` 档 + `openloop.fetch` + Chart.js 预置库——可能也有类似问题
-- **下一步**：统一审查 4 个范例的 runtime 档与 fetch 用法
-
-### P3：左列 APP 行卡片化（A 方案，未做）
+### P1（新）· dock 左列 APP 行卡片化（A 方案已批，未开工）
 
 - 用户反馈「左列看不出内容」——只有 rid + kind 徽标
 - 方案：显示 description 副文本 + artifact/panel 小标签
-- 用户已认可方案但未开工
+- 已提升为待办池首位（见上层 AGENTS.md）
 
-### P4：dsh-task-board 启动报错（第三方插件，非我们 bug）
+### P4：dsh-task-board 启动报错（第三方插件，非我们 bug，可忽略）
 
 - `session/list` 端点在宿主 0.1.1-rc.2 无导出 → 降级日志（不致命）
-- 可忽略或等第三方更新
+- 等第三方更新即可
 
 ## 关键架构事实（踩坑沉淀，勿再犯）
 
