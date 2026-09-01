@@ -1,0 +1,73 @@
+--- a/process-transport.js (original @tencent-ai/agent-sdk 0.3.250)
++++ b/process-transport.js (patched)
+@@ -499,6 +499,14 @@
+         }
+         this.process.on('error', err => this.handleProcessError(err));
+         this.process.on('exit', code => this.handleProcessExit(code));
++        // Writes to stdin can race with CLI process exit (e.g. final control
++        // responses at teardown). Node surfaces EPIPE as an async 'error'
++        // event on the stdin stream; with no listener it becomes an
++        // uncaughtException that kills the host process. The transport is
++        // dead anyway — route through handleError for a graceful close.
++        if (this.process.stdin) {
++            this.process.stdin.on('error', err => this.handleError(err));
++        }
+         // Handle stderr — always capture for diagnostics, optionally forward to callback
+         if (this.process.stderr) {
+             this.process.stderr.on('data', (data) => {
+@@ -629,6 +637,24 @@
+         };
+         // Just send without registering in pendingRequests
+         this.writeLine(request);
++    }
++    /**
++     * Write a control response, swallowing transport failures.
++     *
++     * Control responses frequently run on error-handling paths (e.g. inside
++     * the catch block of handleMcpMessageRequest). If the CLI process has
++     * already exited, writeLine() throws synchronously ("Transport not
++     * started"); letting that escape turns a handled error into an
++     * uncaughtException that kills the host process. Drop the response and
++     * log instead — there is nobody left to receive it.
++     */
++    tryWriteLine(data) {
++        try {
++            this.writeLine(data);
++        }
++        catch (error) {
++            console.error('[agent-sdk] control response dropped (transport not writable):', error instanceof Error ? error.message : String(error));
++        }
+     }
+     /**
+      * Send a control response.
+@@ -642,7 +668,7 @@
+                 response,
+             },
+         };
+-        this.writeLine(controlResponse);
++        this.tryWriteLine(controlResponse);
+     }
+     /**
+      * Send a control error response.
+@@ -656,7 +682,7 @@
+                 error,
+             },
+         };
+-        this.writeLine(controlResponse);
++        this.tryWriteLine(controlResponse);
+     }
+     /**
+      * Check if transport is ready.
+@@ -766,7 +792,11 @@
+             if (message.type === 'control_request') {
+                 const controlRequest = message;
+                 if (controlRequest.request.subtype === 'mcp_message') {
+-                    this.handleMcpMessageRequest(controlRequest);
++                    // Async dispatch without a consumer: never let a failure here
++                    // become an unhandled rejection that kills the host process.
++                    this.handleMcpMessageRequest(controlRequest).catch((error) => {
++                        console.error('[agent-sdk] mcp message request failed:', error instanceof Error ? error.message : String(error));
++                    });
+                 }
+                 else if (this.controlRequestHandler) {
+                     this.controlRequestHandler(controlRequest);
