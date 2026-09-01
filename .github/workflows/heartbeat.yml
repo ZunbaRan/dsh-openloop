@@ -1,0 +1,71 @@
+name: Heartbeat
+
+# 仓库起搏器：每周一跑一次全量 pnpm check，防依赖漂移 / 环境漂移。
+# 绿了无事发生；红了自动开 issue（upsert：同一故障只维护一个 issue，追加而非刷屏）。
+on:
+  schedule:
+    - cron: '0 1 * * 1' # 每周一 01:00 UTC = 北京时间周一 09:00
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write # 开 issue / 评论
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # continue-on-error 让失败流转到下一步开 issue，而不是直接红掉（红也会有邮件，但 issue 更可追踪）
+      - name: Check (typecheck + test + build)
+        id: check
+        continue-on-error: true
+        run: pnpm check
+
+      - name: Open or update failure issue
+        if: steps.check.outcome == 'failure'
+        run: |
+          TITLE="仓库起搏器：pnpm check 失败"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BODY="定时巡检（每周一）发现全仓 \`pnpm check\` 失败。
+
+          - 失败 run：${RUN_URL}
+          - 触发方式：${{ github.event_name }}
+          - 请点开 run 查看失败步骤日志定位。
+
+          *此 issue 由 [heartbeat.yml](https://github.com/${{ github.repository }}/blob/main/.github/workflows/heartbeat.yml) 自动创建。修复后请关闭。*"
+
+          # upsert：已有同标题 open issue 则评论追加，否则新建
+          EXISTING=$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title == \"${TITLE}\") | .number" | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            echo "已有 open issue #${EXISTING}，追加评论"
+            gh issue comment "$EXISTING" --body "巡检仍失败：${RUN_URL}"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 巡检恢复绿色时，把残留的失败 issue 自动关掉
+      - name: Close stale failure issue
+        if: steps.check.outcome == 'success'
+        run: |
+          TITLE="仓库起搏器：pnpm check 失败"
+          EXISTING=$(gh issue list --state open --json number,title \
+            --jq ".[] | select(.title == \"${TITLE}\") | .number" | head -1)
+          if [ -n "$EXISTING" ]; then
+            gh issue close "$EXISTING" --comment "巡检已恢复绿色（${{ github.run_id }}），自动关闭。"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

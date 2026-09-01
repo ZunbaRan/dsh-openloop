@@ -1,0 +1,44 @@
+name: Docs Pages
+
+# 把 docs/*.md 发布成 GitHub Pages 静态卡片索引站。
+# 站点 URL: https://zunbaran.github.io/dsh-openloop/
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'scripts/build-docs-site.mjs'
+      - '.github/workflows/docs-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write      # 写 Pages 部署
+  id-token: write   # Pages 部署的 OIDC 身份
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # 首次运行时若 Pages 未启用，自动把源切到 GitHub Actions
+      - uses: actions/configure-pages@v5
+
+      - name: Build site
+        run: node scripts/build-docs-site.mjs
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

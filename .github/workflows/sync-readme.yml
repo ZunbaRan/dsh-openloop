@@ -1,0 +1,40 @@
+name: Sync README versions
+
+# 包矩阵表版本列与 packages/*/package.json 保持同步的机器人。
+# 触发：任何包版本变化被合入 main，或手动运行。
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/*/package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write # 允许以 GITHUB_TOKEN 身份把同步结果 commit 回 main
+
+concurrency:
+  group: sync-readme
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Sync README version table
+        id: sync
+        run: node scripts/sync-readme-versions.mjs
+
+      # 只有真的改了 README 才提交，无漂移时零提交
+      - name: Commit if changed
+        run: |
+          git config user.name "openloop-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "README 已是最新，无需提交"
+          else
+            git commit -m "docs: 同步 README 包矩阵版本（sync-readme 机器人）"
+            git push
+          fi

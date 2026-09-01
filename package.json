@@ -9,6 +9,8 @@
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "pack:all": "node scripts/pack-all.mjs",
+    "sync:readme": "node scripts/sync-readme-versions.mjs",
+    "docs:site": "node scripts/build-docs-site.mjs",
     "test:mcp:dsh": "node scripts/test-mcp-dsh.mjs",
     "test:mcp:e2e": "node scripts/test-mcp-e2e.mjs",
     "test:mcp:interop": "node scripts/test-mcp-interop.mjs",

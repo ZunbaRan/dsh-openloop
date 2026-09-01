@@ -1,0 +1,98 @@
+name: PR Report
+
+# PR 变更报告机器人：开 PR / 推新提交时自动评论一份统计报告。
+# 报告是确定性统计（git + jq），无 LLM、无外部密钥，只用 GITHUB_TOKEN。
+# 评论 upsert：带 marker 查找机器人旧评论，有则更新（不刷屏），无则新建。
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write # 写 PR 评论
+
+concurrency:
+  group: pr-report-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 需要 merge-base 对比 base 与 head
+
+      - name: Build report
+        run: |
+          BASE=$(git merge-base origin/main HEAD)
+
+          # ---- diff 统计 ----
+          STAT=$(git diff --shortstat "$BASE" HEAD)
+          COMMITS=$(git rev-list --count "$BASE"..HEAD)
+
+          # ---- 包版本变化（将发版的包）----
+          VERSION_TABLE=""
+          while IFS= read -r f; do
+            OLD=$(git show "$BASE:$f" | jq -r '.version' 2>/dev/null || echo "新增")
+            NEW=$(jq -r '.version' "$f")
+            NAME=$(jq -r '.name' "$f")
+            VERSION_TABLE="${VERSION_TABLE}| \`${NAME}\` | ${OLD} → ${NEW} |
+          "
+          done < <(git diff --name-only "$BASE" HEAD -- 'packages/*/package.json')
+
+          if [ -n "$VERSION_TABLE" ]; then
+            VERSION_SECTION="### 版本变化（将发版）
+
+          | 包 | base → head |
+          |---|---|
+          ${VERSION_TABLE}"
+          else
+            VERSION_SECTION="### 版本变化
+
+          本次无包版本变化（纯文档 / 测试 / 源码修复）。"
+          fi
+
+          # ---- 涉及的包目录 ----
+          PKGS=$(git diff --name-only "$BASE" HEAD | grep -oE '^(packages|fixtures)/[^/]+' | sort -u | sed 's/^/`/;s/$/`/' | paste -sd ' ' -)
+          [ -z "$PKGS" ] && PKGS="（无包目录变更）"
+
+          {
+            echo '<!-- pr-report -->'
+            echo '## 📦 变更报告'
+            echo
+            echo "**${COMMITS} 个提交** · ${STAT:-无文件变更}"
+            echo
+            echo "${VERSION_SECTION}"
+            echo '### 涉及包'
+            echo
+            echo "${PKGS}"
+            echo
+            echo '---'
+            echo "*由 [pr-report.yml](https://github.com/${{ github.repository }}/blob/main/.github/workflows/pr-report.yml) 自动生成，随新提交自动更新。*"
+          } | sed 's/^          //' > /tmp/report.md
+
+          echo '===== 报告预览 ====='
+          cat /tmp/report.md
+
+      - name: Upsert PR comment
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          MARKER="<!-- pr-report -->"
+          BODY=$(cat /tmp/report.md)
+
+          # 查找机器人旧评论（以 marker 开头）
+          OLD_ID=$(gh api "repos/${{ github.repository }}/issues/${PR}/comments" \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" | head -1)
+
+          if [ -n "$OLD_ID" ]; then
+            echo "更新已有评论 #$OLD_ID"
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/${OLD_ID}" \
+              -f body="$BODY" --silent
+          else
+            echo "创建新评论"
+            gh api --method POST "repos/${{ github.repository }}/issues/${PR}/comments" \
+              -f body="$BODY" --silent
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

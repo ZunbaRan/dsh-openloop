@@ -1,0 +1,56 @@
+name: Playground
+
+# 纯学习用：dump Actions 运行时给你的全部 context，写进 run summary。
+# 顺便演示 matrix（多 runner 并行）与 $GITHUB_STEP_SUMMARY。
+# 手动触发：Actions → Playground → Run workflow
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  explore:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Dump contexts to summary
+        env:
+          GH_CTX: ${{ toJson(github) }}
+          JOB_CTX: ${{ toJson(job) }}
+          RUNNER_CTX: ${{ toJson(runner) }}
+          ENV_CTX: ${{ toJson(env) }}
+        run: |
+          {
+            echo "## 🧪 Actions Contexts Explorer（${{ matrix.os }}）"
+            echo
+            echo 'workflow 里 `${{ }}` 表达式能读到什么？全 dump 出来研究：'
+            echo
+            echo '### github（事件、仓库、ref、actor…）'
+            echo '```json'
+            echo "$GH_CTX"
+            echo '```'
+            echo '### job（status、matrix strategy…）'
+            echo '```json'
+            echo "$JOB_CTX"
+            echo '```'
+            echo '### runner（跑在什么机器上）'
+            echo '```json'
+            echo "$RUNNER_CTX"
+            echo '```'
+            echo '### env（workflow 级环境变量）'
+            echo '```json'
+            echo "$ENV_CTX"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Runner environment
+        run: |
+          echo "OS:      $(uname -s)"
+          echo "Arch:    $(uname -m)"
+          echo "Cores:   $(sysctl -n hw.ncpu 2>/dev/null || nproc)"
+          echo "Node:    $(node -v)"
+          echo "Disk:"
+          df -h / | tail -1
