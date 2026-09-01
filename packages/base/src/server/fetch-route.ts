@@ -14,6 +14,35 @@ import { safeFetchJson, normalizeTimeoutMs } from './net.ts'
 export const BASE_FETCH_ROUTE = '/openloop/base/fetch'
 const MAX_BODY_BYTES = 8 * 1024
 
+/**
+ * 解析同源相对路径：url 以 '/' 开头即相对——只能指向当前所在 server（无法指到
+ * 内网其他地址，SSRF 面为零），用请求的 Host 头补全成绝对 URL 以便 Node fetch 使用。
+ * host 缺失/非法时原样返回（后续 safeFetchJson 会以绝对性校验兜底拒绝）。
+ */
+export function resolveFetchTarget(url: string, host: unknown): string {
+  if (!url.startsWith('/') || typeof host !== 'string' || host.length === 0) return url
+  try {
+    return new URL(url, `http://${host}`).href
+  } catch {
+    return url
+  }
+}
+
+/**
+ * 自身 origin 白名单：把请求的 Host 头对应的 http origin 并入 allowedOrigins，
+ * 使同源相对路径请求跳过 https-only/SSRF 静态校验（自身 server 的来源天然可信）。
+ * 外部 https 端点仍走原 SSRF 防护，不受影响。
+ */
+export function ownOriginAllowlist(host: unknown, allowedOrigins: readonly string[] = []): readonly string[] {
+  if (typeof host !== 'string' || host.length === 0) return allowedOrigins
+  try {
+    const origin = new URL(`http://${host}`).origin
+    return [...allowedOrigins, origin]
+  } catch {
+    return allowedOrigins
+  }
+}
+
 export interface BaseFetchRouteOptions {
   /** 部署级本机源白名单（如 'http://127.0.0.1:9090'）；命中即跳过 https/SSRF 拒绝 */
   allowedOrigins?: readonly string[]
@@ -67,7 +96,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, options: BaseFe
   }
   try {
     const { url, timeoutMs } = parseFetchRequestBody(Buffer.concat(chunks).toString('utf8'))
-    const data = await safeFetchJson(url, { ...(timeoutMs !== undefined ? { timeoutMs } : {}), ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}) })
+    // 同源相对路径（url 以 '/' 开头）补全为绝对 URL，并把自身 origin 并入白名单：
+    // 内置 artifact 组件调自家 /openloop/app/* 时不再被 SSRF/https-only 静态校验拒绝。
+    const target = resolveFetchTarget(url, req.headers.host)
+    const allowedOrigins = ownOriginAllowlist(req.headers.host, options.allowedOrigins)
+    const data = await safeFetchJson(target, {
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
+    })
     res.statusCode = 200
     res.end(JSON.stringify({ ok: true, status: 200, data }))
   } catch (error) {
