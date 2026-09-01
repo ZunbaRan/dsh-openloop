@@ -28,6 +28,23 @@
 
 ## 已知问题（环境级）
 
+### pi-messenger-swarm harness server 启动/spawn 两个坑（2026-09-01 实测修复）
+
+**坑 1：包更新后 server 起不来**（报 `server failed to start on http://127.0.0.1:9877`）：`server.js` import `@earendil-works/pi-coding-agent`，但 `~/.pi/agent/npm/node_modules` 下没有该包。修复：
+
+```bash
+ln -sfn /Users/loloru/.nvm/versions/node/v22.19.0/lib/node_modules/@earendil-works/pi-coding-agent \
+  /Users/loloru/.pi/agent/npm/node_modules/@earendil-works/pi-coding-agent
+```
+
+**坑 2：spawn 立即 failed**：`dist/swarm/spawn.js` 硬编码 `spawn('pi', ...)`，而 `pi` 二进制在 `~/.nvm/versions/node/v22.19.0/bin/`（默认 PATH 用的是 v22.22.2，没有 pi）。修复：启动 harness server 时把该 bin 前置到 PATH：
+
+```bash
+export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenger-swarm --start
+```
+
+**路由验证结论（2026-09-01）**：subagent（`model: "codebuddy/glm-5.3-flash"`）、dynamic workflow（runs.run options 同字段）、swarm（agent-file frontmatter `model: codebuddy/glm-5.3-flash`，内部转 `--provider codebuddy --model glm-5.3-flash`；spawn 无 `--model` CLI 旗标）三条通道均实测路由成功，子 agent 环境变量均为 `PI_PROVIDER=codebuddy` + `PI_MODEL=glm-5.3-flash`。
+
 ### agent-sdk teardown 崩溃（已本地补丁，非本仓库代码问题）
 
 **现象**：使用 codebuddy provider（AskCodebuddy / pi-codebuddy-sdk 扩展）时，回答正常返回，但回合结束后 pi 整个进程退出，报：
