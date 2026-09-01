@@ -47,4 +47,37 @@ describe('base fetch 代理路由（A3/A6）', () => {
     const data = await safeFetchJson(target, { allowedOrigins: allow, fetchFn: mock })
     expect(data).toEqual({ state: 'running' })
   })
+
+  it('parseFetchRequestBody：method/body/headers 透传', () => {
+    const parsed = parseFetchRequestBody('{"url":"/openloop/app/invalidate","method":"post","body":"{}","headers":{"Content-Type":"application/json","Accept":"application/json"}}')
+    expect(parsed.method).toBe('POST')
+    expect(parsed.body).toBe('{}')
+    expect(parsed.headers).toEqual({ 'Content-Type': 'application/json', Accept: 'application/json' })
+  })
+  it('parseFetchRequestBody：method 白名单拒绝危险方法', () => {
+    expect(() => parseFetchRequestBody('{"url":"https://x.example.com/a","method":"CONNECT"}')).toThrow(/method/)
+    expect(() => parseFetchRequestBody('{"url":"https://x.example.com/a","method":"TRACE"}')).toThrow(/method/)
+  })
+  it('parseFetchRequestBody：body 非 string 丢弃；超 8KB 截断', () => {
+    const noBody = parseFetchRequestBody('{"url":"https://x.example.com/a","body":123}')
+    expect(noBody.body).toBeUndefined()
+    const big = 'x'.repeat(9000)
+    const parsed = parseFetchRequestBody(JSON.stringify({ url: 'https://x.example.com/a', body: big }))
+    expect(parsed.body?.length).toBeLessThanOrEqual(8 * 1024)
+  })
+  it('parseFetchRequestBody：headers 白名单剥离 Authorization/Cookie', () => {
+    const parsed = parseFetchRequestBody('{"url":"https://x.example.com/a","headers":{"Authorization":"Bearer t","Cookie":"k=v","Accept":"application/json"}}')
+    expect(parsed.headers).toEqual({ Accept: 'application/json' })
+  })
+  it('safeFetchJson：method/body/headers 传达到 fetchFn', async () => {
+    let seen: { method?: string; body?: string; headers?: Record<string, string> } = {}
+    const mock = ((_url: string, init?: RequestInit) => { seen = { method: init?.method, body: init?.body as string | undefined, headers: init?.headers as Record<string, string> | undefined }; return Promise.resolve(new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } })) }) as unknown as typeof fetch
+    await safeFetchJson('https://api.example.com/x', {
+      method: 'POST', body: '{}', headers: { 'Content-Type': 'application/json' },
+      fetchFn: mock,
+    })
+    expect(seen.method).toBe('POST')
+    expect(seen.body).toBe('{}')
+    expect(seen.headers).toMatchObject({ 'Content-Type': 'application/json' })
+  })
 })

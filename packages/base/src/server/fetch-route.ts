@@ -13,6 +13,12 @@ import { safeFetchJson, normalizeTimeoutMs } from './net.ts'
 
 export const BASE_FETCH_ROUTE = '/openloop/base/fetch'
 const MAX_BODY_BYTES = 8 * 1024
+/** 转发 body 上限（与请求体上限一致） */
+const MAX_FORWARD_BODY_BYTES = 8 * 1024
+/** 方法白名单：仅标准无副作用方法（CONNECT/TRACE 等拒绝） */
+const ALLOWED_FETCH_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+/** headers 白名单：沙箱只能带 Content-Type/Accept，不能注入 Authorization/Cookie/Host 等 */
+const ALLOWED_FETCH_HEADERS = ['content-type', 'accept']
 
 /**
  * 解析同源相对路径：url 以 '/' 开头即相对——只能指向当前所在 server（无法指到
@@ -48,8 +54,8 @@ export interface BaseFetchRouteOptions {
   allowedOrigins?: readonly string[]
 }
 
-/** 请求体解析（限 8KB；仅 {url, timeoutMs?} 形态） */
-export function parseFetchRequestBody(raw: string): { url: string; timeoutMs?: number } {
+/** 请求体解析（限 8KB；{url, method?, body?, headers?, timeoutMs?} 形态） */
+export function parseFetchRequestBody(raw: string): { url: string; method?: string; body?: string; headers?: Record<string, string>; timeoutMs?: number } {
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
@@ -60,7 +66,27 @@ export function parseFetchRequestBody(raw: string): { url: string; timeoutMs?: n
   const record = parsed as Record<string, unknown>
   if (typeof record.url !== 'string' || record.url.length === 0) throw new Error('request body requires a non-empty "url" string')
   const timeoutMs = record.timeoutMs === undefined ? undefined : normalizeTimeoutMs(Number(record.timeoutMs))
-  return { url: record.url, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }
+  // method 白名单：仅标准无副作用方法（CONNECT/TRACE 等危险方法拒绝）
+  const method = typeof record.method === 'string' && record.method.length > 0 ? record.method.toUpperCase() : undefined
+  if (method !== undefined && !ALLOWED_FETCH_METHODS.includes(method)) throw new Error(`method "${method}" is not allowed`)
+  // body 仅接受 string，8KB 截断（与请求体上限一致）
+  const body = typeof record.body === 'string' && record.body.length > 0 ? record.body.slice(0, MAX_FORWARD_BODY_BYTES) : undefined
+  // headers 白名单：只放行 Content-Type / Accept——沙箱不能注入 Authorization/Cookie/Host 等绕过服务端防护的头部
+  const headers: Record<string, string> | undefined = (() => {
+    if (typeof record.headers !== 'object' || record.headers === null) return undefined
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(record.headers as Record<string, unknown>)) {
+      if (ALLOWED_FETCH_HEADERS.includes(key.toLowerCase()) && typeof value === 'string') out[key] = value
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+  })()
+  return {
+    url: record.url,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    ...(method !== undefined ? { method } : {}),
+    ...(body !== undefined ? { body } : {}),
+    ...(headers !== undefined ? { headers } : {}),
+  }
 }
 
 /** 路由注册（ctx.effect 生命周期回收由调用方包裹） */
@@ -95,7 +121,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, options: BaseFe
     chunks.push(chunk as Buffer)
   }
   try {
-    const { url, timeoutMs } = parseFetchRequestBody(Buffer.concat(chunks).toString('utf8'))
+    const { url, method, body, headers, timeoutMs } = parseFetchRequestBody(Buffer.concat(chunks).toString('utf8'))
     // 同源相对路径（url 以 '/' 开头）补全为绝对 URL，并把自身 origin 并入白名单：
     // 内置 artifact 组件调自家 /openloop/app/* 时不再被 SSRF/https-only 静态校验拒绝。
     const target = resolveFetchTarget(url, req.headers.host)
@@ -103,6 +129,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, options: BaseFe
     const data = await safeFetchJson(target, {
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
+      ...(method !== undefined ? { method } : {}),
+      ...(body !== undefined ? { body } : {}),
+      ...(headers !== undefined ? { headers } : {}),
     })
     res.statusCode = 200
     res.end(JSON.stringify({ ok: true, status: 200, data }))

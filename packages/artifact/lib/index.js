@@ -155,7 +155,13 @@ function fetchBridge(token) {
         var id = 'f' + (++seq);
         pending.set(id, { resolve: resolve, reject: reject });
         parent.postMessage({ type: ${JSON.stringify(ARTIFACT_FETCH_MESSAGE)}, token: ${JSON.stringify(token)}, callId: id,
-          url: String(url), init: { timeoutMs: init.timeoutMs } }, '*');
+          url: String(url),
+          init: {
+            method: init.method,
+            body: typeof init.body === 'string' ? init.body : undefined,
+            headers: init.headers,
+            timeoutMs: init.timeoutMs
+          } }, '*');
         setTimeout(function() {
           if (pending.has(id)) { pending.delete(id); reject(new Error('openloop.fetch timeout (15s)')); }
         }, init.timeoutMs && init.timeoutMs < 15000 ? init.timeoutMs + 2000 : 15000);

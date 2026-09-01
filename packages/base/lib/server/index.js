@@ -158,6 +158,9 @@ async function safeFetchJson(url, options = {}) {
 	options.signal?.addEventListener("abort", onExternalAbort, { once: true });
 	try {
 		const response = await (options.fetchFn ?? fetch)(url, {
+			method: options.method ?? "GET",
+			...options.body !== void 0 ? { body: options.body } : {},
+			...options.headers !== void 0 ? { headers: options.headers } : {},
 			signal: controller.signal,
 			redirect: "error"
 		});
@@ -250,6 +253,18 @@ var RuntimeAssetsRoute = class {
 //#region src/server/fetch-route.ts
 const BASE_FETCH_ROUTE = "/openloop/base/fetch";
 const MAX_BODY_BYTES = 8192;
+/** 转发 body 上限（与请求体上限一致） */
+const MAX_FORWARD_BODY_BYTES = 8192;
+/** 方法白名单：仅标准无副作用方法（CONNECT/TRACE 等拒绝） */
+const ALLOWED_FETCH_METHODS = [
+	"GET",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE"
+];
+/** headers 白名单：沙箱只能带 Content-Type/Accept，不能注入 Authorization/Cookie/Host 等 */
+const ALLOWED_FETCH_HEADERS = ["content-type", "accept"];
 /**
 * 解析同源相对路径：url 以 '/' 开头即相对——只能指向当前所在 server（无法指到
 * 内网其他地址，SSRF 面为零），用请求的 Host 头补全成绝对 URL 以便 Node fetch 使用。
@@ -277,7 +292,7 @@ function ownOriginAllowlist(host, allowedOrigins = []) {
 		return allowedOrigins;
 	}
 }
-/** 请求体解析（限 8KB；仅 {url, timeoutMs?} 形态） */
+/** 请求体解析（限 8KB；{url, method?, body?, headers?, timeoutMs?} 形态） */
 function parseFetchRequestBody(raw) {
 	let parsed;
 	try {
@@ -289,9 +304,21 @@ function parseFetchRequestBody(raw) {
 	const record = parsed;
 	if (typeof record.url !== "string" || record.url.length === 0) throw new Error("request body requires a non-empty \"url\" string");
 	const timeoutMs = record.timeoutMs === void 0 ? void 0 : normalizeTimeoutMs(Number(record.timeoutMs));
+	const method = typeof record.method === "string" && record.method.length > 0 ? record.method.toUpperCase() : void 0;
+	if (method !== void 0 && !ALLOWED_FETCH_METHODS.includes(method)) throw new Error(`method "${method}" is not allowed`);
+	const body = typeof record.body === "string" && record.body.length > 0 ? record.body.slice(0, MAX_FORWARD_BODY_BYTES) : void 0;
+	const headers = (() => {
+		if (typeof record.headers !== "object" || record.headers === null) return void 0;
+		const out = {};
+		for (const [key, value] of Object.entries(record.headers)) if (ALLOWED_FETCH_HEADERS.includes(key.toLowerCase()) && typeof value === "string") out[key] = value;
+		return Object.keys(out).length > 0 ? out : void 0;
+	})();
 	return {
 		url: record.url,
-		...timeoutMs !== void 0 ? { timeoutMs } : {}
+		...timeoutMs !== void 0 ? { timeoutMs } : {},
+		...method !== void 0 ? { method } : {},
+		...body !== void 0 ? { body } : {},
+		...headers !== void 0 ? { headers } : {}
 	};
 }
 /** 路由注册（ctx.effect 生命周期回收由调用方包裹） */
@@ -331,12 +358,15 @@ async function handle(req, res, options) {
 		chunks.push(chunk);
 	}
 	try {
-		const { url, timeoutMs } = parseFetchRequestBody(Buffer.concat(chunks).toString("utf8"));
+		const { url, method, body, headers, timeoutMs } = parseFetchRequestBody(Buffer.concat(chunks).toString("utf8"));
 		const target = resolveFetchTarget(url, req.headers.host);
 		const allowedOrigins = ownOriginAllowlist(req.headers.host, options.allowedOrigins);
 		const data = await safeFetchJson(target, {
 			...timeoutMs !== void 0 ? { timeoutMs } : {},
-			...allowedOrigins.length > 0 ? { allowedOrigins } : {}
+			...allowedOrigins.length > 0 ? { allowedOrigins } : {},
+			...method !== void 0 ? { method } : {},
+			...body !== void 0 ? { body } : {},
+			...headers !== void 0 ? { headers } : {}
 		});
 		res.statusCode = 200;
 		res.end(JSON.stringify({

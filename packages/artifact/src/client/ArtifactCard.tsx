@@ -38,7 +38,7 @@ function ArtifactFrameInner({ meta, token, fullscreen, scope }: { meta: Artifact
   // token 校验与 height 桥同款；来源 iframe 校验经 event.source 比对 contentWindow。
   useEffect(() => {
     const listener = async (event: MessageEvent) => {
-      const data = event.data as { type?: unknown; token?: unknown; callId?: unknown; url?: unknown; init?: { timeoutMs?: unknown } } | null
+      const data = event.data as { type?: unknown; token?: unknown; callId?: unknown; url?: unknown; init?: { method?: unknown; body?: unknown; headers?: unknown; timeoutMs?: unknown } } | null
       if (data?.type !== ARTIFACT_FETCH_MESSAGE || data.token !== token) return
       if (typeof data.callId !== 'string' || typeof data.url !== 'string') return
       const frame = frameRef.current
@@ -47,7 +47,13 @@ function ArtifactFrameInner({ meta, token, fullscreen, scope }: { meta: Artifact
         const response = await fetch('/openloop/base/fetch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: data.url, ...(typeof data.init?.timeoutMs === 'number' ? { timeoutMs: data.init.timeoutMs } : {}) }),
+          body: JSON.stringify({
+            url: data.url,
+            ...(typeof data.init?.method === 'string' ? { method: data.init.method } : {}),
+            ...(typeof data.init?.body === 'string' ? { body: data.init.body } : {}),
+            ...(data.init?.headers && typeof data.init.headers === 'object' ? { headers: data.init.headers } : {}),
+            ...(typeof data.init?.timeoutMs === 'number' ? { timeoutMs: data.init.timeoutMs } : {}),
+          }),
         })
         const result = await response.json() as { ok: boolean; status?: number; data?: unknown; error?: string }
         frame.contentWindow?.postMessage(

@@ -155,6 +155,12 @@ export interface SafeFetchOptions {
   /** 注入 seam：测试 mock；缺省全局 fetch */
   fetchFn?: typeof fetch
   signal?: AbortSignal
+  /** 转发方法（缺省 GET）——fetch 代理联合转发用，白名单在 fetch-route 侧校验 */
+  method?: string
+  /** 转发请求体（string）——8KB 截断在 fetch-route 侧做 */
+  body?: string
+  /** 转发 headers（仅 Content-Type/Accept 等被白名单放行的） */
+  headers?: Record<string, string>
 }
 
 /** 判定 url 源是否命中白名单（origin 精确匹配） */
@@ -189,7 +195,13 @@ export async function safeFetchJson(url: string, options: SafeFetchOptions = {})
   options.signal?.addEventListener('abort', onExternalAbort, { once: true })
   try {
     const fetchFn = options.fetchFn ?? fetch
-    const response = await fetchFn(url, { signal: controller.signal, redirect: 'error' })
+    const response = await fetchFn(url, {
+      method: options.method ?? 'GET',
+      ...(options.body !== undefined ? { body: options.body } : {}),
+      ...(options.headers !== undefined ? { headers: options.headers } : {}),
+      signal: controller.signal,
+      redirect: 'error',
+    })
     if (!response.ok) {
       throw new Error(`api request failed with HTTP ${response.status}`)
     }

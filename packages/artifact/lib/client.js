@@ -142,7 +142,13 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
         var id = 'f' + (++seq);
         pending.set(id, { resolve: resolve, reject: reject });
         parent.postMessage({ type: ${JSON.stringify(ARTIFACT_FETCH_MESSAGE)}, token: ${JSON.stringify(token)}, callId: id,
-          url: String(url), init: { timeoutMs: init.timeoutMs } }, '*');
+          url: String(url),
+          init: {
+            method: init.method,
+            body: typeof init.body === 'string' ? init.body : undefined,
+            headers: init.headers,
+            timeoutMs: init.timeoutMs
+          } }, '*');
         setTimeout(function() {
           if (pending.has(id)) { pending.delete(id); reject(new Error('openloop.fetch timeout (15s)')); }
         }, init.timeoutMs && init.timeoutMs < 15000 ? init.timeoutMs + 2000 : 15000);
@@ -229,6 +235,9 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 							headers: { "Content-Type": "application/json" },
 							body: JSON.stringify({
 								url: data.url,
+								...typeof data.init?.method === "string" ? { method: data.init.method } : {},
+								...typeof data.init?.body === "string" ? { body: data.init.body } : {},
+								...data.init?.headers && typeof data.init.headers === "object" ? { headers: data.init.headers } : {},
 								...typeof data.init?.timeoutMs === "number" ? { timeoutMs: data.init.timeoutMs } : {}
 							})
 						})).json();

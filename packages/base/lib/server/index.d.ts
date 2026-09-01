@@ -42,6 +42,12 @@ interface SafeFetchOptions {
   /** 注入 seam：测试 mock；缺省全局 fetch */
   fetchFn?: typeof fetch;
   signal?: AbortSignal;
+  /** 转发方法（缺省 GET）——fetch 代理联合转发用，白名单在 fetch-route 侧校验 */
+  method?: string;
+  /** 转发请求体（string）——8KB 截断在 fetch-route 侧做 */
+  body?: string;
+  /** 转发 headers（仅 Content-Type/Accept 等被白名单放行的） */
+  headers?: Record<string, string>;
 }
 /**
  * 安全 fetch + JSON 解析（panels api data binding 与 artifact fetch 桥的共同底座）：
@@ -1574,9 +1580,12 @@ interface BaseFetchRouteOptions {
   /** 部署级本机源白名单（如 'http://127.0.0.1:9090'）；命中即跳过 https/SSRF 拒绝 */
   allowedOrigins?: readonly string[];
 }
-/** 请求体解析（限 8KB；仅 {url, timeoutMs?} 形态） */
+/** 请求体解析（限 8KB；{url, method?, body?, headers?, timeoutMs?} 形态） */
 declare function parseFetchRequestBody(raw: string): {
   url: string;
+  method?: string;
+  body?: string;
+  headers?: Record<string, string>;
   timeoutMs?: number;
 };
 /** 路由注册（ctx.effect 生命周期回收由调用方包裹） */
