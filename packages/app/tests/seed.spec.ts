@@ -44,11 +44,11 @@ describe('seedBuiltinApp', () => {
       expect(Array.isArray(entry.widgets)).toBe(true)
       expect((entry.widgets as unknown[]).length).toBeGreaterThan(0)
     }
-    // few-shot 范例四件齐
+    // 内置 artifact 四件齐（0.5.4 去掉 example 前缀）
     const exampleRids = detail!.components.filter(c => c.kind === 'artifact').map(c => c.rid).sort()
     expect(exampleRids).toEqual([
-      'openloop:example-agent-dashboard', 'openloop:example-backend-console',
-      'openloop:example-system-map', 'openloop:example-usage-report',
+      'openloop:agent-dashboard', 'openloop:backend-console',
+      'openloop:system-map', 'openloop:usage-report',
     ])
     // API 形态
     expect(detail!.apis.map(a => a.rid).sort()).toEqual(['openloop:apis', 'openloop:boards', 'openloop:components'])
@@ -74,6 +74,32 @@ describe('seedBuiltinApp', () => {
     const reseed = await seedBuiltinApp(facade)
     expect(reseed.seeded).toBe(true)
     expect((await facade.getAppDetail('openloop'))!.components).toHaveLength(42)
+  })
+
+  it('0.5.4 命名迁移：旧 example-* rid 被删除，新 rid 注册且 entry.artifact 带 rid', async () => {
+    // 模拟老部署：openloop 已存在，components 里只有旧 example-* rid
+    const pb = new FakePb()
+    await initCollections(pb)
+    pb.seed('apps', [
+      { name: 'openloop', displayName: 'OpenLoop', kind: 'builtin', version: '0.4.0', description: 'system app' },
+    ])
+    pb.seed('components', [
+      { rid: 'openloop:example-system-map', appName: 'openloop', kind: 'artifact', title: '旧名', entry: { artifact: { kind: 'openloop.html-artifact', version: 1, title: '旧名', runtime: 'static', html: '<h1>old</h1>', path: 'openloop-examples/system-map-example.html' } }, description: '' },
+      { rid: 'openloop:user-kept', appName: 'openloop', kind: 'panel', title: '用户组件', entry: null, description: '' },
+    ])
+    const f = createAppFacade(pb)
+    const result = await seedBuiltinApp(f)
+    // PATCH 升级路径（非全量 seed）
+    expect(result.seeded).toBe(false)
+    const detail = await f.getAppDetail('openloop')
+    const rids = detail!.components.map(c => c.rid)
+    // 旧 rid 已迁移删除，新 rid 已注册，用户组件保留
+    expect(rids).not.toContain('openloop:example-system-map')
+    expect(rids).toContain('openloop:system-map')
+    expect(rids).toContain('openloop:user-kept')
+    // 新 rid 的 entry.artifact 必须带 rid（sourceIdOf 依赖它显示已固定）
+    const sysmap = detail!.components.find(c => c.rid === 'openloop:system-map')!
+    expect((sysmap.entry as { artifact?: { rid?: unknown } }).artifact?.rid).toBe('openloop:system-map')
   })
 })
 

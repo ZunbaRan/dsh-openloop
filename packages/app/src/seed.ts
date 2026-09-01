@@ -54,12 +54,21 @@ function minimalEntry(kind: string): Record<string, unknown> {
   }
 }
 
-/** few-shot 库（0.5.2）：artifact 范例组件——HTML 来自 @openloop/dsh-html-artifact 的 skill 资产 */
+/** 内置 artifact 组件（0.5.2 引入，0.5.4 去掉 example 前缀——它们是实际有用的内置组件，不是演示素材）：
+ *  HTML 来自 @openloop/dsh-html-artifact 的 skill 资产。 */
 const ARTIFACT_EXAMPLES: ReadonlyArray<{ rid: string; title: string; description: string; runtime: 'static' | 'scripts' | 'network' }> = [
-  { rid: 'openloop:example-system-map', title: '系统地图', description: '生态系统拓扑大屏（可拖节点；static 档范例）', runtime: 'static' },
-  { rid: 'openloop:example-agent-dashboard', title: 'Agent 工作台', description: 'Agent 活动脉冲 · 10s 轮询（scripts 档范例）', runtime: 'scripts' },
-  { rid: 'openloop:example-usage-report', title: '调用监控报表', description: '24h API 调用图表（network 档 + Chart.js 范例）', runtime: 'network' },
-  { rid: 'openloop:example-backend-console', title: '后端控制台', description: '同源 fetch + openloop.fetch 桥示范', runtime: 'network' },
+  { rid: 'openloop:system-map', title: '系统地图', description: '生态系统拓扑大屏（可拖节点；static 档）', runtime: 'static' },
+  { rid: 'openloop:agent-dashboard', title: 'Agent 工作台', description: 'Agent 活动脉冲 · 10s 轮询（scripts 档）', runtime: 'scripts' },
+  { rid: 'openloop:usage-report', title: '调用监控报表', description: '24h API 调用图表（network 档 + Chart.js）', runtime: 'network' },
+  { rid: 'openloop:backend-console', title: '后端控制台', description: '同源 fetch + openloop.fetch 桥', runtime: 'network' },
+]
+
+/** 0.5.4 命名迁移源：旧 example-* rid（seed 独占，删除不影响用户组件） */
+const LEGACY_EXAMPLE_RIDS: readonly string[] = [
+  'openloop:example-system-map',
+  'openloop:example-agent-dashboard',
+  'openloop:example-usage-report',
+  'openloop:example-backend-console',
 ]
 
 /**
@@ -73,10 +82,10 @@ function readArtifactExampleAssets(): Map<string, string> {
     const base = require.resolve('@openloop/dsh-html-artifact/package.json') as string
     const dir = base.slice(0, base.lastIndexOf('/'))
     const files: Array<[string, string]> = [
-      ['example-system-map', 'system-map-example.html'],
-      ['example-agent-dashboard', 'agent-dashboard-example.html'],
-      ['example-usage-report', 'usage-report-example.html'],
-      ['example-backend-console', 'backend-console-example.html'],
+      ['system-map', 'system-map-example.html'],
+      ['agent-dashboard', 'agent-dashboard-example.html'],
+      ['usage-report', 'usage-report-example.html'],
+      ['backend-console', 'backend-console-example.html'],
     ]
     void artifactPkg
     for (const [rid, file] of files) {
@@ -89,18 +98,28 @@ function readArtifactExampleAssets(): Map<string, string> {
 }
 
 /**
- * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
- * 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
- * 0.5.2 升级路径：旧 seed（无 artifact 范例）检测到缺失时**只补注册范例组件**
- * （不动用户已有组件——registerComponent 是按 rid upsert，幂等安全）。
+ * 幂等 seed：APP 存在即走升级/迁移路径；不存在则完整写入。返回写入的组件数。
+ * - 全量路径：openloop APP 不存在 → 完整写入 38 预设 + 4 内置 artifact + 3 API。
+ * - 升级/迁移路径：openloop 已存在 → 只对被 seed 拥有的内置 artifact rid 做
+ *   upsert（registerComponent 是 rid upsert——用户自定义组件同名 rid 不被覆盖），
+ *   并清理 0.5.4 改名前的旧 `openloop:example-*` 孤儿记录（seed 独占这些 rid）。
+ *   用户/agent 自建组件完全无副作用。
  */
 export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boolean; components: number; apis: number }> {
   const existing = await facade.listApps()
   if (existing.some(a => a.name === 'openloop')) {
-    // 升级覆盖：few-shot artifact 范例的 title/description/runtime/html
-    // 全部 upsert（registerComponent 是 rid upsert——用户自定义组件同名 rid
-    // 不会被覆盖；范例内容始终是「最新版的正确形态」，包括 0.5.3 network 档
-    // 修订）。用户组件完全无副作用。
+    // 升级覆盖：内置 artifact 组件的 title/description/runtime/html 全部 upsert
+    // （registerComponent 是 rid upsert——用户自定义组件同名 rid 不会被覆盖；
+    //  内容始终是「最新版的正确形态」，包括 0.5.3 network 档修订）。
+    // 0.5.4 命名迁移：先删掉旧 example-* rid（先取 detail 只删存在的——
+    //  removeComponent 对不存在的 rid 会抛错），再按新 rid 注册。
+    const detail = await facade.getAppDetail('openloop')
+    const currentRids = new Set((detail?.components ?? []).map(c => c.rid))
+    for (const legacyRid of LEGACY_EXAMPLE_RIDS) {
+      if (currentRids.has(legacyRid)) {
+        await facade.removeComponent(legacyRid)
+      }
+    }
     let patched = 0
     const exampleHtml = readArtifactExampleAssets()
     for (const example of ARTIFACT_EXAMPLES) {
@@ -118,7 +137,8 @@ export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boole
             title: example.title,
             runtime: example.runtime,
             html,
-            path: `openloop-examples/${example.rid.split(':')[1]}.html`,
+            path: `openloop-artifacts/${example.rid.split(':')[1]}.html`,
+            rid: example.rid,
           },
         },
       })
@@ -162,7 +182,7 @@ export async function seedBuiltinApp(facade: AppFacade): Promise<{ seeded: boole
           title: example.title,
           runtime: example.runtime,
           html,
-          path: `openloop-examples/${example.rid.split(':')[1]}.html`,
+          path: `openloop-artifacts/${example.rid.split(':')[1]}.html`,
           rid: example.rid,
         },
       },

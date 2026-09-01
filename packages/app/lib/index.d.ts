@@ -5202,10 +5202,12 @@ declare function registerAppRoutes(ctx: Context, webServer: WebServer, backend: 
 /** 与 panels allPresetKinds() 对齐（38 个：33 + 自管理四件套 5） */
 declare const BUILTIN_KINDS: readonly string[];
 /**
- * 幂等 seed：APP 存在即跳过全部（用户/agent 改过 openloop 就不再动）；
- * 不存在则完整写入。返回写入的组件数（0 = 已存在跳过）。
- * 0.5.2 升级路径：旧 seed（无 artifact 范例）检测到缺失时**只补注册范例组件**
- * （不动用户已有组件——registerComponent 是按 rid upsert，幂等安全）。
+ * 幂等 seed：APP 存在即走升级/迁移路径；不存在则完整写入。返回写入的组件数。
+ * - 全量路径：openloop APP 不存在 → 完整写入 38 预设 + 4 内置 artifact + 3 API。
+ * - 升级/迁移路径：openloop 已存在 → 只对被 seed 拥有的内置 artifact rid 做
+ *   upsert（registerComponent 是 rid upsert——用户自定义组件同名 rid 不被覆盖），
+ *   并清理 0.5.4 改名前的旧 `openloop:example-*` 孤儿记录（seed 独占这些 rid）。
+ *   用户/agent 自建组件完全无副作用。
  */
 declare function seedBuiltinApp(facade: AppFacade): Promise<{
   seeded: boolean;

@@ -111,12 +111,12 @@ describe('mergeApps component-level merge（0.5.3 真机事故回归）', () => 
 
   it('merges same-id apps at the COMPONENT level: builtin panels + remote artifacts both visible', () => {
     const builtin = [mkApp('openloop', [mkComp('openloop:metric-grid', 'panel'), mkComp('openloop:chart', 'panel')])]
-    const remote = [mkApp('openloop', [mkComp('openloop:example-system-map', 'artifact'), mkComp('openloop:metric-grid', 'panel')])]
+    const remote = [mkApp('openloop', [mkComp('openloop:system-map', 'artifact'), mkComp('openloop:metric-grid', 'panel')])]
     const merged = mergeApps(builtin, remote)
     expect(merged).toHaveLength(1)
     const rids = merged[0]!.components.map(c => c.id).sort()
-    // artifact 范例不被 builtin 吞掉（旧实现整个 remote openloop 被丢弃）
-    expect(rids).toEqual(['openloop:chart', 'openloop:example-system-map', 'openloop:metric-grid'])
+    // 内置 artifact 组件不被 builtin 吞掉（旧实现整个 remote openloop 被丢弃）
+    expect(rids).toEqual(['openloop:chart', 'openloop:metric-grid', 'openloop:system-map'])
     // 同 rid：remote 条目覆盖（registry 权威）
     expect(merged[0]!.components.find(c => c.id === 'openloop:metric-grid')).toEqual(remote[0]!.components[1])
   })
