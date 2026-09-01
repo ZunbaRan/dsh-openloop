@@ -32,6 +32,8 @@ jobs:
 
       # 首次运行时若 Pages 未启用，自动把源切到 GitHub Actions
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Build site
         run: node scripts/build-docs-site.mjs

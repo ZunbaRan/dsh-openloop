@@ -26,7 +26,7 @@ jobs:
           {
             echo "## 🧪 Actions Contexts Explorer（${{ matrix.os }}）"
             echo
-            echo 'workflow 里 `${{ }}` 表达式能读到什么？全 dump 出来研究：'
+            echo 'workflow 里的双花括号表达式能读到什么？全 dump 出来研究：'
             echo
             echo '### github（事件、仓库、ref、actor…）'
             echo '```json'
