@@ -502,3 +502,23 @@ export function buildPanelMetaForComponent(component: AppComponentDescriptor): {
   }
   return null
 }
+
+// ---- 模块级 registry 缓存（0.9.5：tile 渲染时按 rid 取 registry 最新 entry） ----
+
+let registryCache: Map<string, AppComponentDescriptor> = new Map()
+
+/** 由 DockShell 在 apps（mergeApps 合并后）变化时更新；组件按 id（rid）索引 */
+export function setRegistryCache(apps: AppDescriptor[]): void {
+  const map = new Map<string, AppComponentDescriptor>()
+  for (const app of apps) {
+    for (const comp of app.components) {
+      map.set(comp.id, comp)
+    }
+  }
+  registryCache = map
+}
+
+/** 按 rid（包名:组件名）查 registry 组件；未命中返回 undefined */
+export function lookupRegistryComponent(rid: string): AppComponentDescriptor | undefined {
+  return registryCache.get(rid)
+}

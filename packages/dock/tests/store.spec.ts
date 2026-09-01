@@ -97,6 +97,31 @@ describe('store v2 读取与迁移', () => {
     expect(store.getSnapshot().boards).toHaveLength(1)
     expect(store.getSnapshot().boards[0]?.tiles).toHaveLength(0)
   })
+
+  it('0.5.5 命名迁移：旧 example-* artifact tile 的 rid/path 归一化为新 rid', () => {
+    // 旧 tile：path = openloop-examples/example-backend-console.html，无 rid
+    storage.setItem(KEY, JSON.stringify({
+      version: 2,
+      boards: [{
+        id: 'b-default', name: '默认看板',
+        tiles: [{
+          tileId: 't-old',
+          title: '后端控制台',
+          source: { kind: 'artifact', meta: { kind: 'openloop.html-artifact', version: 1, title: '后端控制台', runtime: 'scripts', html: '<h1>old</h1>', path: 'openloop-examples/example-backend-console.html' } },
+          layout: { column: 0, row: 0, columns: 6, rows: 4 },
+          origin: null,
+          createdAt: 1,
+        }],
+      }],
+      activeBoardId: 'b-default',
+    }))
+    const store = new DockStore()
+    const migrated = store.getSnapshot().boards[0]?.tiles[0]
+    const meta = migrated?.source.meta as { rid?: unknown; path?: unknown } | undefined
+    // rid 已由旧 path 推导为新 rid（sourceIdOf 可匹配 registry）
+    expect(meta?.rid).toBe('openloop:backend-console')
+    // 迁移发生在内存态（渲染读 getSnapshot）——不要求写回 localStorage
+  })
 })
 
 describe('store v2 看板页管理', () => {

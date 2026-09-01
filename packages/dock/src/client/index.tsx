@@ -19,7 +19,7 @@ import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
 import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab } from './RailNav.tsx'
 import { AppsTab } from './AppListPanel.tsx'
-import { listBuiltinApps, buildTileSourceForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, type AppDescriptor } from './app-registry.ts'
+import { listBuiltinApps, buildTileSourceForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, setRegistryCache, type AppDescriptor } from './app-registry.ts'
 import { syncBackend, revalidateBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
@@ -262,6 +262,8 @@ function DockShell(): ReactNode {
   // APP 注册表（M3：内置恒在 + 门面追加合并；panels 桥懒 require 每渲染读一次）
   const { apps: builtinApps, panelsMissing } = listBuiltinApps()
   const apps = mergeApps(builtinApps, remoteApps)
+  // 0.9.5：apps(mergeApps 后)变化时同步 registry 缓存——tile 渲染时按 rid 查最新 entry
+  useEffect(() => { setRegistryCache(apps) }, [apps])
   const selectedApp: AppDescriptor | undefined = apps.find(a => a.id === tabState.selectedAppId) ?? apps[0]
   const activeBoard = state.boards.find(b => b.id === state.activeBoardId) ?? state.boards[0]
   // 当前看板页已固定的资源 ID（`openloop:<kind>`）——AppDetail 的 pinned 判定

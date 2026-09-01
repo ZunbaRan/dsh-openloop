@@ -14,12 +14,12 @@ jobs:
     name: pnpm check + pack tarballs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # pnpm 版本自动读根 package.json 的 packageManager 字段（pnpm@10.28.2）
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -36,7 +36,7 @@ jobs:
         run: pnpm pack:all
 
       - name: Upload tarballs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openloop-tarballs
           path: dist/*.tgz

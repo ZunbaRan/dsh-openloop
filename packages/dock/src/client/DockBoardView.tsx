@@ -18,6 +18,7 @@ import { icons } from './icons.tsx'
 // 被禁用时炸 loader——懒 require 后 tile 按需取，缺失渲染降级条）
 import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
 import { getPanelsClient, getArtifactClient, getMcpAppsClient } from './openloop-clients.ts'
+import { lookupRegistryComponent, entryArtifactOf } from './app-registry.ts'
 
 /** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
 let scopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>['createOpenLoopSettingsScope']> | undefined
@@ -241,7 +242,24 @@ function TileContent({ tile }: { tile: DockTile }) {
     return <DependencyMissing what="Dock Artifact tile" dep="@openloop/dsh-html-artifact" />
   }
   const ArtifactFrame = artifact.ArtifactFrame
-  return <ArtifactFrame meta={tile.source.meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={getScope()} />
+  // 0.9.5：渲染时用 registry 同 rid 组件的最新 entry 覆盖 tile 快照——内置组件 seed
+  // 更新（改名/换档）后已 pin 的旧 tile 也自动用新 HTML/档位。仅首次渲染注
+  // 入最新 meta；registry 命中且 entry 合法才覆盖，否则回退 tile 快照（自定义
+  // artifact 不在 registry，保留快照）。
+  const meta = resolveArtifactMeta(tile)
+  return <ArtifactFrame meta={meta as never} token={`dock-${tile.tileId}`} fullscreen={false} scope={getScope()} />
+}
+
+/** 渲染期 artifact meta 解析：registry 同 rid 最新 entry 优先，回退 tile 快照 */
+function resolveArtifactMeta(tile: DockTile): unknown {
+  const rid = sourceIdOf(tile.source)
+  if (rid === null) return tile.source.meta
+  const component = lookupRegistryComponent(rid)
+  if (component !== undefined) {
+    const fresh = entryArtifactOf(component.entry)
+    if (fresh !== null) return fresh
+  }
+  return tile.source.meta
 }
 
 export function DockBoardView(): ReactNode {

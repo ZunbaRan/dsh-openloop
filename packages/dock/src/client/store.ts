@@ -73,6 +73,42 @@ function sanitizeTiles(tiles: unknown): DockTile[] {
   return tiles
     .filter(t => t && typeof t.tileId === 'string' && typeof t.title === 'string' && t.source && t.source.kind)
     .map(t => ({ ...(t as DockTile), layout: clampLayout((t as DockTile).layout ?? {}) }))
+    .map(migrateArtifactTile)
+}
+
+/**
+ * 0.5.5 命名迁移（2026-09-01）：旧 artifact 内置组件 rid 带 `example-` 前缀，
+ * seed 后已改为正式 rid（openloop:system-map / agent-dashboard / usage-report /
+ * backend-console）。已 pin 的旧 tile 是快照，rid/path 仍是 example 形态，导致
+ * sourceIdOf 退化为旧 path 文件名、与 registry 新 rid 匹配不上（「已固定」徽章
+ * 不显示、渲染用旧 HTML）。此处一次性迁移：把旧 rid / 旧 path 归一化为新 rid，
+ * 使后续 registry 按 rid 查找命中、渲染取最新 entry。
+ */
+const LEGACY_ARTIFACT_RIDS: Record<string, string> = {
+  'openloop:example-system-map': 'openloop:system-map',
+  'openloop:example-agent-dashboard': 'openloop:agent-dashboard',
+  'openloop:example-usage-report': 'openloop:usage-report',
+  'openloop:example-backend-console': 'openloop:backend-console',
+}
+
+function migrateArtifactTile(tile: DockTile): DockTile {
+  if (tile.source.kind !== 'artifact') return tile
+  const meta = tile.source.meta as { rid?: unknown; path?: unknown }
+  // 直接命中旧 rid
+  if (typeof meta.rid === 'string' && LEGACY_ARTIFACT_RIDS[meta.rid] !== undefined) {
+    return { ...tile, source: { ...tile.source, meta: { ...meta, rid: LEGACY_ARTIFACT_RIDS[meta.rid] } } }
+  }
+  // 旧 tile 无 rid、path = openloop-examples/example-X.html → 由 path 推导新 rid
+  if (typeof meta.path === 'string') {
+    const match = meta.path.match(/example-([a-z-]+)\.html/)
+    if (match !== null) {
+      const newRid = `openloop:${match[1] ?? ''}`
+      if (LEGACY_ARTIFACT_RIDS[`openloop:example-${match[1] ?? ''}`] !== undefined) {
+        return { ...tile, source: { ...tile.source, meta: { ...meta, rid: newRid } } }
+      }
+    }
+  }
+  return tile
 }
 
 function persistState(state: DockBoardState): void {
