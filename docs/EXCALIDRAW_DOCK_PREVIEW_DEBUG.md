@@ -104,3 +104,16 @@ PB 持久化（pin 时捕获调用上下文进组件条目）留作后续增强�
   refresh 合成调用）+ refresh 响应
 - 客户端补推：`packages/mcp-apps/src/client/index.tsx` McpAppSandbox oninitialized（:205）
 - 类型：`packages/mcp-runtime/src/types.ts` McpAppResourceReference（+invocation 可选字段）
+
+## 真机端到端验证（2026-09-02 11:40，commit 757c3c5，全部通过）
+
+驱动方式：经 dsh web 的 HTTP API（POST /api/session.create → /api/session.prompt，
+envelope = {type:"client-request", rpcId, method, payload}）让 agent 真实调用
+excalidraw create_view（会话 session-584bc295）。
+
+1. ✅ agent 真实调用后 ~60s，refresh 响应出现 `invocation.structuredContent.checkpointId`
+2. ✅ 模拟 App 回环：POST callToolUrl read_checkpoint → 4127 字节场景，
+   8 元素（3 rectangle + 3 text + 2 arrow）= agent 画的「开始→处理→结束」流程图
+3. ✅ 客户端补推路径由单测覆盖（oninitialized 无 toolCall 但有 invocation → sendToolResult）
+
+快照是 gateway 会话内存：web 进程重启后需重新产生一次真实调用，预览才有内容。
