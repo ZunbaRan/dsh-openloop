@@ -11,6 +11,7 @@ import { useEffect, useState, type PointerEvent, type ReactNode } from 'react'
 import type { AppDescriptor, AppComponentDescriptor } from './app-registry.ts'
 import { buildTileSourceForComponent } from './app-registry.ts'
 import { AppIcon, KindBadge, TypeBadge } from './badges.tsx'
+import { RelChips, RelDeclSection } from './rel-views.tsx'
 import { icons } from './icons.tsx'
 import { DependencyMissing, getBaseClient } from './base-bridge.tsx'
 import { getPanelsClient, getMcpAppsClient, getArtifactClient } from './openloop-clients.ts'
@@ -300,6 +301,7 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
                   <div className="d2-name">{c.title}</div>
                   <div className="d2-rid">{c.id}</div>
                 </div>
+                <RelChips rid={c.id} />
                 {pinnedIds.has(c.id) ? <span className="d2-pin-dot" title="已固定到看板"><span className="d2-dot ok" /></span> : null}
               </button>
             ))}
@@ -505,6 +507,7 @@ function ComponentPreview({ app, comp, pinned, onPin, tone }: ComponentPreviewPr
         )}
       </div>
       <div className="d2-preview-canvas">
+        <RelDeclSection rid={comp.id} />
         <div className="d2-preview-note">
           <span className={`d2-dot ${tone}`} />
           {tone === 'warn'

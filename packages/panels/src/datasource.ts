@@ -98,6 +98,43 @@ export function buildApiUrl(url: string, query?: Record<string, string>): string
 }
 
 /**
+ * 联动参数模板替换（2026-09-02 联动特性 v1）：
+ * 把 binding.params 声明的 `{{paramName}}` 模板变量替换为运行时参数值。
+ * 替换范围：url / query 值 / body 序列化后的字符串 / pick 不动。
+ * - 参数已提供 → 替换为 encodeURIComponent 后的值（URL 上下文安全）
+ * - 声明了但未提供 → 替换为空串（面板可先渲染空态）
+ * - 值含特殊字符按 URL 语境转义；body 为 JSON 序列化后整体替换（保持结构合法）
+ */
+export function applyBindingParams(
+  binding: WidgetDataBinding,
+  values: Record<string, unknown>,
+): WidgetDataBinding {
+  const declared = binding.params
+  if (!declared || Object.keys(declared).length === 0) return binding
+  const resolve = (template: string): string => {
+    return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_m, name: string) => {
+      const value = values[name]
+      if (value === undefined || value === null) return ''
+      return encodeURIComponent(String(value))
+    })
+  }
+  const source = binding.source
+  if (source.type !== 'api') return binding
+  const next: WidgetDataBinding = {
+    ...binding,
+    source: {
+      ...source,
+      url: resolve(source.url),
+      ...(source.query ? { query: Object.fromEntries(Object.entries(source.query).map(([k, v]) => [k, resolve(v)])) } : {}),
+      ...(source.body !== undefined
+        ? { body: JSON.parse(resolve(JSON.stringify(source.body))) as unknown }
+        : {}),
+    },
+  }
+  return next
+}
+
+/**
  * api source URL 校验（§5.4 / §15 S3，fail-closed）：
  * 必须 https://，且不指向环回/内网。复用 validation.ts 的 isForbiddenApiUrl。
  */

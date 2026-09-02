@@ -522,3 +522,8 @@ export function setRegistryCache(apps: AppDescriptor[]): void {
 export function lookupRegistryComponent(rid: string): AppComponentDescriptor | undefined {
   return registryCache.get(rid)
 }
+
+/** 全量 registry 组件快照（联动 consumes 索引构建等遍历场景用） */
+export function getRegistryComponents(): AppComponentDescriptor[] {
+  return [...registryCache.values()]
+}

@@ -3862,6 +3862,7 @@ function DataTableRender({ props }) {
 							...tone ? { background: ROW_TONE_BG[tone] } : {}
 						},
 						"data-openloop-row-tone": tone ?? "none",
+						"data-openloop-row-index": rowIndex,
 						children: effectiveColumns.map((column) => /* @__PURE__ */ jsx("td", {
 							style: {
 								...column.numeric ? cellNumericStyle : cellStyle$2,
@@ -8331,6 +8332,36 @@ function buildApiUrl(url, query) {
 	const parsed = new URL(url);
 	for (const [key, value] of Object.entries(query)) parsed.searchParams.append(key, value);
 	return parsed.toString();
+}
+/**
+* 联动参数模板替换（2026-09-02 联动特性 v1）：
+* 把 binding.params 声明的 `{{paramName}}` 模板变量替换为运行时参数值。
+* 替换范围：url / query 值 / body 序列化后的字符串 / pick 不动。
+* - 参数已提供 → 替换为 encodeURIComponent 后的值（URL 上下文安全）
+* - 声明了但未提供 → 替换为空串（面板可先渲染空态）
+* - 值含特殊字符按 URL 语境转义；body 为 JSON 序列化后整体替换（保持结构合法）
+*/
+function applyBindingParams(binding, values) {
+	const declared = binding.params;
+	if (!declared || Object.keys(declared).length === 0) return binding;
+	const resolve = (template) => {
+		return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_m, name) => {
+			const value = values[name];
+			if (value === void 0 || value === null) return "";
+			return encodeURIComponent(String(value));
+		});
+	};
+	const source = binding.source;
+	if (source.type !== "api") return binding;
+	return {
+		...binding,
+		source: {
+			...source,
+			url: resolve(source.url),
+			...source.query ? { query: Object.fromEntries(Object.entries(source.query).map(([k, v]) => [k, resolve(v)])) } : {},
+			...source.body !== void 0 ? { body: JSON.parse(resolve(JSON.stringify(source.body))) } : {}
+		}
+	};
 }
 /**
 * api source URL 校验（§5.4 / §15 S3，fail-closed）：
@@ -30014,8 +30045,10 @@ function errorMessage(error) {
 }
 /**
 * 解析并校验刷新请求体（fail-closed）：
-* `{ widgetId: kebab-case, data: WidgetDataBinding }` 且 data.source.type 必须为 'api'
-* （static 数据随 props 下发，没有刷新通道的意义；非 api 一律 400）。
+* `{ widgetId: kebab-case, data: WidgetDataBinding, params?: Record<string, unknown> }`
+* 且 data.source.type 必须为 'api'（static 数据随 props 下发，没有刷新通道的
+* 意义；非 api 一律 400）。params 为联动参数（2026-09-02 v1）：值经
+* applyBindingParams 替换 binding 的 `{{param}}` 模板。
 */
 function parseRefreshBody(text) {
 	let parsed;
@@ -30034,9 +30067,15 @@ function parseRefreshBody(text) {
 	if (typeof source !== "object" || source === null || Array.isArray(source)) throw new RefreshRequestError(`refresh request data binding for widget "${widgetId}" requires a source object`);
 	const sourceType = source.type;
 	if (sourceType !== "api") throw new RefreshRequestError(`refresh request for widget "${widgetId}" only supports api data sources; got ${JSON.stringify(sourceType)}`);
+	let params;
+	if (record.params !== void 0) {
+		if (typeof record.params !== "object" || record.params === null || Array.isArray(record.params)) throw new RefreshRequestError(`refresh request params for widget "${widgetId}" must be an object of parameter values`);
+		params = record.params;
+	}
 	return {
 		widgetId,
-		data
+		data,
+		params
 	};
 }
 /** 流式读取请求体，超过 maxBytes 立即中止并抛 413（不缓冲超限数据） */
@@ -30061,8 +30100,9 @@ async function readRequestBody(req, maxBytes = MAX_REFRESH_BODY_BYTES) {
 * ctx 透传 fetchFn/signal 注入 seam（测试不真联网）。
 */
 async function handleRefreshRequest(bodyText, ctx = {}) {
-	const { widgetId, data } = parseRefreshBody(bodyText);
-	const source = data.source;
+	const { widgetId, data, params } = parseRefreshBody(bodyText);
+	const binding = params !== void 0 ? applyBindingParams(data, params) : data;
+	const source = binding.source;
 	if (source.credentialRef !== void 0) throw new RefreshRequestError("api source credentialRef is a v2 feature and is not supported in v1");
 	try {
 		validateApiUrl(source.url);
@@ -30077,7 +30117,7 @@ async function handleRefreshRequest(bodyText, ctx = {}) {
 			status: 200,
 			payload: {
 				ok: true,
-				data: await resolveWidgetData(data, ctx)
+				data: await resolveWidgetData(binding, ctx)
 			}
 		};
 	} catch (error) {
@@ -30717,4 +30757,4 @@ function createPanelExecute(tool, ctx) {
 	};
 }
 //#endregion
-export { CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, PackRegistry, PanelsPackAssets, apply, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel };
+export { CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, PackRegistry, PanelsPackAssets, apply, applyBindingParams, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel };

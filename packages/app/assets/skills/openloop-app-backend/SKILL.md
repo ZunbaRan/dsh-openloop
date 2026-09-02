@@ -84,6 +84,52 @@
 - api 数据绑定的 widget 可正常工作：pin 后面板打开时 panels 的 onLoad 刷新自动拉数据
 - entry 缺失/畸形 → dock 显示「待生成」（用户看到的提示会引导重新注册）
 
+## 页面关联（relations，联动 v1）——列表/详情成对声明
+
+一个列表页（如线索列表）点击行 → 详情页即时打开（对话流卡片下方 / Board 悬浮窗），全程**不经 Agent**。要启用，成对声明 `relations`（放进 PanelDefinition 顶层字段，随 entry 一起注册）：
+
+```jsonc
+// 列表页（emits 可触发）：payload 值支持 $row.<字段> 引用被点行数据
+{
+  "$schema": "openloop.panel/v1",
+  "id": "lead-list",
+  "title": "线索列表",
+  "relations": {
+    "emits": [{
+      "event": "my-crm:lead:selected",        // 命名空间 {app}:{entity}:{action}
+      "payload": { "leadId": "$row.id" },     // $row = 被点击的行
+      "target": { "rid": "my-crm:lead-detail" } // 可选：显式指向详情 rid
+    }]
+  },
+  "widgets": [ /* data-table，rows 来自 api 数据 */ ]
+}
+
+// 详情页（consumes 可响应）：事件参数 → 本页数据参数
+{
+  "$schema": "openloop.panel/v1",
+  "id": "lead-detail",
+  "title": "线索详情",
+  "relations": {
+    "consumes": [{ "event": "my-crm:lead:selected", "param": "leadId" }]
+  },
+  "widgets": [{
+    "id": "detail",
+    "source": { "type": "preset", "kind": "data-table", "props": {} },
+    "data": {
+      "source": { "type": "api", "url": "https://api.example.com/leads/{{leadId}}" },
+      "params": { "leadId": "" }               // 声明模板变量（缺省空串）
+    }
+  }]
+}
+```
+
+要点：
+- **成对注册**：emits 方（列表）与 consumes 方（详情）都要注册，事件名逐字一致
+- `{{leadId}}` 模板可出现在 url / query 值 / body；参数来自事件 payload（consumes.param 指定取哪个字段）
+- 详情页可再声明自己的 emits（如 `my-crm:lead:advanced`）——多级级联自然成立
+- 资源列表会显示 ⚡ 可触发 / ⇄ 可响应 chip；详情页展示页面关系表（emits 可触发 / consumes 可响应，双语）
+- 列表页行点击由系统自动处理（data-table 行级事件委托），无需为点击写任何 widget 代码
+
 > **UI 可见性**：全部写操作（upsert_app / register_* / set_api_key / save_dock_state 等）完成后端会自动通知 dock 工作台刷新（约 15 秒内生效，无需用户刷新页面）。注册完成后可以告诉用户「到 APP 页看一眼」。
 > 仅当你绕过本工具直接改了数据（如外部脚本）才需要显式调用 `invalidate`。
 

@@ -9,6 +9,11 @@ export { PanelCard, PanelSurface, panelMetaFrom } from './PanelCard.tsx'
 // 已实现预设 kind 清单（Dock 2.0 APP 注册表消费——与渲染器同源，清单永不漂移；
 // registry 已被 PanelCard 打进 client bundle，此 re-export 零增量）
 export { allPresetKinds } from '../presets/index.ts'
+// 联动 v1（2026-09-02）：事件通道 + 关联声明解析 + 目标面板渲染槽
+export { relBus, dispatchRelEvent, postRelEvent, parseRelations, evalPayloadTemplate, REL_EVENT_PREFIX } from './rel-bus.ts'
+export { RelLinkedSlot, LinkedPanelSurface, setRelPanelResolver, panelDefinitionFromEntry } from './RelLinked.tsx'
+export type { RelPanelResolver } from './RelLinked.tsx'
+export { applyBindingParams } from '../datasource.ts'
 
 // ---- OpenLoop Dock pin 接线（可选依赖）----
 import type { DockServiceLike } from './dock-pin.ts'

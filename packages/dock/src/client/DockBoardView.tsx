@@ -19,6 +19,7 @@ import { icons } from './icons.tsx'
 import { getBaseClient, DependencyMissing } from './base-bridge.tsx'
 import { getPanelsClient, getArtifactClient, getMcpAppsClient } from './openloop-clients.ts'
 import { lookupRegistryComponent, entryArtifactOf } from './app-registry.ts'
+import { RelFloatLayer } from './RelFloatLayer.tsx'
 
 /** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
 let scopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>['createOpenLoopSettingsScope']> | undefined
@@ -290,7 +291,9 @@ export function DockBoardView(): ReactNode {
   }
 
   return (
-    <section style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }} data-screen-label="board">
+    <section style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', position: 'relative' }} data-screen-label="board">
+      {/* 联动 v1（M3）：Board 悬浮窗层——事件 → consumes 映射 → 多开详情窗（不 pin） */}
+      <RelFloatLayer />
       <header className="d2-board-head">
         {board === undefined ? null : editingName ? (
           <input

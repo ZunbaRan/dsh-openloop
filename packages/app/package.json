@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-app",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "OpenLoop App backend: local PocketBase (pinned binary, plugin-managed lifecycle) behind a controlled facade — app/component/api registry, boards/tiles storage, dock state migration. Agents and UIs only talk to the facade, never to PocketBase directly (docs/APP_PLATFORM_DESIGN.md §4).",
   "private": true,
   "type": "module",

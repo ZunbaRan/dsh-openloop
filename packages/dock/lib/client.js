@@ -5777,6 +5777,294 @@ window.__ModuleLoader__.load({
 		function lookupRegistryComponent(rid) {
 			return registryCache.get(rid);
 		}
+		/** 全量 registry 组件快照（联动 consumes 索引构建等遍历场景用） */
+		function getRegistryComponents() {
+			return [...registryCache.values()];
+		}
+		//#endregion
+		//#region src/client/RelFloatLayer.tsx
+		/**
+		* Board 联动悬浮窗层（M3，2026-09-02 联动特性 v1）。
+		*
+		* 挂在 DockBoardView 内：监听联动事件总线，按「registry 组件 relations.consumes」
+		* 把事件映射为目标面板 rid + params → 悬浮窗渲染目标面板（PanelSurface 带参）。
+		*
+		* 交互语义（原型 designs/linkage-proto 决策 B/C，用户已批）：
+		* - 多开：不同 params 各自开窗并排对比；同 rid+params 重复事件 → 聚焦已有窗
+		* - 悬浮窗不 pin 进 board（只是投影壳：拖拽 / 折叠 / 关闭）
+		* - 用户关闭的窗口，同参数事件再次到来不自动重开（本会话记住关闭意图）
+		*/
+		let zSeq = 20;
+		let winSeq = 0;
+		/** rid → PanelDefinition 解析器（registry entry → panel 定义），供 panels 侧 RelLinkedSlot 共用 */
+		function registryPanelResolver(rid) {
+			const comp = lookupRegistryComponent(rid);
+			if (!comp) return void 0;
+			return panelsPanelFromEntry(comp.entry);
+		}
+		/** registry entry 宽松解析为 PanelDefinition（经 panels client 的 panelDefinitionFromEntry） */
+		function panelsPanelFromEntry(entry) {
+			const panels = getPanelsClient();
+			if (!panels) return void 0;
+			return panels.panelDefinitionFromEntry(entry);
+		}
+		/** 从 registry 组件 entry 宽松提取 relations（panels 契约形态，经懒桥） */
+		function relationsOfRegistryComponent(rid) {
+			const panels = getPanelsClient();
+			const comp = lookupRegistryComponent(rid);
+			if (!panels || !comp) return void 0;
+			const entry = comp.entry;
+			if (typeof entry !== "object" || entry === null) return void 0;
+			const record = entry;
+			const panel = typeof record.panel === "object" && record.panel !== null ? record.panel : record;
+			return panels.parseRelations(panel.relations);
+		}
+		/** 全量 registry 的 consumes 索引：event → [{ rid, param }]（挂载时构建一次） */
+		function buildConsumesIndex() {
+			const index = /* @__PURE__ */ new Map();
+			for (const comp of getRegistryComponents()) {
+				const rels = relationsOfRegistryComponent(comp.id);
+				if (!rels?.consumes) continue;
+				for (const c of rels.consumes) {
+					const list = index.get(c.event) ?? [];
+					list.push({
+						rid: comp.id,
+						param: c.param
+					});
+					index.set(c.event, list);
+				}
+			}
+			return index;
+		}
+		function RelFloatLayer() {
+			const [wins, setWins] = (0, react.useState)([]);
+			const closedKeysRef = (0, react.useRef)(/* @__PURE__ */ new Set());
+			const zIndexRef = (0, react.useRef)(zSeq);
+			(0, react.useEffect)(() => {
+				getPanelsClient()?.setRelPanelResolver(registryPanelResolver);
+			}, []);
+			(0, react.useEffect)(() => {
+				const panels = getPanelsClient();
+				if (!panels) return;
+				const consumesIndex = buildConsumesIndex();
+				return panels.relBus().subscribe((event, payload) => {
+					const targets = consumesIndex.get(event);
+					if (!targets || targets.length === 0) return;
+					setWins((prev) => {
+						const next = [...prev];
+						for (const target of targets) {
+							const paramKey = `${target.rid}::${target.param}=${String(payload[target.param] ?? "")}`;
+							if (closedKeysRef.current.has(paramKey)) continue;
+							const existing = next.find((w) => w.paramKey === paramKey);
+							if (existing) {
+								existing.z = ++zIndexRef.current;
+								continue;
+							}
+							winSeq += 1;
+							zIndexRef.current += 1;
+							next.push({
+								winId: `relfw-${winSeq}`,
+								rid: target.rid,
+								params: payload,
+								paramKey,
+								x: 380 + winSeq % 5 * 42,
+								y: 48 + winSeq % 5 * 44,
+								collapsed: false,
+								z: zIndexRef.current
+							});
+						}
+						return next;
+					});
+				});
+			}, []);
+			const closeWin = (0, react.useCallback)((winId, paramKey) => {
+				closedKeysRef.current.add(paramKey);
+				setWins((prev) => prev.filter((w) => w.winId !== winId));
+			}, []);
+			const toggleWin = (0, react.useCallback)((winId) => {
+				setWins((prev) => prev.map((w) => w.winId === winId ? {
+					...w,
+					collapsed: !w.collapsed
+				} : w));
+			}, []);
+			const focusWin = (0, react.useCallback)((winId) => {
+				setWins((prev) => prev.map((w) => w.winId === winId ? {
+					...w,
+					z: ++zIndexRef.current
+				} : w));
+			}, []);
+			const moveWin = (0, react.useCallback)((winId, x, y) => {
+				setWins((prev) => prev.map((w) => w.winId === winId ? {
+					...w,
+					x,
+					y
+				} : w));
+			}, []);
+			if (wins.length === 0) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					position: "absolute",
+					inset: 0,
+					pointerEvents: "none",
+					zIndex: 40
+				},
+				"data-openloop-rel-float-layer": true,
+				children: wins.map((w) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelFloatWindow, {
+					win: w,
+					onClose: () => closeWin(w.winId, w.paramKey),
+					onToggle: () => toggleWin(w.winId),
+					onFocus: () => focusWin(w.winId),
+					onMove: (x, y) => moveWin(w.winId, x, y)
+				}, w.winId))
+			});
+		}
+		function RelFloatWindow({ win, onClose, onToggle, onFocus, onMove }) {
+			const dragRef = (0, react.useRef)(null);
+			const PanelSurface = getPanelsClient()?.PanelSurface;
+			const panel = registryPanelResolver(win.rid);
+			const onPointerDown = (e) => {
+				onFocus();
+				dragRef.current = {
+					sx: e.clientX,
+					sy: e.clientY,
+					ox: win.x,
+					oy: win.y
+				};
+				const move = (ev) => {
+					const d = dragRef.current;
+					if (!d) return;
+					onMove(d.ox + ev.clientX - d.sx, d.oy + ev.clientY - d.sy);
+				};
+				const up = () => {
+					dragRef.current = null;
+					window.removeEventListener("pointermove", move);
+					window.removeEventListener("pointerup", up);
+				};
+				window.addEventListener("pointermove", move);
+				window.addEventListener("pointerup", up);
+			};
+			const title = panel?.title ?? win.rid;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					position: "absolute",
+					left: win.x,
+					top: win.y,
+					width: 420,
+					display: "flex",
+					flexDirection: "column",
+					pointerEvents: "auto",
+					borderRadius: 12,
+					overflow: "hidden",
+					zIndex: win.z,
+					boxShadow: "0 12px 40px rgba(0,0,0,.32)",
+					border: "1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 38%, transparent)",
+					background: "var(--dsw-alias-bg-layer-1, #fff)"
+				},
+				"data-openloop-rel-window": win.rid,
+				onPointerDown: () => onFocus(),
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						flex: "0 0 32px",
+						display: "flex",
+						alignItems: "center",
+						gap: 7,
+						padding: "0 10px",
+						cursor: "grab",
+						userSelect: "none",
+						background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, var(--dsw-alias-bg-layer-2, #f6f6f7))",
+						borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
+					},
+					onPointerDown,
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: {
+								fontSize: 9,
+								padding: "1px 6px",
+								borderRadius: 5,
+								color: "var(--dsw-alias-state-business-primary, #4176e6)",
+								background: "color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent)"
+							},
+							children: "详情"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: {
+								fontSize: 11,
+								fontWeight: 600,
+								whiteSpace: "nowrap",
+								overflow: "hidden",
+								textOverflow: "ellipsis"
+							},
+							children: title
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								marginLeft: "auto",
+								display: "flex",
+								gap: 5,
+								flexShrink: 0
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								title: win.collapsed ? "展开" : "折叠",
+								onClick: onToggle,
+								style: {
+									width: 18,
+									height: 18,
+									borderRadius: 5,
+									border: 0,
+									background: "none",
+									cursor: "pointer",
+									fontSize: 10,
+									color: "var(--dsw-alias-label-tertiary, #888)"
+								},
+								children: win.collapsed ? "▢" : "—"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								title: "关闭",
+								onClick: onClose,
+								style: {
+									width: 18,
+									height: 18,
+									borderRadius: 5,
+									border: 0,
+									background: "none",
+									cursor: "pointer",
+									fontSize: 11,
+									color: "var(--dsw-alias-label-tertiary, #888)"
+								},
+								children: "×"
+							})]
+						})
+					]
+				}), win.collapsed ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						maxHeight: 360,
+						overflow: "auto"
+					},
+					children: panel && PanelSurface ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, {
+						meta: {
+							kind: "openloop.panel",
+							version: 1,
+							panel,
+							resolved: {},
+							resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+						},
+						relParams: win.params
+					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							padding: 16,
+							fontSize: 12,
+							color: "var(--dsw-alias-label-caption, #888)"
+						},
+						children: [
+							"页面 ",
+							win.rid,
+							" 当前不可用（可能未注册或已移除）"
+						]
+					})
+				})]
+			});
+		}
 		//#endregion
 		//#region src/client/DockBoardView.tsx
 		/**
@@ -6083,116 +6371,121 @@ window.__ModuleLoader__.load({
 					minWidth: 0,
 					minHeight: 0,
 					display: "flex",
-					flexDirection: "column"
+					flexDirection: "column",
+					position: "relative"
 				},
 				"data-screen-label": "board",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
-					className: "d2-board-head",
-					children: [
-						board === void 0 ? null : editingName ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-							className: "d2-board-rename",
-							autoFocus: true,
-							defaultValue: board.name,
-							size: Math.max(4, board.name.length + 2),
-							"aria-label": "重命名看板页",
-							onBlur: (e) => commitName(e.target.value),
-							onKeyDown: onNameKeyDown
-						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-board-name",
-							title: "双击重命名看板页",
-							onDoubleClick: () => setEditingName(true),
-							children: board.name
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							className: "d2-badge kind",
-							children: [tiles.length, " tiles"]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "d2-actions",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-								type: "button",
-								className: "d2-ghost-btn",
-								title: "重力紧凑：消除空洞，保持相对顺序",
-								onClick: () => dockStore.compact(),
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.sort, { size: 13 }), " 整理"]
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-								type: "button",
-								className: confirmingClear ? "d2-ghost-btn danger" : "d2-ghost-btn",
-								title: confirmingClear ? "再次点击确认清空当前页 tile" : "清空当前页 tile（其他看板页不受影响）",
-								onClick: () => {
-									if (confirmingClear) {
-										dockStore.clear();
-										setConfirmingClear(false);
-									} else setConfirmingClear(true);
-								},
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.trash, { size: 13 }),
-									" ",
-									confirmingClear ? "确认清空？" : "清空"
-								]
-							})]
-						})
-					]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: {
-						flex: 1,
-						minHeight: 0,
-						overflow: "auto"
-					},
-					children: tiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-empty-note",
-						style: { paddingTop: 60 },
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelFloatLayer, {}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+						className: "d2-board-head",
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: {
-									fontSize: 22,
-									opacity: .6
-								},
-								children: "📌"
+							board === void 0 ? null : editingName ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								className: "d2-board-rename",
+								autoFocus: true,
+								defaultValue: board.name,
+								size: Math.max(4, board.name.length + 2),
+								"aria-label": "重命名看板页",
+								onBlur: (e) => commitName(e.target.value),
+								onKeyDown: onNameKeyDown
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-board-name",
+								title: "双击重命名看板页",
+								onDoubleClick: () => setEditingName(true),
+								children: board.name
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "这一页还是空的" }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "d2-tcap",
-								children: "到 APP 页把组件「固定」到看板，或让 Agent 帮你生成"
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								className: "d2-badge kind",
+								children: [tiles.length, " tiles"]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-actions",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: "d2-ghost-btn",
+									title: "重力紧凑：消除空洞，保持相对顺序",
+									onClick: () => dockStore.compact(),
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.sort, { size: 13 }), " 整理"]
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									className: confirmingClear ? "d2-ghost-btn danger" : "d2-ghost-btn",
+									title: confirmingClear ? "再次点击确认清空当前页 tile" : "清空当前页 tile（其他看板页不受影响）",
+									onClick: () => {
+										if (confirmingClear) {
+											dockStore.clear();
+											setConfirmingClear(false);
+										} else setConfirmingClear(true);
+									},
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.trash, { size: 13 }),
+										" ",
+										confirmingClear ? "确认清空？" : "清空"
+									]
+								})]
 							})
 						]
-					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						ref: containerRef,
-						style: { minHeight: 104 },
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridStyles, {}), mounted && width > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridLayout, {
-							width,
-							layout,
-							gridConfig: {
-								cols: RGL_COLS(),
-								rowHeight: ROW_HEIGHT,
-								margin: GRID_MARGIN
-							},
-							dragConfig: {
-								enabled: true,
-								handle: ".dock-tile-handle",
-								cancel: ".dock-tile-cancel, .d2-title-edit"
-							},
-							resizeConfig: {
-								enabled: true,
-								handles: [
-									"se",
-									"e",
-									"s"
-								]
-							},
-							onLayoutChange: (items) => dockStore.applyLayout(items),
-							children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
-								tile,
-								onRemove: () => dockStore.remove(tile.tileId),
-								onAlias: (alias) => dockStore.setTileAlias(tile.tileId, alias),
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
-									tileId: tile.tileId,
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							flex: 1,
+							minHeight: 0,
+							overflow: "auto"
+						},
+						children: tiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-empty-note",
+							style: { paddingTop: 60 },
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										fontSize: 22,
+										opacity: .6
+									},
+									children: "📌"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "这一页还是空的" }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-tcap",
+									children: "到 APP 页把组件「固定」到看板，或让 Agent 帮你生成"
 								})
-							}) }, tile.tileId))
-						}) : null]
+							]
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							ref: containerRef,
+							style: { minHeight: 104 },
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridStyles, {}), mounted && width > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridLayout, {
+								width,
+								layout,
+								gridConfig: {
+									cols: RGL_COLS(),
+									rowHeight: ROW_HEIGHT,
+									margin: GRID_MARGIN
+								},
+								dragConfig: {
+									enabled: true,
+									handle: ".dock-tile-handle",
+									cancel: ".dock-tile-cancel, .d2-title-edit"
+								},
+								resizeConfig: {
+									enabled: true,
+									handles: [
+										"se",
+										"e",
+										"s"
+									]
+								},
+								onLayoutChange: (items) => dockStore.applyLayout(items),
+								children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
+									tile,
+									onRemove: () => dockStore.remove(tile.tileId),
+									onAlias: (alias) => dockStore.setTileAlias(tile.tileId, alias),
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
+										tileId: tile.tileId,
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+									})
+								}) }, tile.tileId))
+							}) : null]
+						})
 					})
-				})]
+				]
 			});
 		}
 		//#endregion
@@ -6343,6 +6636,131 @@ window.__ModuleLoader__.load({
 					fontSize: Math.round(size * .46)
 				} : void 0,
 				children: app.name.slice(0, 1)
+			});
+		}
+		//#endregion
+		//#region src/client/rel-views.tsx
+		/** 组件的 relations（panels 契约形态；无声明返回 undefined） */
+		function relationsOf(rid) {
+			const panels = getPanelsClient();
+			const comp = lookupRegistryComponent(rid);
+			if (!panels || !comp) return void 0;
+			const entry = comp.entry;
+			if (typeof entry !== "object" || entry === null) return void 0;
+			const record = entry;
+			const panel = typeof record.panel === "object" && record.panel !== null ? record.panel : record;
+			return panels.parseRelations(panel.relations);
+		}
+		/** chip 颜色样式（rel 紫） */
+		const chipStyle = {
+			display: "inline-flex",
+			alignItems: "center",
+			gap: 3,
+			fontSize: 9,
+			padding: "1px 6px",
+			borderRadius: 5,
+			color: "#b06ad9",
+			background: "rgba(176,106,217,.12)",
+			whiteSpace: "nowrap"
+		};
+		/** 资源行 relations chip：有 emits 显示「⚡ 可触发」、有 consumes 显示「⇄ 可响应」 */
+		function RelChips({ rid }) {
+			const rels = relationsOf(rid);
+			if (!rels) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [rels.emits && rels.emits.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				style: chipStyle,
+				title: `点行可触发 · emits：${rels.emits.map((e) => e.event).join(", ")}`,
+				children: "⚡ 可触发"
+			}) : null, rels.consumes && rels.consumes.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				style: chipStyle,
+				title: `可响应事件 · consumes：${rels.consumes.map((c) => c.event).join(", ")}`,
+				children: "⇄ 可响应"
+			}) : null] });
+		}
+		/** 组件详情区：页面关系双语表（预览头部下方） */
+		function RelDeclSection({ rid }) {
+			const rels = relationsOf(rid);
+			if (!rels || (!rels.emits || rels.emits.length === 0) && (!rels.consumes || rels.consumes.length === 0)) return null;
+			const rows = [];
+			for (const e of rels.emits ?? []) rows.push({
+				dir: "out",
+				event: e.event,
+				param: "—",
+				note: e.note ?? "点行时触发 · fires on row click"
+			});
+			for (const c of rels.consumes ?? []) rows.push({
+				dir: "in",
+				event: c.event,
+				param: c.param,
+				note: c.note ?? `按 ${c.param} 取数 · renders by ${c.param}`
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: { marginTop: 12 },
+				"data-openloop-rel-decl": rid,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						fontSize: 10,
+						fontWeight: 600,
+						letterSpacing: ".06em",
+						color: "var(--dsw-alias-label-caption, #888)",
+						marginBottom: 6
+					},
+					children: ["页面关系 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: { fontWeight: 400 },
+						children: "Relations（emits 可触发 / consumes 可响应）"
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+						borderRadius: 9,
+						overflow: "hidden"
+					},
+					children: rows.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							padding: "6px 10px",
+							fontSize: 10.5,
+							borderTop: i === 0 ? void 0 : "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+							color: "var(--dsw-alias-label-primary, inherit)"
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontSize: 9,
+									fontWeight: 600,
+									padding: "1px 7px",
+									borderRadius: 999,
+									whiteSpace: "nowrap",
+									color: r.dir === "out" ? "#b06ad9" : "var(--dsw-alias-state-business-primary, #4176e6)",
+									background: r.dir === "out" ? "rgba(176,106,217,.1)" : "rgba(65,118,230,.1)"
+								},
+								children: r.dir === "out" ? "→ 可触发 emits" : "← 可响应 consumes"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
+									fontSize: 9.5,
+									color: "#b06ad9"
+								},
+								children: r.event
+							}),
+							r.param !== "—" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: { fontSize: 10 },
+								children: r.param
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									marginLeft: "auto",
+									fontSize: 9.5,
+									color: "var(--dsw-alias-label-caption, #888)"
+								},
+								children: r.note
+							})
+						]
+					}, i))
+				})]
 			});
 		}
 		//#endregion
@@ -6714,6 +7132,7 @@ window.__ModuleLoader__.load({
 													children: c.id
 												})]
 											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelChips, { rid: c.id }),
 											pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 												className: "d2-pin-dot",
 												title: "已固定到看板",
@@ -7004,46 +7423,50 @@ window.__ModuleLoader__.load({
 					]
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "d2-preview-canvas",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-preview-note",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` }), tone === "warn" ? "MCP server 当前不可达——pin 后 tile 会显示可重试错误态（惰性重连自愈）" : tone === "off" ? "MCP server 已关闭" : comp.type === "mcp-app" ? `来自 ${app.name} · 渲染时经 refresh 端点取数（沙箱）` : `来自 ${app.name} · 宿主车道渲染`]
-					}), source === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-empty-note",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: {
-									fontSize: 22,
-									opacity: .6
-								},
-								children: "🧩"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "暂无可渲染内容" }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								className: "d2-tcap",
-								children: "让 Agent 经 app_backend 生成内容后重新注册"
-							})
-						]
-					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						className: "d2-frame",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "d2-frame-bar",
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								className: "d2-fdots",
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {})
-								]
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: source.kind === "mcp-app" ? "opaque-origin 沙箱 · AppBridge" : "panel 宿主车道" })]
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							className: "d2-frame-body",
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelDeclSection, { rid: comp.id }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-preview-note",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` }), tone === "warn" ? "MCP server 当前不可达——pin 后 tile 会显示可重试错误态（惰性重连自愈）" : tone === "off" ? "MCP server 已关闭" : comp.type === "mcp-app" ? `来自 ${app.name} · 渲染时经 refresh 端点取数（沙箱）` : `来自 ${app.name} · 宿主车道渲染`]
+						}),
+						source === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-empty-note",
 							children: [
-								source.kind === "panel" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelPreviewBody, { meta: source.meta }) : null,
-								source.kind === "mcp-app" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppPreviewBody, { comp }) : null,
-								source.kind === "artifact" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactPreviewBody, { meta: source.meta }) : null
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										fontSize: 22,
+										opacity: .6
+									},
+									children: "🧩"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: "暂无可渲染内容" }),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									className: "d2-tcap",
+									children: "让 Agent 经 app_backend 生成内容后重新注册"
+								})
 							]
-						})]
-					})]
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							className: "d2-frame",
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-frame-bar",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									className: "d2-fdots",
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("i", {})
+									]
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: source.kind === "mcp-app" ? "opaque-origin 沙箱 · AppBridge" : "panel 宿主车道" })]
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								className: "d2-frame-body",
+								children: [
+									source.kind === "panel" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelPreviewBody, { meta: source.meta }) : null,
+									source.kind === "mcp-app" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppPreviewBody, { comp }) : null,
+									source.kind === "artifact" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactPreviewBody, { meta: source.meta }) : null
+								]
+							})]
+						})
+					]
 				})]
 			});
 		}

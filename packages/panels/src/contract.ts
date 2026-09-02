@@ -60,6 +60,50 @@ export interface WidgetDataBinding {
   source: WidgetDataSource
   /** JSONPath 子集取值路径（v1：仅 a.b[0].c 形态），缺省取整个响应 */
   pick?: string
+  /**
+   * 参数化取数（联动特性 v1）：url/query/body 中的 `{{paramName}}` 模板变量，
+   * 渲染时用关联事件映射来的参数值替换（如 leadId）。未提供参数的变量替换为空串。
+   */
+  params?: Record<string, string>
+}
+
+/**
+ * 页面关联（relations）契约 v1（2026-09-02 联动特性）。
+ *
+ * 面板可声明两类关系：
+ * - emits：本面板产生的事件（如列表点行）——payload 模板值支持 `$row.<path>`
+ *   / `$panel.<path>` 取自触发上下文（被点行数据 / 面板当前数据）。
+ * - consumes：本面板响应的事件——事件 payload 的某字段映射为本面板数据参数，
+ *   渲染时经 refresh 端点带参取数（binding.params 声明模板变量）。
+ *
+ * 事件命名空间：`{app}:{entity}:{action}`（如 my-crm:lead:selected），
+ * 与 rid 命名空间（`app:component`）对齐，避免跨 APP 撞名。
+ */
+export interface PanelEmitsDecl {
+  /** 事件名：`{app}:{entity}:{action}` */
+  event: string
+  /** payload 模板：值支持 `$row.x` / `$panel.x` 引用（其余按字面值下发） */
+  payload?: JsonObject
+  /** 渲染目标（可选）：显式指向消费方 rid；缺省按事件名推断 `{app}:{entity}-detail` */
+  target?: { rid: string }
+  /** 事件说明（资源列表展示用，建议中英双语） */
+  note?: string
+}
+
+export interface PanelConsumesDecl {
+  /** 响应的事件名（须与某 emits 方的事件名一致才成对） */
+  event: string
+  /** 事件 payload 的哪个字段映射为本面板参数（如 leadId） */
+  param: string
+  /** 参数说明（资源列表展示用） */
+  note?: string
+}
+
+export interface PanelRelationsDecl {
+  /** 本面板触发的事件 */
+  emits?: PanelEmitsDecl[]
+  /** 本面板响应的事件（事件参数 → 本面板数据参数） */
+  consumes?: PanelConsumesDecl[]
 }
 
 export interface PanelDefinition {
@@ -68,6 +112,8 @@ export interface PanelDefinition {
   id: string
   title: string                 // ≤ 120 字符
   description?: string          // ≤ 360 字符
+  /** 页面关联声明（联动特性 v1） */
+  relations?: PanelRelationsDecl
   layout?: {
     mode: 'stack' | 'grid'      // 默认 stack
     columns?: 1 | 2 | 3         // grid 时有效，默认 2

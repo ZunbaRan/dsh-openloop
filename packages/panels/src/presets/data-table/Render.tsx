@@ -192,6 +192,7 @@ export function DataTableRender({ props }: PresetRenderProps) {
                     ...(tone ? { background: ROW_TONE_BG[tone] } : {}),
                   }}
                   data-openloop-row-tone={tone ?? 'none'}
+                  data-openloop-row-index={rowIndex}
                 >
                   {effectiveColumns.map((column) => (
                     <td

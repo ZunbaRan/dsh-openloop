@@ -24,6 +24,8 @@ import type { TokenSyncPayload } from './bridge.ts'
 import { isErrorData, normalizeRefreshPolicy, requestWidgetRefresh } from './refresh.ts'
 import { runtimeUrl } from './runtime-url.gen.ts'
 import { usePanelVisualTheme, type PanelVisualTheme } from './theme.ts'
+import { dispatchRelEvent, evalPayloadTemplate } from './rel-bus.ts'
+import { RelLinkedSlot, panelDefinitionFromEntry } from './RelLinked.tsx'
 
 const caption: CSSProperties = { color: 'var(--dsw-alias-label-caption, #666)', fontSize: 12 }
 
@@ -63,14 +65,17 @@ export function PanelCard({ block }: ToolCallViewProps) {
   if (!('kind' in block)) return <div style={caption}>OpenLoop Panel · rendering…</div>
   if (block.isError) return <div style={caption}>OpenLoop Panel · failed</div>
   const meta = panelMetaFrom(block.meta)
-  return meta
-    ? (
-      <div style={{ position: 'relative' }}>
-        <PinToDock meta={meta} title={meta.panel?.title as unknown as string ?? 'Panel'} />
-        <PanelSurface meta={meta} />
-      </div>
-    )
-    : <div style={caption}>OpenLoop Panel · metadata unavailable</div>
+  if (!meta) return <div style={caption}>OpenLoop Panel · metadata unavailable</div>
+  // 联动 v1（M2）：面板声明了 relations.emits → 卡片下方挂联动渲染槽
+  // （行点击事件 → consumes 注册表映射 → 目标面板带参渲染，未经 Agent）。
+  const relations = meta.panel.relations
+  return (
+    <div style={{ position: 'relative' }}>
+      <PinToDock meta={meta} title={meta.panel?.title as unknown as string ?? 'Panel'} />
+      <PanelSurface meta={meta} />
+      {relations?.emits && relations.emits.length > 0 ? <RelLinkedSlot relations={relations} /> : null}
+    </div>
+  )
 }
 
 // ---- 面板外壳：标题 + 布局区 ----
@@ -109,7 +114,7 @@ const descStyle: CSSProperties = {
   color: 'var(--openloop-muted-foreground)',
 }
 
-export function PanelSurface({ meta }: { meta: PanelMeta }) {
+export function PanelSurface({ meta, relParams }: { meta: PanelMeta; relParams?: JsonObject }) {
   const theme = usePanelVisualTheme()
   // 主题变量注入宿主 DOM（真机事故：此前 tokens 只经桥发给沙箱格，宿主车道从未注入，
   // 所有 var(--openloop-*) 落空 → 面板无样式、换肤无效）
@@ -130,6 +135,25 @@ export function PanelSurface({ meta }: { meta: PanelMeta }) {
     setResolved(prev => ({ ...prev, [widgetId]: data }))
   }, [])
 
+  // 联动 v1（M2）：emits 声明存在时启用行点击事件委托——点击 data-table 行
+  // → 取行数据 → payload 模板求值（$row.x / $panel.x）→ relBus 发事件。
+  // preset 零改动；行数据来源：该面板内含 api 数据的 widget 快照 rows。
+  const emits = panel.relations?.emits
+  const onRowClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (!emits || emits.length === 0) return
+    const rowEl = (event.target as HTMLElement).closest('tr[data-openloop-row-index]')
+    if (!rowEl) return
+    const index = Number((rowEl as HTMLElement).dataset['openloopRowIndex'])
+    // 行数据：从首个数组形态的 resolved 快照取（data-table rows 注入路径）
+    const rowsSource = Object.values(resolved).find(v => Array.isArray(v))
+    const row = Array.isArray(rowsSource) ? rowsSource[index] : undefined
+    if (row === undefined) return
+    for (const decl of emits) {
+      const payload = evalPayloadTemplate(decl.payload, row, { resolved })
+      dispatchRelEvent(decl.event, payload)
+    }
+  }, [emits, resolved])
+
   const containerStyle: CSSProperties = isGrid
     ? { display: 'grid', gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 12, padding: 12, alignItems: 'start' }
     : { display: 'flex', flexDirection: 'column', gap: 12, padding: 12 }
@@ -140,6 +164,7 @@ export function PanelSurface({ meta }: { meta: PanelMeta }) {
       data-openloop-preset={theme.preset}
       data-openloop-appearance={theme.appearance}
       style={{ ...shellStyle, ...themeVars }}
+      onClick={emits && emits.length > 0 ? onRowClick : undefined}
     >
       <header style={headerStyle}>
         <h3 style={titleStyle}>{panel.title}</h3>
@@ -148,7 +173,7 @@ export function PanelSurface({ meta }: { meta: PanelMeta }) {
       <div style={containerStyle} data-openloop-layout={layout.mode}>
         {panel.widgets.map(widget => (
           <WidgetErrorBoundary key={widget.id} widget={widget}>
-            <RefreshableWidgetCell widget={widget} theme={theme} data={resolved[widget.id]} onData={updateWidgetData} />
+            <RefreshableWidgetCell widget={widget} theme={theme} data={resolved[widget.id]} onData={updateWidgetData} relParams={relParams} />
           </WidgetErrorBoundary>
         ))}
       </div>
@@ -326,11 +351,14 @@ function RefreshableWidgetCell({
   theme,
   data,
   onData,
+  relParams,
 }: {
   widget: WidgetUnit
   theme: PanelVisualTheme
   data: unknown
   onData: (widgetId: string, data: unknown) => void
+  /** 联动参数（v1）：关联事件映射来的参数值，随刷新请求下发（server 替换 {{param}}） */
+  relParams?: JsonObject | undefined
 }) {
   const binding = widget.data
   const hasApiData = binding?.source.type === 'api'
@@ -342,13 +370,15 @@ function RefreshableWidgetCell({
   // 失败判定时读取最新快照（避免闭包捕获过期 data）
   const dataRef = useRef(data)
   dataRef.current = data
+  // relParams 变化（点选了不同行）→ 视为新取数请求，重新拉取（联动 v1）
+  const relParamsKey = JSON.stringify(relParams ?? null)
 
   const refresh = useCallback(async (): Promise<void> => {
     if (binding?.source.type !== 'api' || inFlightRef.current) return
     inFlightRef.current = true
     setBusy(true)
     try {
-      const outcome = await requestWidgetRefresh(widget.id, binding)
+      const outcome = await requestWidgetRefresh(widget.id, binding, undefined, relParams)
       if (outcome.ok) {
         onData(widget.id, outcome.data)
         setStale(false)
@@ -362,12 +392,13 @@ function RefreshableWidgetCell({
       inFlightRef.current = false
       setBusy(false)
     }
-  }, [binding, widget.id, onData])
+  }, [binding, widget.id, onData, relParams])
 
-  // onLoad（§10，默认 true）：面板打开时重新拉取
+  // onLoad（§10，默认 true）：面板打开时重新拉取；联动参数变化同样触发（M2）
   useEffect(() => {
     if (policy.onLoad) void refresh()
-  }, [policy.onLoad, refresh])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [policy.onLoad, refresh, relParamsKey])
 
   // intervalMs（§10，≥10s）：IntersectionObserver 不可见时暂停定时器
   const intervalMs = policy.intervalMs

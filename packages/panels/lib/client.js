@@ -3824,6 +3824,7 @@ window.__ModuleLoader__.load({
 									...tone ? { background: ROW_TONE_BG[tone] } : {}
 								},
 								"data-openloop-row-tone": tone ?? "none",
+								"data-openloop-row-index": rowIndex,
 								children: effectiveColumns.map((column) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
 									style: {
 										...column.numeric ? cellNumericStyle : cellStyle$2,
@@ -8321,8 +8322,9 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		* 调用刷新通道重新解析单个 widget 的 api 数据（§10）。
 		* 成功 → { ok: true, data }；任何失败（网络/非 JSON 响应/HTTP 非 2xx/业务 ok:false）
 		* → { ok: false, error }，由调用方按 §10 失败语义处理（保留旧快照 + stale / 错误占位）。
+		* params（联动 v1）：关联事件映射来的参数值，server 侧替换 binding 的 {{param}} 模板。
 		*/
-		async function requestWidgetRefresh(widgetId, binding, fetchFn) {
+		async function requestWidgetRefresh(widgetId, binding, fetchFn, params) {
 			const doFetch = fetchFn ?? fetch;
 			let response;
 			try {
@@ -8331,7 +8333,8 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 					headers: { "content-type": "application/json" },
 					body: JSON.stringify({
 						widgetId,
-						data: binding
+						data: binding,
+						...params !== void 0 ? { params } : {}
 					})
 				});
 			} catch (error) {
@@ -8457,6 +8460,253 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			return theme;
 		}
 		//#endregion
+		//#region src/client/rel-bus.ts
+		/**
+		* 联动事件通道（client 侧，2026-09-02 联动特性 v1）。
+		*
+		* 极小的 window 事件总线：panel 行点击产生带参事件（emits）→ 宿主监听按
+		* relations.consumes 映射为目标面板参数（rid + params）→ 由对话流卡片 /
+		* Board 悬浮窗渲染。遵循仓库既有 window 单例事实标准（__openloopDockService
+		* 模式），不引入 cordis 依赖、不跨插件 import。
+		*
+		* 事件流：window.postMessage('openloop-rel:{event}', { payload }) —— 用
+		* postMessage 而非 CustomEvent 直发，是因为沙箱 iframe（panel 的 sandbox 车道）
+		* 只能经 window.parent.postMessage 与宿主通信；宿主与 iframe 两侧用同一形态。
+		*/
+		/** 消息前缀（联动事件通道专用） */
+		const REL_EVENT_PREFIX = "openloop-rel:";
+		const BUS_KEY = "__openloopRelBus";
+		function createBus() {
+			const listeners = /* @__PURE__ */ new Set();
+			const onMessage = (ev) => {
+				if (typeof ev.data !== "object" || ev.data === null) return;
+				const data = ev.data;
+				if (typeof data.type !== "string" || !data.type.startsWith("openloop-rel:")) return;
+				const event = data.type.slice(13);
+				const payload = typeof data.payload === "object" && data.payload !== null && !Array.isArray(data.payload) ? data.payload : {};
+				for (const listener of listeners) listener(event, payload);
+			};
+			window.addEventListener("message", onMessage);
+			return {
+				subscribe(listener) {
+					listeners.add(listener);
+					return () => {
+						listeners.delete(listener);
+					};
+				},
+				dispatch(event, payload) {
+					for (const listener of listeners) listener(event, payload);
+				}
+			};
+		}
+		/** 宿主侧联动事件总线（window 单例；测试可重复创建） */
+		function relBus() {
+			const w = window;
+			if (!w[BUS_KEY]) w[BUS_KEY] = createBus();
+			return w[BUS_KEY];
+		}
+		/** 便捷直发（宿主侧 React 组件内，不经 postMessage 绕行） */
+		function dispatchRelEvent(event, payload) {
+			relBus().dispatch(event, payload);
+		}
+		/** iframe 侧便捷发送（panel 沙箱车道 widget → 宿主） */
+		function postRelEvent(event, payload) {
+			window.parent.postMessage({
+				type: REL_EVENT_PREFIX + event,
+				payload
+			}, "*");
+		}
+		/** 宽松校验提取 relations（形状不对按无声明处理，不致命） */
+		function parseRelations(value) {
+			if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
+			const record = value;
+			const out = {};
+			if (Array.isArray(record.emits)) {
+				const emits = [];
+				for (const item of record.emits) {
+					if (typeof item !== "object" || item === null) continue;
+					const decl = item;
+					if (typeof decl.event !== "string" || decl.event.length === 0) continue;
+					emits.push({
+						event: decl.event,
+						...decl.payload && typeof decl.payload === "object" && !Array.isArray(decl.payload) ? { payload: decl.payload } : {},
+						...typeof decl.note === "string" ? { note: decl.note } : {}
+					});
+				}
+				if (emits.length > 0) out.emits = emits;
+			}
+			if (Array.isArray(record.consumes)) {
+				const consumes = [];
+				for (const item of record.consumes) {
+					if (typeof item !== "object" || item === null) continue;
+					const decl = item;
+					if (typeof decl.event !== "string" || decl.event.length === 0) continue;
+					if (typeof decl.param !== "string" || decl.param.length === 0) continue;
+					consumes.push({
+						event: decl.event,
+						param: decl.param,
+						...typeof decl.note === "string" ? { note: decl.note } : {}
+					});
+				}
+				if (consumes.length > 0) out.consumes = consumes;
+			}
+			return out.emits || out.consumes ? out : void 0;
+		}
+		/**
+		* payload 模板求值（emits 侧）：`$row.x` / `$panel.x` 引用触发上下文。
+		* 非模板值原样下发；路径不存在时该字段省略。
+		*/
+		function evalPayloadTemplate(template, row, panel) {
+			if (!template) return {};
+			const out = {};
+			for (const [key, value] of Object.entries(template)) if (typeof value === "string" && value.startsWith("$row.")) {
+				const resolved = pickPath(row, value.slice(5));
+				if (resolved !== void 0) out[key] = resolved;
+			} else if (typeof value === "string" && value.startsWith("$panel.")) {
+				const resolved = pickPath(panel, value.slice(7));
+				if (resolved !== void 0) out[key] = resolved;
+			} else out[key] = value;
+			return out;
+		}
+		function pickPath(source, path) {
+			let cursor = source;
+			for (const segment of path.split(".").filter(Boolean)) {
+				if (typeof cursor !== "object" || cursor === null) return void 0;
+				cursor = cursor[segment];
+			}
+			return cursor;
+		}
+		//#endregion
+		//#region src/client/RelLinked.tsx
+		/**
+		* 联动详情渲染槽（M2，2026-09-02 联动特性 v1）。
+		*
+		* PanelCard 的一部分：列表面板声明了 emits 时，卡片内渲染此槽。
+		* 订阅联动事件总线 → 按（本会话可见的）consumes 注册表把事件映射为
+		* 「目标面板 rid + 参数」→ 解析目标面板定义 → 带参渲染 PanelSurface。
+		*
+		* 目标面板解析路径（M1 范围）：
+		* 1. 对话流内的其它 PanelMeta（同消息上下文）——v1 不做跨卡片查找，
+		*    目标面板定义由资源注册表提供（见 resolveTargetPanel）。
+		* 2. 资源注册表条目 entry.panel（panelFile / registry 组件 entry）。
+		*
+		* v1 简化：目标面板由 emits 事件的 `target.rid` 显式指向（skill 指导 agent
+		* 生成时成对声明），未声明 target 或注册表查不到时不渲染（安全空态）。
+		*/
+		let panelResolver;
+		/** 注入注册表面板解析器（dock client 启动时调用一次） */
+		function setRelPanelResolver(resolver) {
+			panelResolver = resolver;
+		}
+		function resolvePanelDefinition(rid) {
+			try {
+				return panelResolver?.(rid);
+			} catch {
+				return;
+			}
+		}
+		/** 把注册表条目 entry 宽松解析为 PanelDefinition（形状不对返回 undefined） */
+		function panelDefinitionFromEntry(entry) {
+			if (typeof entry !== "object" || entry === null) return void 0;
+			const record = entry;
+			const panel = record.panel ?? record;
+			if (typeof panel !== "object" || panel === null) return void 0;
+			const def = panel;
+			if (typeof def.id !== "string" || typeof def.title !== "string" || !Array.isArray(def.widgets)) return void 0;
+			return def;
+		}
+		/**
+		* 联动渲染槽：emits 声明 + 事件 → 目标面板带参渲染。
+		* 行点击（PanelSurface 事件委托）→ relBus 事件 → 这里解析目标并渲染。
+		*/
+		function RelLinkedSlot({ relations }) {
+			const [target, setTarget] = (0, react.useState)();
+			const relationsRef = (0, react.useRef)(relations);
+			relationsRef.current = relations;
+			(0, react.useEffect)(() => {
+				return relBus().subscribe((event, payload) => {
+					const emit = relationsRef.current.emits?.find((e) => e.event === event);
+					if (!emit) return;
+					const targetRid = emit.target?.rid ?? inferTargetRid(event);
+					if (typeof targetRid !== "string" || targetRid.length === 0) return;
+					const panel = resolvePanelDefinition(targetRid);
+					if (!panel) return;
+					setTarget({
+						rid: targetRid,
+						panel,
+						params: payload,
+						event
+					});
+				});
+			}, []);
+			if (!target) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					padding: "10px 14px",
+					fontSize: 12,
+					color: "var(--openloop-muted-foreground, #888)",
+					borderTop: "1px dashed var(--openloop-border)"
+				},
+				"data-openloop-rel-slot": "empty",
+				children: "点击列表行，关联页面将在这里呈现 · click a row to open the linked page"
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					borderTop: "1px dashed var(--openloop-border)",
+					paddingTop: 10,
+					marginTop: 10
+				},
+				"data-openloop-rel-slot": "linked",
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						display: "flex",
+						alignItems: "center",
+						gap: 7,
+						padding: "4px 10px",
+						marginBottom: 8,
+						fontSize: 10.5,
+						color: "var(--openloop-muted-foreground, #888)"
+					},
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["⚡ ", target.event] }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: {
+								fontFamily: "ui-monospace, monospace",
+								opacity: .8
+							},
+							children: Object.keys(target.params).map((k) => `${k}=${String(target.params[k])}`).join(" · ")
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: { marginLeft: "auto" },
+							children: target.rid
+						})
+					]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LinkedPanelSurface, {
+					panel: target.panel,
+					params: target.params
+				})]
+			});
+		}
+		/** 带参面板渲染：api widget 的 {{param}} 经 refresh 端点带参解析（M1 通道） */
+		function LinkedPanelSurface({ panel, params }) {
+			const meta = (0, react.useMemo)(() => ({
+				kind: "openloop.panel",
+				version: 1,
+				panel,
+				resolved: {},
+				resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+			}), [panel]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, {
+				meta,
+				relParams: params
+			});
+		}
+		/** 事件名 → 目标 rid 推断（未显式声明 target 时的兜底：{app}:{entity}:selected → 同 entity 详情） */
+		function inferTargetRid(event) {
+			const match = /^([a-z0-9][a-z0-9-]*):([a-z][a-z0-9-]*):selected$/.exec(event);
+			if (!match) return void 0;
+			return `${match[1]}:${match[2]}-detail`;
+		}
+		//#endregion
 		//#region src/client/PanelCard.tsx
 		/**
 		* PanelCard：面板容器（§7 宿主车道编排）。
@@ -8526,15 +8776,21 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 				children: "OpenLoop Panel · failed"
 			});
 			const meta = panelMetaFrom(block.meta);
-			return meta ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: { position: "relative" },
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PinToDock, {
-					meta,
-					title: meta.panel?.title ?? "Panel"
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta })]
-			}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			if (!meta) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: caption,
 				children: "OpenLoop Panel · metadata unavailable"
+			});
+			const relations = meta.panel.relations;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: { position: "relative" },
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PinToDock, {
+						meta,
+						title: meta.panel?.title ?? "Panel"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, { meta }),
+					relations?.emits && relations.emits.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelLinkedSlot, { relations }) : null
+				]
 			});
 		}
 		const shellStyle = {
@@ -8567,7 +8823,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			lineHeight: 1.5,
 			color: "var(--openloop-muted-foreground)"
 		};
-		function PanelSurface({ meta }) {
+		function PanelSurface({ meta, relParams }) {
 			const theme = usePanelVisualTheme();
 			const themeVars = (0, react.useMemo)(() => {
 				const vars = {};
@@ -8586,6 +8842,20 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 					[widgetId]: data
 				}));
 			}, []);
+			const emits = panel.relations?.emits;
+			const onRowClick = (0, react.useCallback)((event) => {
+				if (!emits || emits.length === 0) return;
+				const rowEl = event.target.closest("tr[data-openloop-row-index]");
+				if (!rowEl) return;
+				const index = Number(rowEl.dataset["openloopRowIndex"]);
+				const rowsSource = Object.values(resolved).find((v) => Array.isArray(v));
+				const row = Array.isArray(rowsSource) ? rowsSource[index] : void 0;
+				if (row === void 0) return;
+				for (const decl of emits) {
+					const payload = evalPayloadTemplate(decl.payload, row, { resolved });
+					dispatchRelEvent(decl.event, payload);
+				}
+			}, [emits, resolved]);
 			const containerStyle = isGrid ? {
 				display: "grid",
 				gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
@@ -8606,6 +8876,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 					...shellStyle,
 					...themeVars
 				},
+				onClick: emits && emits.length > 0 ? onRowClick : void 0,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
 					style: headerStyle,
 					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("h3", {
@@ -8624,7 +8895,8 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 							widget,
 							theme,
 							data: resolved[widget.id],
-							onData: updateWidgetData
+							onData: updateWidgetData,
+							relParams
 						})
 					}, widget.id))
 				})]
@@ -8810,7 +9082,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		* - onLoad（默认 true）：面板打开时重新拉取一次。
 		* - 防重入：同一 widget 上一次请求未返回不重复发。
 		*/
-		function RefreshableWidgetCell({ widget, theme, data, onData }) {
+		function RefreshableWidgetCell({ widget, theme, data, onData, relParams }) {
 			const binding = widget.data;
 			const hasApiData = binding?.source.type === "api";
 			const policy = normalizeRefreshPolicy(widget.refresh, hasApiData);
@@ -8820,12 +9092,13 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			const cellRef = (0, react.useRef)(null);
 			const dataRef = (0, react.useRef)(data);
 			dataRef.current = data;
+			const relParamsKey = JSON.stringify(relParams ?? null);
 			const refresh = (0, react.useCallback)(async () => {
 				if (binding?.source.type !== "api" || inFlightRef.current) return;
 				inFlightRef.current = true;
 				setBusy(true);
 				try {
-					const outcome = await requestWidgetRefresh(widget.id, binding);
+					const outcome = await requestWidgetRefresh(widget.id, binding, void 0, relParams);
 					if (outcome.ok) {
 						onData(widget.id, outcome.data);
 						setStale(false);
@@ -8841,11 +9114,16 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			}, [
 				binding,
 				widget.id,
-				onData
+				onData,
+				relParams
 			]);
 			(0, react.useEffect)(() => {
 				if (policy.onLoad) refresh();
-			}, [policy.onLoad, refresh]);
+			}, [
+				policy.onLoad,
+				refresh,
+				relParamsKey
+			]);
 			const intervalMs = policy.intervalMs;
 			(0, react.useEffect)(() => {
 				if (intervalMs === void 0) return;
@@ -8963,6 +9241,38 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			}
 		};
 		//#endregion
+		//#region src/datasource.ts
+		/**
+		* 联动参数模板替换（2026-09-02 联动特性 v1）：
+		* 把 binding.params 声明的 `{{paramName}}` 模板变量替换为运行时参数值。
+		* 替换范围：url / query 值 / body 序列化后的字符串 / pick 不动。
+		* - 参数已提供 → 替换为 encodeURIComponent 后的值（URL 上下文安全）
+		* - 声明了但未提供 → 替换为空串（面板可先渲染空态）
+		* - 值含特殊字符按 URL 语境转义；body 为 JSON 序列化后整体替换（保持结构合法）
+		*/
+		function applyBindingParams(binding, values) {
+			const declared = binding.params;
+			if (!declared || Object.keys(declared).length === 0) return binding;
+			const resolve = (template) => {
+				return template.replace(/\{\{([a-zA-Z][a-zA-Z0-9_]*)\}\}/g, (_m, name) => {
+					const value = values[name];
+					if (value === void 0 || value === null) return "";
+					return encodeURIComponent(String(value));
+				});
+			};
+			const source = binding.source;
+			if (source.type !== "api") return binding;
+			return {
+				...binding,
+				source: {
+					...source,
+					url: resolve(source.url),
+					...source.query ? { query: Object.fromEntries(Object.entries(source.query).map(([k, v]) => [k, resolve(v)])) } : {},
+					...source.body !== void 0 ? { body: JSON.parse(resolve(JSON.stringify(source.body))) } : {}
+				}
+			};
+		}
+		//#endregion
 		//#region src/client/index.tsx
 		const name = "openloop-dsh-panels";
 		const inject = ["slots"];
@@ -8973,14 +9283,25 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			}, PanelCard));
 		}
 		//#endregion
+		exports.LinkedPanelSurface = LinkedPanelSurface;
 		exports.PanelCard = PanelCard;
 		exports.PanelSurface = PanelSurface;
+		exports.REL_EVENT_PREFIX = REL_EVENT_PREFIX;
+		exports.RelLinkedSlot = RelLinkedSlot;
 		exports.allPresetKinds = allPresetKinds;
 		exports.apply = apply;
+		exports.applyBindingParams = applyBindingParams;
+		exports.dispatchRelEvent = dispatchRelEvent;
+		exports.evalPayloadTemplate = evalPayloadTemplate;
 		exports.getDockService = getDockService;
 		exports.inject = inject;
 		exports.name = name;
+		exports.panelDefinitionFromEntry = panelDefinitionFromEntry;
 		exports.panelMetaFrom = panelMetaFrom;
+		exports.parseRelations = parseRelations;
+		exports.postRelEvent = postRelEvent;
+		exports.relBus = relBus;
+		exports.setRelPanelResolver = setRelPanelResolver;
 		return module.exports;
 	}
 });

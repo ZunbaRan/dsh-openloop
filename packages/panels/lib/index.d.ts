@@ -60,6 +60,49 @@ interface WidgetDataBinding {
   source: WidgetDataSource;
   /** JSONPath 子集取值路径（v1：仅 a.b[0].c 形态），缺省取整个响应 */
   pick?: string;
+  /**
+   * 参数化取数（联动特性 v1）：url/query/body 中的 `{{paramName}}` 模板变量，
+   * 渲染时用关联事件映射来的参数值替换（如 leadId）。未提供参数的变量替换为空串。
+   */
+  params?: Record<string, string>;
+}
+/**
+ * 页面关联（relations）契约 v1（2026-09-02 联动特性）。
+ *
+ * 面板可声明两类关系：
+ * - emits：本面板产生的事件（如列表点行）——payload 模板值支持 `$row.<path>`
+ *   / `$panel.<path>` 取自触发上下文（被点行数据 / 面板当前数据）。
+ * - consumes：本面板响应的事件——事件 payload 的某字段映射为本面板数据参数，
+ *   渲染时经 refresh 端点带参取数（binding.params 声明模板变量）。
+ *
+ * 事件命名空间：`{app}:{entity}:{action}`（如 my-crm:lead:selected），
+ * 与 rid 命名空间（`app:component`）对齐，避免跨 APP 撞名。
+ */
+interface PanelEmitsDecl {
+  /** 事件名：`{app}:{entity}:{action}` */
+  event: string;
+  /** payload 模板：值支持 `$row.x` / `$panel.x` 引用（其余按字面值下发） */
+  payload?: JsonObject;
+  /** 渲染目标（可选）：显式指向消费方 rid；缺省按事件名推断 `{app}:{entity}-detail` */
+  target?: {
+    rid: string;
+  };
+  /** 事件说明（资源列表展示用，建议中英双语） */
+  note?: string;
+}
+interface PanelConsumesDecl {
+  /** 响应的事件名（须与某 emits 方的事件名一致才成对） */
+  event: string;
+  /** 事件 payload 的哪个字段映射为本面板参数（如 leadId） */
+  param: string;
+  /** 参数说明（资源列表展示用） */
+  note?: string;
+}
+interface PanelRelationsDecl {
+  /** 本面板触发的事件 */
+  emits?: PanelEmitsDecl[];
+  /** 本面板响应的事件（事件参数 → 本面板数据参数） */
+  consumes?: PanelConsumesDecl[];
 }
 interface PanelDefinition {
   $schema: 'openloop.panel/v1';
@@ -67,6 +110,8 @@ interface PanelDefinition {
   id: string;
   title: string;
   description?: string;
+  /** 页面关联声明（联动特性 v1） */
+  relations?: PanelRelationsDecl;
   layout?: {
     mode: 'stack' | 'grid';
     columns?: 1 | 2 | 3;
@@ -1643,6 +1688,15 @@ declare function pickValue(data: unknown, pick?: string): unknown;
 /** 拼接 query 参数到 api url（原 url 已有 query 时合并） */
 declare function buildApiUrl(url: string, query?: Record<string, string>): string;
 /**
+ * 联动参数模板替换（2026-09-02 联动特性 v1）：
+ * 把 binding.params 声明的 `{{paramName}}` 模板变量替换为运行时参数值。
+ * 替换范围：url / query 值 / body 序列化后的字符串 / pick 不动。
+ * - 参数已提供 → 替换为 encodeURIComponent 后的值（URL 上下文安全）
+ * - 声明了但未提供 → 替换为空串（面板可先渲染空态）
+ * - 值含特殊字符按 URL 语境转义；body 为 JSON 序列化后整体替换（保持结构合法）
+ */
+declare function applyBindingParams(binding: WidgetDataBinding, values: Record<string, unknown>): WidgetDataBinding;
+/**
  * api source URL 校验（§5.4 / §15 S3，fail-closed）：
  * 必须 https://，且不指向环回/内网。复用 validation.ts 的 isForbiddenApiUrl。
  */
@@ -2253,4 +2307,4 @@ declare function apply(ctx: Context, config: Config): void;
  */
 declare function createPanelExecute(tool: ToolDefinition, ctx: Context): ToolDefinition['execute'];
 //#endregion
-export { type AntdThemeTokens, CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, JsonObject, Lane, type LoadPackComponentOptions, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, type MuiThemeInput, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, type PackComponent, type PackComponentMeta, type PackComponentProps, type PackFs, type PackManifest, PackRegistry, type PackRuntime, PanelDefinition, type PanelFs, PanelMeta, type PanelStore, type PanelStoreOptions, PanelsPackAssets, PresetKind, RefreshPolicy, type RegisteredPack, ResolveWidgetDataContext, type ScanResult, type StoredPanel, WidgetDataBinding, WidgetDataSource, WidgetSource, WidgetUnit, apply, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel };
+export { type AntdThemeTokens, CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, JsonObject, Lane, type LoadPackComponentOptions, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, type MuiThemeInput, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, type PackComponent, type PackComponentMeta, type PackComponentProps, type PackFs, type PackManifest, PackRegistry, type PackRuntime, PanelConsumesDecl, PanelDefinition, PanelEmitsDecl, type PanelFs, PanelMeta, PanelRelationsDecl, type PanelStore, type PanelStoreOptions, PanelsPackAssets, PresetKind, RefreshPolicy, type RegisteredPack, ResolveWidgetDataContext, type ScanResult, type StoredPanel, WidgetDataBinding, WidgetDataSource, WidgetSource, WidgetUnit, apply, applyBindingParams, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel };

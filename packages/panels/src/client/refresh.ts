@@ -83,11 +83,13 @@ function payloadError(payload: unknown): string | undefined {
  * 调用刷新通道重新解析单个 widget 的 api 数据（§10）。
  * 成功 → { ok: true, data }；任何失败（网络/非 JSON 响应/HTTP 非 2xx/业务 ok:false）
  * → { ok: false, error }，由调用方按 §10 失败语义处理（保留旧快照 + stale / 错误占位）。
+ * params（联动 v1）：关联事件映射来的参数值，server 侧替换 binding 的 {{param}} 模板。
  */
 export async function requestWidgetRefresh(
   widgetId: string,
   binding: WidgetDataBinding,
   fetchFn?: RefreshFetchFn,
+  params?: Record<string, unknown>,
 ): Promise<RefreshOutcome> {
   const doFetch: RefreshFetchFn = fetchFn ?? (fetch as unknown as RefreshFetchFn)
   let response: RefreshFetchResponse
@@ -95,7 +97,7 @@ export async function requestWidgetRefresh(
     response = await doFetch(PANELS_REFRESH_PATH, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ widgetId, data: binding }),
+      body: JSON.stringify({ widgetId, data: binding, ...(params !== undefined ? { params } : {}) }),
     })
   } catch (error) {
     return { ok: false, error: `refresh request failed: ${errorMessage(error)}` }

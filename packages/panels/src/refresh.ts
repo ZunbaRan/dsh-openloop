@@ -24,7 +24,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { WebServer } from '@deepseek-ai/dsh-host-webserver'
 import type { WidgetDataBinding } from './contract.ts'
-import { resolveWidgetData, validateApiUrl, type ResolveWidgetDataContext } from './datasource.ts'
+import { resolveWidgetData, validateApiUrl, applyBindingParams, type ResolveWidgetDataContext } from './datasource.ts'
 
 /** §10 刷新路由：绝对路径、无尾部斜杠（IMPL_NOTES §1.1 path 契约） */
 export const PANELS_REFRESH_ROUTE = '/openloop/panels/refresh'
@@ -69,10 +69,12 @@ function errorMessage(error: unknown): string {
 
 /**
  * 解析并校验刷新请求体（fail-closed）：
- * `{ widgetId: kebab-case, data: WidgetDataBinding }` 且 data.source.type 必须为 'api'
- * （static 数据随 props 下发，没有刷新通道的意义；非 api 一律 400）。
+ * `{ widgetId: kebab-case, data: WidgetDataBinding, params?: Record<string, unknown> }`
+ * 且 data.source.type 必须为 'api'（static 数据随 props 下发，没有刷新通道的
+ * 意义；非 api 一律 400）。params 为联动参数（2026-09-02 v1）：值经
+ * applyBindingParams 替换 binding 的 `{{param}}` 模板。
  */
-export function parseRefreshBody(text: string): { widgetId: string; data: WidgetDataBinding } {
+export function parseRefreshBody(text: string): { widgetId: string; data: WidgetDataBinding; params?: Record<string, unknown> | undefined } {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -99,7 +101,14 @@ export function parseRefreshBody(text: string): { widgetId: string; data: Widget
   if (sourceType !== 'api') {
     throw new RefreshRequestError(`refresh request for widget "${widgetId}" only supports api data sources; got ${JSON.stringify(sourceType)}`)
   }
-  return { widgetId, data: data as WidgetDataBinding }
+  let params: Record<string, unknown> | undefined
+  if (record.params !== undefined) {
+    if (typeof record.params !== 'object' || record.params === null || Array.isArray(record.params)) {
+      throw new RefreshRequestError(`refresh request params for widget "${widgetId}" must be an object of parameter values`)
+    }
+    params = record.params as Record<string, unknown>
+  }
+  return { widgetId, data: data as WidgetDataBinding, params }
 }
 
 /** 流式读取请求体，超过 maxBytes 立即中止并抛 413（不缓冲超限数据） */
@@ -125,8 +134,10 @@ export async function readRequestBody(req: IncomingMessage, maxBytes = MAX_REFRE
  * ctx 透传 fetchFn/signal 注入 seam（测试不真联网）。
  */
 export async function handleRefreshRequest(bodyText: string, ctx: ResolveWidgetDataContext = {}): Promise<RefreshHandleResult> {
-  const { widgetId, data } = parseRefreshBody(bodyText)
-  const source = data.source as Extract<WidgetDataBinding['source'], { type: 'api' }> & { credentialRef?: unknown }
+  const { widgetId, data, params } = parseRefreshBody(bodyText)
+  // 联动参数（v1）：binding 声明了 params 模板时替换（未提供值的变量 → 空串）
+  const binding = params !== undefined ? applyBindingParams(data, params) : data
+  const source = binding.source as Extract<WidgetDataBinding['source'], { type: 'api' }> & { credentialRef?: unknown }
   // §5.4 / §15 S3：URL 必须 https:// 且不指向环回/内网；请求级校验失败属 400（非业务失败）
   if (source.credentialRef !== undefined) {
     throw new RefreshRequestError('api source credentialRef is a v2 feature and is not supported in v1')
@@ -144,7 +155,7 @@ export async function handleRefreshRequest(bodyText: string, ctx: ResolveWidgetD
     }
   }
   try {
-    const resolved = await resolveWidgetData(data, ctx)
+    const resolved = await resolveWidgetData(binding, ctx)
     return { status: 200, payload: { ok: true, data: resolved } }
   } catch (error) {
     // 业务失败（网络/超时/非 JSON/超限/上游非 2xx）：200 ok:false，client 走 §10 失败语义
