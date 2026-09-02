@@ -265,7 +265,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, backend: AppBac
       domain: String(row.domain ?? ''),
       path: String(row.path ?? ''),
       authType: row.authType === 'key' ? 'key' : 'none',
-      configured: typeof row.keySecret === 'string' && row.keySecret.length > 0,
+      // authType none（本地/免鉴权 API）恒视为已配置——无需凭据
+      configured: row.authType !== 'key' || (typeof row.keySecret === 'string' && row.keySecret.length > 0),
     })).filter(row => row.rid.length > 0).sort((a, b) => a.rid.localeCompare(b.rid))
     json(res, 200, { apis: rows })
     return

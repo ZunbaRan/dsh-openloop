@@ -329,7 +329,9 @@ export function createAppFacade(pb: PbClient): AppFacade {
         .map(record => {
           const row = toApiRow(record)
           const secret = record.keySecret
-          const status: ApiStatusRow = { ...row, configured: typeof secret === 'string' && secret.length > 0 }
+          // authType none（本地/免鉴权 API）恒为已配置——「未配置 key」只对 authType key 有意义
+          const configured = row.authType === 'none' || (typeof secret === 'string' && secret.length > 0)
+          const status: ApiStatusRow = { ...row, configured }
           return status
         })
         .sort((a, b) => a.rid.localeCompare(b.rid))
