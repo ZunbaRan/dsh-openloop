@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dock 左列 APP 行卡片化 · A 方案 demo</title>
+<style>
+  /* ---- dsw 设计令牌（dock 宿主暗色/亮色两套，与 v2-styles.ts fallback 一致） ---- */
+  :root {
+    --dsw-alias-bg-layer-1: #ffffff;
+    --dsw-alias-bg-layer-2: #f6f6f7;
+    --dsw-alias-border-l1: rgba(127,127,127,.12);
+    --dsw-alias-border-l2: rgba(127,127,127,.18);
+    --dsw-alias-label-primary: rgba(0,0,0,.88);
+    --dsw-alias-label-secondary: rgba(0,0,0,.6);
+    --dsw-alias-label-tertiary: rgba(0,0,0,.45);
+    --dsw-alias-label-caption: #888;
+    --dsw-alias-interactive-bg-hover: rgba(127,127,127,.12);
+    --dsw-alias-interactive-bg-active: rgba(127,127,127,.2);
+    --dsw-alias-state-business-primary: #4176e6;
+    --dsw-alias-state-success-primary: #22c55e;
+    --dsw-alias-state-warn-primary: #f59e0b;
+    --dsw-alias-state-error-primary: #d4453a;
+    --page-bg: #ececef;
+  }
+  [data-theme="dark"] {
+    --dsw-alias-bg-layer-1: #232326;
+    --dsw-alias-bg-layer-2: #2a2a2e;
+    --dsw-alias-border-l1: rgba(255,255,255,.09);
+    --dsw-alias-border-l2: rgba(255,255,255,.14);
+    --dsw-alias-label-primary: rgba(255,255,255,.92);
+    --dsw-alias-label-secondary: rgba(255,255,255,.62);
+    --dsw-alias-label-tertiary: rgba(255,255,255,.45);
+    --dsw-alias-label-caption: #8e8e93;
+    --dsw-alias-interactive-bg-hover: rgba(255,255,255,.08);
+    --dsw-alias-interactive-bg-active: rgba(255,255,255,.14);
+    --page-bg: #17171a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+    background: var(--page-bg);
+    color: var(--dsw-alias-label-primary);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 34px 24px 60px;
+    transition: background .25s;
+  }
+
+  /* ---- 页头 ---- */
+  .page-head { text-align: center; margin-bottom: 26px; }
+  .page-head h1 { font-size: 17px; font-weight: 600; letter-spacing: .01em; }
+  .page-head p { font-size: 12px; color: var(--dsw-alias-label-caption); margin-top: 6px; }
+  .page-controls { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+  .pc-btn {
+    font-size: 11.5px; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+    font-family: inherit; color: var(--dsw-alias-label-secondary);
+    background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1);
+  }
+  .pc-btn.on { color: var(--dsw-alias-state-business-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 45%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
+
+  /* ---- 并排画板 ---- */
+  .boards { display: flex; gap: 28px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+  .board { display: flex; flex-direction: column; gap: 10px; }
+  .board-label { font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-secondary); display: flex; align-items: center; gap: 7px; }
+  .board-label .tag { font-size: 10px; font-weight: 500; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-caption); }
+
+  /* ---- dock 语境框（只截 col1 + col2 一角） ---- */
+  .dock-frame {
+    display: flex; width: 480px; height: 460px; border-radius: 14px; overflow: hidden;
+    border: 1px solid var(--dsw-alias-border-l1);
+    background: var(--dsw-alias-bg-layer-1);
+    box-shadow: 0 10px 34px rgba(0,0,0,.22);
+  }
+
+  /* ---- d2 现有样式（v2-styles.ts 原样搬运） ---- */
+  .d2-applist { width: 230px; min-width: 160px; flex-shrink: 1; position: relative; border-right: 1px solid var(--dsw-alias-border-l1); display: flex; flex-direction: column; background: var(--dsw-alias-bg-layer-1); min-height: 0; }
+  .d2-applist .d2-col-head { padding: 10px 12px 8px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption); display: flex; align-items: center; justify-content: space-between; }
+  .d2-applist .d2-rows { flex: 1; overflow-y: auto; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .d2-applist .d2-app-row { width: 100%; border: 0; background: none; font-family: inherit; cursor: pointer; }
+  .d2-app-row { display: flex; align-items: center; gap: 9px; padding: 8px 9px; border-radius: 8px; text-align: left; background: none; border: 0; cursor: pointer; }
+  .d2-app-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .d2-app-row.on { background: var(--dsw-alias-interactive-bg-active); }
+  .d2-app-row .d2-meta { min-width: 0; flex: 1; }
+  .d2-app-row .d2-name { display: block; font-size: 12.5px; color: var(--dsw-alias-label-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d2-app-row .d2-sub { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--dsw-alias-label-caption); margin-top: 1px; }
+  .d2-applist .d2-app-row .d2-status { margin-left: auto; flex-shrink: 0; }
+  .d2-badge { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; border: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-tertiary); white-space: nowrap; }
+  .d2-badge.builtin { color: var(--dsw-alias-state-business-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent); }
+  .d2-badge.thirdparty { color: var(--dsw-alias-state-warn-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); }
+  .d2-badge.local { color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, transparent); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent); }
+  .d2-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .d2-dot.ok { background: var(--dsw-alias-state-success-primary); }
+  .d2-dot.warn { background: var(--dsw-alias-state-warn-primary); }
+  .d2-dot.off { background: color-mix(in srgb, var(--dsw-alias-label-caption) 45%, transparent); }
+  .d2-app-icon { width: 28px; height: 28px; flex-shrink: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; border: 1px solid var(--dsw-alias-border-l2); }
+  .d2-app-icon.builtin { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent); color: var(--dsw-alias-state-business-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent); }
+  .d2-app-icon.thirdparty { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent); color: var(--dsw-alias-state-warn-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 35%, transparent); }
+  .d2-app-icon.local { background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent); color: var(--dsw-alias-state-success-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 35%, transparent); }
+
+  /* ---- col2 幽灵占位（示意语境，非本方案对象） ---- */
+  .ghost-col { flex: 1; display: flex; flex-direction: column; padding: 10px 12px; gap: 8px; opacity: .5; }
+  .ghost-col .g-head { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption); }
+  .ghost-line { height: 26px; border-radius: 7px; background: var(--dsw-alias-interactive-bg-hover); }
+  .ghost-line.short { width: 62%; }
+  .ghost-col .g-note { margin-top: auto; font-size: 10px; color: var(--dsw-alias-label-caption); text-align: center; }
+
+  /* ---- A 方案：卡片行（新增样式） ---- */
+  .d2-applist.cards .d2-rows { gap: 6px; padding: 4px 8px 10px; }
+  .d2-app-card {
+    width: 100%; border: 0; background: none; font-family: inherit; cursor: pointer;
+    display: flex; flex-direction: column; gap: 7px; padding: 10px 10px 9px;
+    border-radius: 11px; position: relative; text-align: left;
+    border: 1px solid transparent;
+    transition: background .12s, border-color .12s;
+  }
+  .d2-app-card:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .d2-app-card.on {
+    background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 9%, transparent);
+    border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 32%, transparent);
+  }
+  .d2-app-card.on::before {
+    content: ""; position: absolute; left: -1px; top: 9px; bottom: 9px; width: 3px; border-radius: 3px;
+    background: var(--dsw-alias-state-business-primary);
+  }
+  .d2-app-card .c-head { display: flex; align-items: center; gap: 9px; }
+  .d2-app-card .d2-meta { min-width: 0; flex: 1; }
+  .d2-app-card .d2-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--dsw-alias-label-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .d2-app-card .d2-desc {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+    font-size: 10.5px; line-height: 1.55; color: var(--dsw-alias-label-caption);
+    text-wrap: pretty;
+  }
+  .d2-app-card .c-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px;
+    font-size: 10px; font-weight: 500; letter-spacing: .01em;
+    color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-interactive-bg-hover);
+    white-space: nowrap;
+  }
+  .chip b { font-weight: 600; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
+  .chip.panel { color: color-mix(in srgb, var(--dsw-alias-state-business-primary) 75%, var(--dsw-alias-label-secondary)); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 11%, transparent); }
+  .chip.artifact { color: color-mix(in srgb, #b06ad9 70%, var(--dsw-alias-label-secondary)); background: color-mix(in srgb, #b06ad9 11%, transparent); }
+  .chip.mcpapp { color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 72%, var(--dsw-alias-label-secondary)); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 10%, transparent); }
+  .chip.api { color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-interactive-bg-hover); }
+
+  /* warn 态卡片（server 不可达：desc 换行内提示） */
+  .d2-app-card.tone-warn .d2-desc { color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 68%, var(--dsw-alias-label-caption)); }
+
+  /* ---- 标注 ---- */
+  .annotations { display: flex; flex-direction: column; gap: 6px; width: 230px; }
+  .anno { display: flex; gap: 8px; font-size: 11px; line-height: 1.6; color: var(--dsw-alias-label-secondary); padding: 8px 10px; border-radius: 9px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); }
+  .anno .n { flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 700; color: var(--dsw-alias-state-business-primary); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent); margin-top: 1px; }
+  .anno code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px; color: var(--dsw-alias-label-tertiary); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>dock 左列 APP 行卡片化 · A 方案预期效果</h1>
+  <p>左：现状（只有 rid 计数 + kind 徽标，看不出内容）· 右：A 方案（description 副文本 + 组件类型小标签）· 数据取自真机 registry</p>
+  <div class="page-controls">
+    <button class="pc-btn on" id="themeBtn" type="button">暗色 / 亮色</button>
+    <button class="pc-btn" id="densityBtn" type="button">紧凑模式</button>
+  </div>
+</div>
+
+<div class="boards">
+
+  <!-- ============ 现状 ============ -->
+  <div class="board">
+    <div class="board-label">现状 <span class="tag">d2-app-row</span></div>
+    <div class="dock-frame">
+      <aside class="d2-applist" aria-label="APP 列表现状">
+        <div class="d2-col-head"><span>APP</span><span>5</span></div>
+        <div class="d2-rows">
+          <button type="button" class="d2-app-row on">
+            <span class="d2-app-icon builtin">o</span>
+            <span class="d2-meta">
+              <span class="d2-name">openloop</span>
+              <span class="d2-sub">37 组件 · 3 API <span class="d2-badge builtin">内置</span></span>
+            </span>
+            <span class="d2-status"><span class="d2-dot ok"></span></span>
+          </button>
+          <button type="button" class="d2-app-row">
+            <span class="d2-app-icon local">m</span>
+            <span class="d2-meta">
+              <span class="d2-name">my-sales</span>
+              <span class="d2-sub">2 组件 · 1 API <span class="d2-badge local">自研</span></span>
+            </span>
+            <span class="d2-status"><span class="d2-dot ok"></span></span>
+          </button>
+          <button type="button" class="d2-app-row">
+            <span class="d2-app-icon thirdparty">e</span>
+            <span class="d2-meta">
+              <span class="d2-name">excalidraw</span>
+              <span class="d2-sub">1 组件 <span class="d2-badge thirdparty">第三方</span></span>
+            </span>
+            <span class="d2-status"><span class="d2-dot ok"></span></span>
+          </button>
+          <button type="button" class="d2-app-row">
+            <span class="d2-app-icon thirdparty">t</span>
+            <span class="d2-meta">
+              <span class="d2-name">tldraw</span>
+              <span class="d2-sub">1 组件 <span class="d2-badge thirdparty">第三方</span></span>
+            </span>
+            <span class="d2-status"><span class="d2-dot warn"></span></span>
+          </button>
+          <button type="button" class="d2-app-row">
+            <span class="d2-app-icon thirdparty">f</span>
+            <span class="d2-meta">
+              <span class="d2-name">fixture</span>
+              <span class="d2-sub">1 组件 <span class="d2-badge thirdparty">第三方</span></span>
+            </span>
+            <span class="d2-status"><span class="d2-dot ok"></span></span>
+          </button>
+        </div>
+      </aside>
+      <div class="ghost-col">
+        <div class="g-head">资源列表</div>
+        <div class="ghost-line"></div>
+        <div class="ghost-line short"></div>
+        <div class="ghost-line"></div>
+        <div class="ghost-line"></div>
+        <div class="ghost-line short"></div>
+        <div class="g-note">col2（非本方案对象，示意语境）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ A 方案 ============ -->
+  <div class="board">
+    <div class="board-label">A 方案 · 卡片化 <span class="tag">d2-app-card</span></div>
+    <div class="dock-frame">
+      <aside class="d2-applist cards" aria-label="APP 列表卡片化">
+        <div class="d2-col-head"><span>APP</span><span>5</span></div>
+        <div class="d2-rows" id="cardRows">
+          <button type="button" class="d2-app-card on">
+            <span class="c-head">
+              <span class="d2-app-icon builtin">o</span>
+              <span class="d2-meta"><span class="d2-name">openloop</span></span>
+              <span class="d2-status"><span class="d2-dot ok"></span></span>
+            </span>
+            <span class="d2-desc">系统内置 APP：panels 预设组件与本地后端 API，开箱即用。</span>
+            <span class="c-chips">
+              <span class="chip panel">panel <b>33</b></span>
+              <span class="chip artifact">artifact <b>4</b></span>
+              <span class="chip api">API <b>3</b></span>
+            </span>
+          </button>
+          <button type="button" class="d2-app-card">
+            <span class="c-head">
+              <span class="d2-app-icon local">m</span>
+              <span class="d2-meta"><span class="d2-name">my-sales</span></span>
+              <span class="d2-status"><span class="d2-dot ok"></span></span>
+            </span>
+            <span class="d2-desc">本地自研演示应用。</span>
+            <span class="c-chips">
+              <span class="chip panel">panel <b>2</b></span>
+              <span class="chip api">API <b>1</b></span>
+            </span>
+          </button>
+          <button type="button" class="d2-app-card">
+            <span class="c-head">
+              <span class="d2-app-icon thirdparty">e</span>
+              <span class="d2-meta"><span class="d2-name">excalidraw</span></span>
+              <span class="d2-status"><span class="d2-dot ok"></span></span>
+            </span>
+            <span class="d2-desc">手绘风格白板：create_view 渲染 Excalidraw 元素。</span>
+            <span class="c-chips">
+              <span class="chip mcpapp">mcp-app <b>1</b></span>
+            </span>
+          </button>
+          <button type="button" class="d2-app-card tone-warn">
+            <span class="c-head">
+              <span class="d2-app-icon thirdparty">t</span>
+              <span class="d2-meta"><span class="d2-name">tldraw</span></span>
+              <span class="d2-status"><span class="d2-dot warn"></span></span>
+            </span>
+            <span class="d2-desc">MCP server 不可达——惰性重连中，pin 后 tile 显示可重试错误态。</span>
+            <span class="c-chips">
+              <span class="chip mcpapp">mcp-app <b>1</b></span>
+            </span>
+          </button>
+          <button type="button" class="d2-app-card">
+            <span class="c-head">
+              <span class="d2-app-icon thirdparty">f</span>
+              <span class="d2-meta"><span class="d2-name">fixture</span></span>
+              <span class="d2-status"><span class="d2-dot ok"></span></span>
+            </span>
+            <span class="d2-desc">开发夹具：text fallback 与沙箱 MCP App 同结果渲染。</span>
+            <span class="c-chips">
+              <span class="chip mcpapp">mcp-app <b>1</b></span>
+            </span>
+          </button>
+        </div>
+      </aside>
+      <div class="ghost-col">
+        <div class="g-head">资源列表</div>
+        <div class="ghost-line"></div>
+        <div class="ghost-line short"></div>
+        <div class="ghost-line"></div>
+        <div class="ghost-line"></div>
+        <div class="ghost-line short"></div>
+        <div class="g-note">col2（非本方案对象，示意语境）</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 标注 ============ -->
+  <div class="board">
+    <div class="board-label">变化点</div>
+    <div class="annotations">
+      <div class="anno"><span class="n">1</span><span>description 副文本（2 行截断）——APP 是什么一眼可读；warn 态换成连接提示文案</span></div>
+      <div class="anno"><span class="n">2</span><span>组件类型小标签 <code>panel 33 · artifact 4 · API 3</code>（只显示非零项，替代原来干巴巴的「37 组件」总数）</span></div>
+      <div class="anno"><span class="n">3</span><span>选中态升级：左缘 3px 强调条 + 描边（对齐 col2 资源行的选中语言）</span></div>
+      <div class="anno"><span class="n">4</span><span>保留：图标 / 名称 / 状态点 / kind 配色体系 / 230px 列宽与缩略模式（缩略回 48px 图标条不变）</span></div>
+      <div class="anno"><span class="n">5</span><span>高度代价：单行 ~44px → 卡片 ~78px；5 个 APP 总高 ~390px，d2-rows 原生滚动兜底</span></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.getElementById('themeBtn').addEventListener('click', function () {
+    var root = document.documentElement
+    root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'
+  })
+  document.getElementById('densityBtn').addEventListener('click', function () {
+    this.classList.toggle('on')
+    var rows = document.getElementById('cardRows')
+    rows.querySelectorAll('.d2-app-card').forEach(function (card) {
+      card.style.padding = card.style.padding ? '' : '7px 10px 6px'
+      card.style.gap = card.style.gap ? '' : '4px'
+      card.querySelector('.d2-desc').style.display = card.querySelector('.d2-desc').style.display === 'none' ? '' : 'none'
+    })
+  })
+</script>
+</body>
+</html>

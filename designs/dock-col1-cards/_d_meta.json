@@ -1,0 +1,13 @@
+{
+  "project": "dock-col1-cards",
+  "description": "dock 左列 APP 行卡片化 A 方案静态 demo（现状 vs 卡片化对比），2026-09-02 用户拍板暂不实施，保留待办与原型",
+  "createdAt": "2026-09-02",
+  "status": "deferred",
+  "deliverables": [
+    {
+      "file": "col1-cards-demo.html",
+      "kind": "ui-demo",
+      "notes": "并排对比 + 变化点标注；暗/亮主题切换 + 紧凑模式开关；样式词汇取自 packages/dock/src/client/v2-styles.ts，数据取自真机 /openloop/app/registry"
+    }
+  ]
+}

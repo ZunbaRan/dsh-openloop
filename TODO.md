@@ -32,6 +32,11 @@
 
 ## 低优先 / 观察池
 
+- [ ] **dock 左列 APP 行卡片化**（A 方案 demo 已出，2026-09-02 用户拍板：暂不实施，保留待办与原型）：
+  - 原型：`designs/dock-col1-cards/col1-cards-demo.html`（现状 vs 卡片化并排对比 + 变化点标注，样式词汇取自 v2-styles.ts，数据取自真机 registry）
+  - 方案要点：description 副文本（2 行截断）+ 组件类型小标签（panel/artifact/mcp-app/API 只显示非零项）；选中态升级为左缘强调条 + 描边；warn 态 desc 位显示连接提示；保留图标/名称/状态点/kind 配色/230px 列宽/缩略模式
+  - 实现落点：`packages/dock/src/client/AppListPanel.tsx` col1 行渲染 + `v2-styles.ts` 新增 ~40 行样式，dock 单包 bump
+  - 触发条件：左列「看不出内容」的痛点再次被用户/演示提出，或做北极星 demo 录制前打磨 UI 时一并做
 - [ ] MCP 设置页行级「测试」就地结果
 - [ ] PocketBase 升级流程（pin v0.39.10；升级需重验 superuser CLI / collections API 形态）
 - [ ] dsh-app schema migration 机制（真实演进需求出现再做）
