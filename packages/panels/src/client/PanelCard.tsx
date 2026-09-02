@@ -144,15 +144,19 @@ export function PanelSurface({ meta, relParams }: { meta: PanelMeta; relParams?:
     const rowEl = (event.target as HTMLElement).closest('tr[data-openloop-row-index]')
     if (!rowEl) return
     const index = Number((rowEl as HTMLElement).dataset['openloopRowIndex'])
-    // 行数据：从首个数组形态的 resolved 快照取（data-table rows 注入路径）
-    const rowsSource = Object.values(resolved).find(v => Array.isArray(v))
+    // 行数据：api 路径从 resolved 快照取；static 路径从 preset props.rows 取
+    const rowsFromData = Object.values(resolved).find(v => Array.isArray(v))
+    const rowsFromProps = panel.widgets
+      .map(w => w.source.type === 'preset' ? (w.source.props as Record<string, unknown> | undefined)?.rows : undefined)
+      .find(v => Array.isArray(v))
+    const rowsSource = rowsFromData ?? rowsFromProps
     const row = Array.isArray(rowsSource) ? rowsSource[index] : undefined
-    if (row === undefined) return
+    if (row === undefined || typeof row !== 'object') return
     for (const decl of emits) {
       const payload = evalPayloadTemplate(decl.payload, row, { resolved })
       dispatchRelEvent(decl.event, payload)
     }
-  }, [emits, resolved])
+  }, [emits, resolved, panel.widgets])
 
   const containerStyle: CSSProperties = isGrid
     ? { display: 'grid', gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gap: 12, padding: 12, alignItems: 'start' }

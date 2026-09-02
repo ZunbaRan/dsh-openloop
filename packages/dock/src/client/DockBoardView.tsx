@@ -112,7 +112,22 @@ export function sourceIdOf(source: DockTileSource): string | null {
   return base.length > 0 ? `openloop:${base}` : null
 }
 
-function TileChrome({ tile, onRemove, onAlias, children }: { tile: DockTile; onRemove: () => void; onAlias: (alias: string | null) => void; children: ReactNode }): ReactNode {
+/** 联动 v1（hover 亮灯）：tile 的 relations 事件集合（panel tile 才有） */
+function tileRelationSets(tile: DockTile): { emits: Set<string>; consumes: Set<string> } | undefined {
+  if (tile.source.kind !== 'panel') return undefined
+  const panels = getPanelsClient()
+  if (!panels) return undefined
+  const meta = tile.source.meta as { panel?: Record<string, unknown> } | null
+  if (!meta?.panel) return undefined
+  const rels = panels.parseRelations(meta.panel.relations)
+  if (!rels) return undefined
+  return {
+    emits: new Set((rels.emits ?? []).map(e => e.event)),
+    consumes: new Set((rels.consumes ?? []).map(c => c.event)),
+  }
+}
+
+function TileChrome({ tile, relTone, onRemove, onAlias, children }: { tile: DockTile; relTone?: 'glow' | 'dim' | undefined; onRemove: () => void; onAlias: (alias: string | null) => void; children: ReactNode }): ReactNode {
   const [editing, setEditing] = useState(false)
   const displayTitle = tile.alias ?? tile.title
   const sourceId = sourceIdOf(tile.source)
@@ -135,6 +150,14 @@ function TileChrome({ tile, onRemove, onAlias, children }: { tile: DockTile; onR
         border: '1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))',
         background: 'var(--dsw-alias-bg-layer-1, #fff)',
         overflow: 'hidden',
+        transition: 'box-shadow .18s, border-color .18s, opacity .18s',
+        ...(relTone === 'glow'
+          ? {
+              borderColor: 'rgba(176,106,217,.65)',
+              boxShadow: '0 0 0 3px rgba(176,106,217,.22), 0 4px 18px rgba(0,0,0,.18)',
+            }
+          : {}),
+        ...(relTone === 'dim' ? { opacity: 0.45 } : {}),
       }}
     >
       <div
@@ -273,6 +296,20 @@ export function DockBoardView(): ReactNode {
 
   const [editingName, setEditingName] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
+  // 联动 v1（hover 亮灯，决策 C）：hover 某 tile → 关联 tile 紫框亮起，无关 tile 降透明
+  const [hoveredTileId, setHoveredTileId] = useState<string | null>(null)
+  const relToneOfTile = (tileId: string): 'glow' | 'dim' | undefined => {
+    if (hoveredTileId === null) return undefined
+    if (tileId === hoveredTileId) return 'glow'
+    const hovered = tiles.find(t => t.tileId === hoveredTileId)
+    const current = tiles.find(t => t.tileId === tileId)
+    if (!hovered || !current) return undefined
+    const h = tileRelationSets(hovered)
+    const c = tileRelationSets(current)
+    if (!h || !c) return 'dim'
+    const linked = [...h.emits].some(e => c.consumes.has(e)) || [...c.emits].some(e => h.consumes.has(e))
+    return linked ? 'glow' : 'dim'
+  }
   // 两步确认 3 秒未确认自动复位（替代原生 confirm 弹窗）
   useEffect(() => {
     if (!confirmingClear) return
@@ -352,9 +389,14 @@ export function DockBoardView(): ReactNode {
                     onLayoutChange={items => dockStore.applyLayout(items)}
                   >
                     {tiles.map(tile => (
-                      <div key={tile.tileId}>
+                      <div
+                        key={tile.tileId}
+                        onMouseEnter={() => setHoveredTileId(tile.tileId)}
+                        onMouseLeave={() => setHoveredTileId(prev => prev === tile.tileId ? null : prev)}
+                      >
                         <TileChrome
                           tile={tile}
+                          relTone={relToneOfTile(tile.tileId)}
                           onRemove={() => dockStore.remove(tile.tileId)}
                           onAlias={alias => dockStore.setTileAlias(tile.tileId, alias)}
                         >

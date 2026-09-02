@@ -79,12 +79,6 @@ export function RelFloatLayer(): ReactNode {
   const closedKeysRef = useRef(new Set<string>())
   const zIndexRef = useRef(zSeq)
 
-  // 注入 panels 侧 rid 解析器（RelLinkedSlot 对话流联动共用同一 registry）
-  useEffect(() => {
-    const panels = getPanelsClient()
-    panels?.setRelPanelResolver(registryPanelResolver)
-  }, [])
-
   useEffect(() => {
     const panels = getPanelsClient()
     if (!panels) return

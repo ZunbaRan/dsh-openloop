@@ -19,7 +19,8 @@ import { DockHost, clampDockWidth, DOCK_MIN_WIDTH, probeDockRightEdge } from './
 import { DockBoardView, sourceIdOf } from './DockBoardView.tsx'
 import { RailNav, RAIL_HUB_WIDTH, RAIL_ICON_WIDTH, type DockTab } from './RailNav.tsx'
 import { AppsTab } from './AppListPanel.tsx'
-import { listBuiltinApps, buildTileSourceForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, setRegistryCache, type AppDescriptor } from './app-registry.ts'
+import { listBuiltinApps, buildTileSourceForComponent, fetchRemoteApps, fetchRegistryRev, mergeApps, setRegistryCache, lookupRegistryComponent, type AppDescriptor } from './app-registry.ts'
+import { getPanelsClient } from './openloop-clients.ts'
 import { syncBackend, revalidateBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
 import { dockStore, type DockTile } from './store.ts'
@@ -405,6 +406,14 @@ export function apply(ctx: Context): void {
   // 且渲染时读取天然支持时序（晚渲染的卡片拿到最新状态））
   ctx.provide('openloop-dock/client', service)
   ;(window as unknown as Record<string, unknown>).__openloopDockService = service
+  // 联动 v1：注入 rid → PanelDefinition 解析器（panels RelLinkedSlot 对话流联动
+  // 共用 dock 的 registry 缓存；惰性查询——registry 拉取后自然生效）
+  const panelsClient = getPanelsClient()
+  panelsClient?.setRelPanelResolver((rid) => {
+    const comp = lookupRegistryComponent(rid)
+    if (!comp) return undefined
+    return panelsClient.panelDefinitionFromEntry(comp.entry)
+  })
   // 自主渲染（better-sidebar 同款模式）：自建 host + createRoot，
   // cordis 生命周期负责 dispose。
   ctx.effect(() => {

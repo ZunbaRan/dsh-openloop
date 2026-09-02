@@ -8186,7 +8186,7 @@ function validateApiSource(url, widgetId) {
 	if (parsed.protocol !== "https:") throw new Error(`panel widget "${widgetId}" api source URL "${url}" must use https:// (insecure http:// is rejected in v1)`);
 	if (isForbiddenApiUrl(url)) throw new Error(`panel widget "${widgetId}" api source URL "${url}" points to a loopback/private address, which is forbidden (SSRF guard); use a public https:// endpoint`);
 }
-/** 校验单个 widget 的数据绑定（§5.2 / §5.4） */
+/** 校验单个 widget 的数据绑定（§5.2 / §5.4；联动 v1 params） */
 function validateDataBinding(widgetId, data) {
 	if (typeof data !== "object" || data === null) throw new Error(`panel widget "${widgetId}" data binding must be an object`);
 	const binding = data;
@@ -8195,6 +8195,10 @@ function validateDataBinding(widgetId, data) {
 	const sourceRecord = source;
 	if (sourceRecord.pick !== void 0) throw new Error(`panel widget "${widgetId}" data binding: pick belongs on the binding (sibling of source), not inside source — move it to data.pick`);
 	if (binding.pick !== void 0 && typeof binding.pick !== "string") throw new Error(`panel widget "${widgetId}" data binding pick must be a string like "items[0].total"`);
+	if (binding.params !== void 0) {
+		if (typeof binding.params !== "object" || binding.params === null || Array.isArray(binding.params)) throw new Error(`panel widget "${widgetId}" data binding params must be an object like { "leadId": "" } declaring template variables`);
+		for (const [key, value] of Object.entries(binding.params)) if (typeof value !== "string") throw new Error(`panel widget "${widgetId}" data binding params.${key} must be a string (declare the template variable name; runtime values come from linkage events)`);
+	}
 	if (sourceRecord.type === "api") {
 		const api = sourceRecord;
 		if (typeof api.url !== "string" || api.url.length === 0) throw new Error(`panel widget "${widgetId}" api source requires a non-empty url string`);
@@ -8204,6 +8208,37 @@ function validateDataBinding(widgetId, data) {
 		}
 		validateApiSource(api.url, widgetId);
 	} else if (sourceRecord.type !== "static") throw new Error(`panel widget "${widgetId}" data binding source.type must be "static" or "api"`);
+}
+/**
+* 校验页面关联声明（联动 v1）：emits（event/payload/target/note）与
+* consumes（event/param/note）。事件名要求 `{app}:{entity}:{action}` 三段命名空间。
+*/
+function validateRelations(panelId, relations) {
+	if (typeof relations !== "object" || relations === null || Array.isArray(relations)) throw new Error(`panel "${panelId}" relations must be an object { emits?, consumes? }`);
+	const record = relations;
+	const EVENT_RE = /^[a-z0-9][a-z0-9-]*:[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/;
+	if (record.emits !== void 0) {
+		if (!Array.isArray(record.emits)) throw new Error(`panel "${panelId}" relations.emits must be an array`);
+		for (const item of record.emits) {
+			if (typeof item !== "object" || item === null) throw new Error(`panel "${panelId}" relations.emits entries must be objects like { event, payload?, target?, note? }`);
+			const decl = item;
+			if (typeof decl.event !== "string" || !EVENT_RE.test(decl.event)) throw new Error(`panel "${panelId}" relations.emits[].event must follow the {app}:{entity}:{action} namespace, e.g. "my-crm:lead:selected"`);
+			if (decl.payload !== void 0 && (typeof decl.payload !== "object" || decl.payload === null || Array.isArray(decl.payload))) throw new Error(`panel "${panelId}" relations.emits payload for "${decl.event}" must be an object; use "$row.<field>" values to reference the clicked row`);
+			if (decl.target !== void 0) {
+				const target = decl.target;
+				if (typeof target !== "object" || target === null || typeof target.rid !== "string" || target.rid.length === 0) throw new Error(`panel "${panelId}" relations.emits target for "${decl.event}" must be { rid: "<target component rid>" }`);
+			}
+		}
+	}
+	if (record.consumes !== void 0) {
+		if (!Array.isArray(record.consumes)) throw new Error(`panel "${panelId}" relations.consumes must be an array`);
+		for (const item of record.consumes) {
+			if (typeof item !== "object" || item === null) throw new Error(`panel "${panelId}" relations.consumes entries must be objects like { event, param, note? }`);
+			const decl = item;
+			if (typeof decl.event !== "string" || !EVENT_RE.test(decl.event)) throw new Error(`panel "${panelId}" relations.consumes[].event must follow the {app}:{entity}:{action} namespace, e.g. "my-crm:lead:selected"`);
+			if (typeof decl.param !== "string" || decl.param.length === 0) throw new Error(`panel "${panelId}" relations.consumes param for "${decl.event}" must be the payload field name mapped to this panel's data parameter, e.g. "leadId"`);
+		}
+	}
 }
 /** 校验单个 widget（§5.4 widget 级规则） */
 function validateWidget(widget, widgetId, panelId, depth = 0) {
@@ -8283,6 +8318,7 @@ function validatePanel(input) {
 		if (layout.mode !== void 0 && layout.mode !== "stack" && layout.mode !== "grid") throw new Error("panel layout.mode must be \"stack\" or \"grid\"");
 		if (layout.columns !== void 0 && layout.columns !== 1 && layout.columns !== 2 && layout.columns !== 3) throw new Error("panel layout.columns must be 1, 2, or 3");
 	}
+	if (panel.relations !== void 0) validateRelations(panel.id, panel.relations);
 	for (const widget of panel.widgets) validateWidget(widget, widget.id, panel.id);
 }
 //#endregion
@@ -30757,4 +30793,4 @@ function createPanelExecute(tool, ctx) {
 	};
 }
 //#endregion
-export { CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, PackRegistry, PanelsPackAssets, apply, applyBindingParams, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel };
+export { CUSTOM_CODE_MAX_BYTES, Config, DEFAULT_TIMEOUT_MS, HOST_LANE_RUNTIME, MAX_RESPONSE_BYTES, MAX_TIMEOUT_MS, PACKS_ROUTE, PACK_ENTRY_VIRTUAL, PACK_NAME_RE, PACK_RUNTIMES, PACK_STYLES_VIRTUAL, PANELS_SUBDIR, PANEL_OUTPUT_SCHEMA, PANEL_PARAMETERS, PANEL_TOOL, PLUGIN_VERSION, PRESET_KINDS, PackRegistry, PanelsPackAssets, apply, applyBindingParams, buildApiUrl, coercePanelArg, createCtxPanelFs, createMemoryPanelFs, createPanelExecute, createPanelStore, definePanelTool, forbiddenCustomCodeTerm, getPack, hasPack, inject, isForbiddenApiUrl, isPackComponent, isSafePackRelPath, listPacks, listPanels, loadPackComponent, loadPanel, looksLikeJsonContentType, name, nodePackFs, normalizeTimeoutMs, packEntryUrl, packLaneFor, packRegistry, panelsSkillProviders, parseJsonResponse, parsePackManifest, parsePickPath, pickValue, readBodyBytes, registerPack, resetPackRegistry, resolvePanelData, resolveWidgetData, savePanel, scanPacksDir, toAntdThemeTokens, toMuiThemeTokens, validateApiUrl, validatePanel, validateRelations };

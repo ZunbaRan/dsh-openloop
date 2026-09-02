@@ -5841,9 +5841,6 @@ window.__ModuleLoader__.load({
 			const closedKeysRef = (0, react.useRef)(/* @__PURE__ */ new Set());
 			const zIndexRef = (0, react.useRef)(zSeq);
 			(0, react.useEffect)(() => {
-				getPanelsClient()?.setRelPanelResolver(registryPanelResolver);
-			}, []);
-			(0, react.useEffect)(() => {
 				const panels = getPanelsClient();
 				if (!panels) return;
 				const consumesIndex = buildConsumesIndex();
@@ -6161,7 +6158,21 @@ window.__ModuleLoader__.load({
 			const base = path.split("/").pop() ?? path;
 			return base.length > 0 ? `openloop:${base}` : null;
 		}
-		function TileChrome({ tile, onRemove, onAlias, children }) {
+		/** 联动 v1（hover 亮灯）：tile 的 relations 事件集合（panel tile 才有） */
+		function tileRelationSets(tile) {
+			if (tile.source.kind !== "panel") return void 0;
+			const panels = getPanelsClient();
+			if (!panels) return void 0;
+			const meta = tile.source.meta;
+			if (!meta?.panel) return void 0;
+			const rels = panels.parseRelations(meta.panel.relations);
+			if (!rels) return void 0;
+			return {
+				emits: new Set((rels.emits ?? []).map((e) => e.event)),
+				consumes: new Set((rels.consumes ?? []).map((c) => c.event))
+			};
+		}
+		function TileChrome({ tile, relTone, onRemove, onAlias, children }) {
 			const [editing, setEditing] = (0, react.useState)(false);
 			const displayTitle = tile.alias ?? tile.title;
 			const sourceId = sourceIdOf(tile.source);
@@ -6184,7 +6195,13 @@ window.__ModuleLoader__.load({
 					borderRadius: 10,
 					border: "1px solid var(--dsw-alias-border-l2, rgba(0,0,0,.08))",
 					background: "var(--dsw-alias-bg-layer-1, #fff)",
-					overflow: "hidden"
+					overflow: "hidden",
+					transition: "box-shadow .18s, border-color .18s, opacity .18s",
+					...relTone === "glow" ? {
+						borderColor: "rgba(176,106,217,.65)",
+						boxShadow: "0 0 0 3px rgba(176,106,217,.22), 0 4px 18px rgba(0,0,0,.18)"
+					} : {},
+					...relTone === "dim" ? { opacity: .45 } : {}
 				},
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -6351,6 +6368,18 @@ window.__ModuleLoader__.load({
 			const layout = toRglLayout(tiles);
 			const [editingName, setEditingName] = (0, react.useState)(false);
 			const [confirmingClear, setConfirmingClear] = (0, react.useState)(false);
+			const [hoveredTileId, setHoveredTileId] = (0, react.useState)(null);
+			const relToneOfTile = (tileId) => {
+				if (hoveredTileId === null) return void 0;
+				if (tileId === hoveredTileId) return "glow";
+				const hovered = tiles.find((t) => t.tileId === hoveredTileId);
+				const current = tiles.find((t) => t.tileId === tileId);
+				if (!hovered || !current) return void 0;
+				const h = tileRelationSets(hovered);
+				const c = tileRelationSets(current);
+				if (!h || !c) return "dim";
+				return [...h.emits].some((e) => c.consumes.has(e)) || [...c.emits].some((e) => h.consumes.has(e)) ? "glow" : "dim";
+			};
 			(0, react.useEffect)(() => {
 				if (!confirmingClear) return;
 				const timer = setTimeout(() => setConfirmingClear(false), 3e3);
@@ -6473,15 +6502,20 @@ window.__ModuleLoader__.load({
 									]
 								},
 								onLayoutChange: (items) => dockStore.applyLayout(items),
-								children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
-									tile,
-									onRemove: () => dockStore.remove(tile.tileId),
-									onAlias: (alias) => dockStore.setTileAlias(tile.tileId, alias),
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
-										tileId: tile.tileId,
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+								children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									onMouseEnter: () => setHoveredTileId(tile.tileId),
+									onMouseLeave: () => setHoveredTileId((prev) => prev === tile.tileId ? null : prev),
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
+										tile,
+										relTone: relToneOfTile(tile.tileId),
+										onRemove: () => dockStore.remove(tile.tileId),
+										onAlias: (alias) => dockStore.setTileAlias(tile.tileId, alias),
+										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileErrorBoundary, {
+											tileId: tile.tileId,
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileContent, { tile })
+										})
 									})
-								}) }, tile.tileId))
+								}, tile.tileId))
 							}) : null]
 						})
 					})
@@ -8563,6 +8597,12 @@ window.__ModuleLoader__.load({
 			};
 			ctx.provide("openloop-dock/client", service);
 			window.__openloopDockService = service;
+			const panelsClient = getPanelsClient();
+			panelsClient?.setRelPanelResolver((rid) => {
+				const comp = lookupRegistryComponent(rid);
+				if (!comp) return void 0;
+				return panelsClient.panelDefinitionFromEntry(comp.entry);
+			});
 			ctx.effect(() => {
 				const host = document.createElement("div");
 				host.setAttribute("data-openloop-dock-root", "");

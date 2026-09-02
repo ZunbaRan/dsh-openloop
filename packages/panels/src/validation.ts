@@ -76,7 +76,7 @@ function validateApiSource(url: string, widgetId: string): void {
   }
 }
 
-/** 校验单个 widget 的数据绑定（§5.2 / §5.4） */
+/** 校验单个 widget 的数据绑定（§5.2 / §5.4；联动 v1 params） */
 function validateDataBinding(widgetId: string, data: unknown): void {
   if (typeof data !== 'object' || data === null) {
     throw new Error(`panel widget "${widgetId}" data binding must be an object`)
@@ -93,6 +93,17 @@ function validateDataBinding(widgetId: string, data: unknown): void {
   }
   if (binding.pick !== undefined && typeof binding.pick !== 'string') {
     throw new Error(`panel widget "${widgetId}" data binding pick must be a string like "items[0].total"`)
+  }
+  // 联动 v1：params 声明（{{param}} 模板变量 → 对象 of string）
+  if (binding.params !== undefined) {
+    if (typeof binding.params !== 'object' || binding.params === null || Array.isArray(binding.params)) {
+      throw new Error(`panel widget "${widgetId}" data binding params must be an object like { "leadId": "" } declaring template variables`)
+    }
+    for (const [key, value] of Object.entries(binding.params as Record<string, unknown>)) {
+      if (typeof value !== 'string') {
+        throw new Error(`panel widget "${widgetId}" data binding params.${key} must be a string (declare the template variable name; runtime values come from linkage events)`)
+      }
+    }
   }
   if (sourceRecord.type === 'api') {
     const api = sourceRecord as { url?: unknown; timeoutMs?: unknown; headers?: unknown }
@@ -112,6 +123,54 @@ function validateDataBinding(widgetId: string, data: unknown): void {
     validateApiSource(api.url, widgetId)
   } else if (sourceRecord.type !== 'static') {
     throw new Error(`panel widget "${widgetId}" data binding source.type must be "static" or "api"`)
+  }
+}
+
+/**
+ * 校验页面关联声明（联动 v1）：emits（event/payload/target/note）与
+ * consumes（event/param/note）。事件名要求 `{app}:{entity}:{action}` 三段命名空间。
+ */
+export function validateRelations(panelId: string, relations: unknown): void {
+  if (typeof relations !== 'object' || relations === null || Array.isArray(relations)) {
+    throw new Error(`panel "${panelId}" relations must be an object { emits?, consumes? }`)
+  }
+  const record = relations as Record<string, unknown>
+  const EVENT_RE = /^[a-z0-9][a-z0-9-]*:[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/
+  if (record.emits !== undefined) {
+    if (!Array.isArray(record.emits)) throw new Error(`panel "${panelId}" relations.emits must be an array`)
+    for (const item of record.emits) {
+      if (typeof item !== 'object' || item === null) {
+        throw new Error(`panel "${panelId}" relations.emits entries must be objects like { event, payload?, target?, note? }`)
+      }
+      const decl = item as Record<string, unknown>
+      if (typeof decl.event !== 'string' || !EVENT_RE.test(decl.event)) {
+        throw new Error(`panel "${panelId}" relations.emits[].event must follow the {app}:{entity}:{action} namespace, e.g. "my-crm:lead:selected"`)
+      }
+      if (decl.payload !== undefined && (typeof decl.payload !== 'object' || decl.payload === null || Array.isArray(decl.payload))) {
+        throw new Error(`panel "${panelId}" relations.emits payload for "${decl.event}" must be an object; use "$row.<field>" values to reference the clicked row`)
+      }
+      if (decl.target !== undefined) {
+        const target = decl.target as Record<string, unknown> | undefined
+        if (typeof target !== 'object' || target === null || typeof target.rid !== 'string' || target.rid.length === 0) {
+          throw new Error(`panel "${panelId}" relations.emits target for "${decl.event}" must be { rid: "<target component rid>" }`)
+        }
+      }
+    }
+  }
+  if (record.consumes !== undefined) {
+    if (!Array.isArray(record.consumes)) throw new Error(`panel "${panelId}" relations.consumes must be an array`)
+    for (const item of record.consumes) {
+      if (typeof item !== 'object' || item === null) {
+        throw new Error(`panel "${panelId}" relations.consumes entries must be objects like { event, param, note? }`)
+      }
+      const decl = item as Record<string, unknown>
+      if (typeof decl.event !== 'string' || !EVENT_RE.test(decl.event)) {
+        throw new Error(`panel "${panelId}" relations.consumes[].event must follow the {app}:{entity}:{action} namespace, e.g. "my-crm:lead:selected"`)
+      }
+      if (typeof decl.param !== 'string' || decl.param.length === 0) {
+        throw new Error(`panel "${panelId}" relations.consumes param for "${decl.event}" must be the payload field name mapped to this panel's data parameter, e.g. "leadId"`)
+      }
+    }
   }
 }
 
@@ -267,6 +326,10 @@ export function validatePanel(input: unknown): asserts input is PanelDefinition 
     if (layout.columns !== undefined && layout.columns !== 1 && layout.columns !== 2 && layout.columns !== 3) {
       throw new Error('panel layout.columns must be 1, 2, or 3')
     }
+  }
+  // 联动 v1：relations 声明（emits 可触发 / consumes 可响应）
+  if (panel.relations !== undefined) {
+    validateRelations(panel.id as string, panel.relations)
   }
   for (const widget of panel.widgets) {
     validateWidget(widget, (widget as WidgetUnit).id, panel.id as string)

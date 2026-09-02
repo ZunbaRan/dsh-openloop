@@ -8848,14 +8848,20 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 				const rowEl = event.target.closest("tr[data-openloop-row-index]");
 				if (!rowEl) return;
 				const index = Number(rowEl.dataset["openloopRowIndex"]);
-				const rowsSource = Object.values(resolved).find((v) => Array.isArray(v));
+				const rowsFromData = Object.values(resolved).find((v) => Array.isArray(v));
+				const rowsFromProps = panel.widgets.map((w) => w.source.type === "preset" ? w.source.props?.rows : void 0).find((v) => Array.isArray(v));
+				const rowsSource = rowsFromData ?? rowsFromProps;
 				const row = Array.isArray(rowsSource) ? rowsSource[index] : void 0;
-				if (row === void 0) return;
+				if (row === void 0 || typeof row !== "object") return;
 				for (const decl of emits) {
 					const payload = evalPayloadTemplate(decl.payload, row, { resolved });
 					dispatchRelEvent(decl.event, payload);
 				}
-			}, [emits, resolved]);
+			}, [
+				emits,
+				resolved,
+				panel.widgets
+			]);
 			const containerStyle = isGrid ? {
 				display: "grid",
 				gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
