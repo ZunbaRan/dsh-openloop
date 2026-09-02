@@ -64,6 +64,8 @@ interface McpAppResource {
  * 经 callToolUrl 回环自取场景（excalidraw 模式，2026-09-03）。
  */
 interface McpAppInvocationSnapshot {
+  /** 工具调用入参（excalidraw 类 App 的首帧渲染靠 toolInput.elements） */
+  readonly arguments?: JsonObject;
   readonly content: readonly unknown[];
   readonly isError: boolean;
   readonly structuredContent?: JsonObject;
@@ -241,6 +243,7 @@ declare class McpAppGateway {
   register(ctx: Context): void;
   reference(tool: McpToolRecord, result: McpCallResult, options?: {
     readonly record?: boolean;
+    readonly args?: JsonObject;
   }): McpCallResult;
   private prune;
   private invocationKey;
@@ -272,7 +275,7 @@ declare class McpRuntimeService extends Service<McpRuntime> {
     readonly binding?: McpUiBinding;
     readonly hydrateApp?: boolean;
   }): Promise<McpCallResult>;
-  preparePresentation(tool: McpToolRecord, result: McpCallResult): McpCallResult;
+  preparePresentation(tool: McpToolRecord, result: McpCallResult, args?: JsonObject): McpCallResult;
   readAppResource(serverId: string, resourceUri: string, binding?: McpUiBinding, signal?: AbortSignal): Promise<McpAppResource>;
 }
 declare module '@deepseek-ai/cordis' {

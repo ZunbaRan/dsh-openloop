@@ -38,8 +38,8 @@ function outputSchema(): JsonSchemaNode {
   }
 }
 
-function presentationResult(runtime: McpRuntimeService, tool: McpToolRecord, result: Parameters<McpRuntimeService['preparePresentation']>[1]) {
-  return typeof runtime.preparePresentation === 'function' ? runtime.preparePresentation(tool, result) : result
+function presentationResult(runtime: McpRuntimeService, tool: McpToolRecord, result: Parameters<McpRuntimeService['preparePresentation']>[1], args?: Parameters<McpRuntimeService['preparePresentation']>[2]) {
+  return typeof runtime.preparePresentation === 'function' ? runtime.preparePresentation(tool, result, args) : result
 }
 
 function makeDefinition(runtime: McpRuntimeService, tool: McpToolRecord): ToolDefinition {
@@ -55,9 +55,10 @@ function makeDefinition(runtime: McpRuntimeService, tool: McpToolRecord): ToolDe
         const content = Array.isArray(result['content']) ? result['content'] : []
         return [{ type: 'text', text: textFallback(content) }]
       },
-      presentationMeta: (_args, value) => {
+      presentationMeta: (args, value) => {
         const result = isRecord(value) ? value : {}
-        return toPresentation(tool, callName, presentationResult(runtime, tool, result as never)) as never
+        // args 透传：gateway 记录最近一次调用快照供预览/pin 补推（excalidraw 首帧靠 toolInput.elements）
+        return toPresentation(tool, callName, presentationResult(runtime, tool, result as never, isRecord(args) ? args : undefined)) as never
       },
     },
     async execute(args, exec) {
@@ -94,7 +95,7 @@ class CodeDispatchPresentationBridge {
       || !isRecord(value.uiResource)) return
 
     const callName = mcpToolName(tool.serverId, tool.name)
-    const presented = presentationResult(this.runtime, tool, value as never)
+    const presented = presentationResult(this.runtime, tool, value as never, isRecord(exec.arguments) ? exec.arguments : undefined)
     const block = codeDispatchPresentationBlock(String(exec.callId), toPresentation(tool, callName, presented))
     if (!block) return
     while (this.pending.size >= CodeDispatchPresentationBridge.MAX_PENDING) {

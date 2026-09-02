@@ -44,6 +44,9 @@ function parseInvocationSnapshot(value: unknown): McpAppInvocationSnapshot | und
   const snapshot = value as Partial<McpAppInvocationSnapshot>
   if (!Array.isArray(snapshot.content) || typeof snapshot.isError !== 'boolean') return undefined
   return {
+    ...(snapshot.arguments && typeof snapshot.arguments === 'object' && !Array.isArray(snapshot.arguments)
+      ? { arguments: snapshot.arguments }
+      : {}),
     content: snapshot.content,
     isError: snapshot.isError,
     ...(snapshot.structuredContent && typeof snapshot.structuredContent === 'object' && !Array.isArray(snapshot.structuredContent)
@@ -223,12 +226,14 @@ function McpAppSandbox({ callId, label, serverId, toolName, resource: initialRes
       })
       bridgeRef.current = bridge
       bridge.oninitialized = () => {
-        // pin/预览场景无工具调用上下文：补推最近一次真实调用的结果快照，
-        // App（excalidraw 模式）从 structuredContent 取 checkpointId 等句柄后
-        // 经 callToolUrl 回环自取场景渲染；无快照则不推（空画布语义正确）。
+        // pin/预览场景无工具调用上下文：按对话流同序补推最近一次真实调用的
+        // toolInput + toolResult。toolInput 必须推——excalidraw 类 App 的首帧
+        // 渲染靠 toolInput.elements，toolResult 只提供 checkpointId 等存档句柄
+        // （2026-09-02 真机二轮定位）；无快照则不推（空画布语义正确）。
         if (!toolCall) {
           const invocation = resource && 'invocation' in resource ? resource.invocation : undefined
           if (invocation) {
+            if (invocation.arguments) void bridge?.sendToolInput({ arguments: invocation.arguments })
             void bridge?.sendToolResult({
               content: invocation.content as CallToolResult['content'],
               ...(invocation.structuredContent ? { structuredContent: invocation.structuredContent } : {}),

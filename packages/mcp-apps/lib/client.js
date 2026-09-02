@@ -8187,6 +8187,7 @@ container holding the app. Specify either width or maxWidth, and either height o
 			const snapshot = value;
 			if (!Array.isArray(snapshot.content) || typeof snapshot.isError !== "boolean") return void 0;
 			return {
+				...snapshot.arguments && typeof snapshot.arguments === "object" && !Array.isArray(snapshot.arguments) ? { arguments: snapshot.arguments } : {},
 				content: snapshot.content,
 				isError: snapshot.isError,
 				...snapshot.structuredContent && typeof snapshot.structuredContent === "object" && !Array.isArray(snapshot.structuredContent) ? { structuredContent: snapshot.structuredContent } : {},
@@ -8348,12 +8349,15 @@ container holding the app. Specify either width or maxWidth, and either height o
 					bridge.oninitialized = () => {
 						if (!toolCall) {
 							const invocation = resource && "invocation" in resource ? resource.invocation : void 0;
-							if (invocation) bridge?.sendToolResult({
-								content: invocation.content,
-								...invocation.structuredContent ? { structuredContent: invocation.structuredContent } : {},
-								...invocation._meta ? { _meta: invocation._meta } : {},
-								...invocation.isError ? { isError: true } : {}
-							});
+							if (invocation) {
+								if (invocation.arguments) bridge?.sendToolInput({ arguments: invocation.arguments });
+								bridge?.sendToolResult({
+									content: invocation.content,
+									...invocation.structuredContent ? { structuredContent: invocation.structuredContent } : {},
+									...invocation._meta ? { _meta: invocation._meta } : {},
+									...invocation.isError ? { isError: true } : {}
+								});
+							}
 							return;
 						}
 						bridge?.sendToolInput({ arguments: toolCall.arguments });

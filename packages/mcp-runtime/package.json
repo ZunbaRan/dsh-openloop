@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-mcp-runtime",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "One shared MCP connection per server for the OpenLoop DSH MCP bundles.",
   "private": true,
   "type": "module",

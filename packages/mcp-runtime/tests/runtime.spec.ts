@@ -221,11 +221,12 @@ describe('McpRuntime', () => {
     // 从未调用过：无快照
     expect(gateway.lastInvocation('fixture', binding.resourceUri)).toBeUndefined()
 
-    // 真实调用（对话流投影路径 = preparePresentation → reference）
-    const result = await runtime.callTool('fixture', 'mcp_app_tool', {}, { binding })
-    const referenced = gateway.reference(tool, result)
+    // 真实调用（对话流投影路径 = preparePresentation → reference，args 随调用透传）
+    const result = await runtime.callTool('fixture', 'mcp_app_tool', { label: 'demo' }, { binding })
+    const referenced = gateway.reference(tool, result, { args: { label: 'demo' } })
     expect(referenced.uiResource).toMatchObject({ serverId: 'fixture', resourceUri: binding.resourceUri })
     expect(gateway.lastInvocation('fixture', binding.resourceUri)).toEqual({
+      arguments: { label: 'demo' },
       content: [{ type: 'text', text: 'fallback' }],
       isError: false,
       structuredContent: { ok: true },

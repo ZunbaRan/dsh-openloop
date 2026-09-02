@@ -104,8 +104,8 @@ function outputSchema() {
 		}
 	};
 }
-function presentationResult(runtime, tool, result) {
-	return typeof runtime.preparePresentation === "function" ? runtime.preparePresentation(tool, result) : result;
+function presentationResult(runtime, tool, result, args) {
+	return typeof runtime.preparePresentation === "function" ? runtime.preparePresentation(tool, result, args) : result;
 }
 function makeDefinition(runtime, tool) {
 	const callName = mcpToolName(tool.serverId, tool.name);
@@ -122,9 +122,9 @@ function makeDefinition(runtime, tool) {
 					text: textFallback(Array.isArray(result["content"]) ? result["content"] : [])
 				}];
 			},
-			presentationMeta: (_args, value) => {
+			presentationMeta: (args, value) => {
 				const result = isRecord(value) ? value : {};
-				return toPresentation(tool, callName, presentationResult(runtime, tool, result));
+				return toPresentation(tool, callName, presentationResult(runtime, tool, result, isRecord(args) ? args : void 0));
 			}
 		},
 		async execute(args, exec) {
@@ -155,7 +155,7 @@ var CodeDispatchPresentationBridge = class CodeDispatchPresentationBridge {
 		const value = result.value;
 		if (!isRecord(value) || value.serverId !== tool.serverId || value.toolName !== tool.name || value.isError !== false || !Array.isArray(value.content) || !isRecord(value.uiResource)) return;
 		const callName = mcpToolName(tool.serverId, tool.name);
-		const presented = presentationResult(this.runtime, tool, value);
+		const presented = presentationResult(this.runtime, tool, value, isRecord(exec.arguments) ? exec.arguments : void 0);
 		const block = codeDispatchPresentationBlock(String(exec.callId), toPresentation(tool, callName, presented));
 		if (!block) return;
 		while (this.pending.size >= CodeDispatchPresentationBridge.MAX_PENDING) {

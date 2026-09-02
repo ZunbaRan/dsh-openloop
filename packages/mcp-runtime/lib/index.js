@@ -885,6 +885,7 @@ var McpAppGateway = class {
 		this.prune();
 		if (options.record !== false) {
 			this.invocations.set(this.invocationKey(tool.serverId, tool.ui.resourceUri), {
+				...options.args !== void 0 ? { arguments: options.args } : {},
 				content: result.content,
 				isError: result.isError,
 				...result.structuredContent ? { structuredContent: result.structuredContent } : {},
@@ -939,8 +940,9 @@ var McpAppGateway = class {
 			this.invocations.delete(key);
 			return;
 		}
-		const { content, isError, structuredContent, _meta } = record;
+		const { content, isError, structuredContent, _meta, arguments: args } = record;
 		return {
+			...args !== void 0 ? { arguments: args } : {},
 			content,
 			isError,
 			...structuredContent ? { structuredContent } : {},
@@ -1100,8 +1102,8 @@ var McpRuntimeService = class extends Service {
 	callTool(serverId, toolName, args, options = {}) {
 		return this.runtime.callTool(serverId, toolName, args, options);
 	}
-	preparePresentation(tool, result) {
-		return this.appGateway?.reference(tool, result) ?? result;
+	preparePresentation(tool, result, args) {
+		return this.appGateway?.reference(tool, result, args !== void 0 ? { args } : {}) ?? result;
 	}
 	readAppResource(serverId, resourceUri, binding, signal) {
 		return this.runtime.readAppResource(serverId, resourceUri, binding, signal);

@@ -531,14 +531,17 @@ export class McpAppGateway {
     }, 'mcp-runtime: App authority store')
   }
 
-  reference(tool: McpToolRecord, result: McpCallResult, options: { readonly record?: boolean } = {}): McpCallResult {
+  reference(tool: McpToolRecord, result: McpCallResult, options: { readonly record?: boolean; readonly args?: JsonObject } = {}): McpCallResult {
     const resource = result.uiResource
     if (!resource || !('html' in resource) || !tool.ui || resource.resourceUri !== tool.ui.resourceUri) return result
     this.prune()
     // 记录最近一次真实调用的结果快照（refresh 合成调用必须传 record:false，
     // 否则空结果会覆盖快照——预览/pin 视图将永远拿不到 checkpointId）。
+    // arguments 必须记录：excalidraw 类 App 的首帧渲染靠 toolInput.elements，
+    // 只补推 toolResult 拿不到场景（2026-09-02 真机二轮定位）。
     if (options.record !== false) {
       this.invocations.set(this.invocationKey(tool.serverId, tool.ui.resourceUri), {
+        ...(options.args !== undefined ? { arguments: options.args } : {}),
         content: result.content,
         isError: result.isError,
         ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
@@ -597,8 +600,9 @@ export class McpAppGateway {
       this.invocations.delete(key)
       return undefined
     }
-    const { content, isError, structuredContent, _meta } = record
+    const { content, isError, structuredContent, _meta, arguments: args } = record
     return {
+      ...(args !== undefined ? { arguments: args } : {}),
       content,
       isError,
       ...(structuredContent ? { structuredContent } : {}),
@@ -759,8 +763,8 @@ export class McpRuntimeService extends Service<McpRuntime> {
   callTool(serverId: string, toolName: string, args: JsonObject, options: { readonly signal?: AbortSignal; readonly binding?: McpUiBinding; readonly hydrateApp?: boolean } = {}) {
     return this.runtime.callTool(serverId, toolName, args, options)
   }
-  preparePresentation(tool: McpToolRecord, result: McpCallResult) {
-    return this.appGateway?.reference(tool, result) ?? result
+  preparePresentation(tool: McpToolRecord, result: McpCallResult, args?: JsonObject) {
+    return this.appGateway?.reference(tool, result, args !== undefined ? { args } : {}) ?? result
   }
   readAppResource(serverId: string, resourceUri: string, binding?: McpUiBinding, signal?: AbortSignal) {
     return this.runtime.readAppResource(serverId, resourceUri, binding, signal)
