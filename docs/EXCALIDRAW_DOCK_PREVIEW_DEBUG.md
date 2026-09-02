@@ -75,7 +75,8 @@ bridge 是否应答了 initialize / 是否推了数据。
    （`read_checkpoint` 是 appVisible 工具，非 403）——App 拿到 checkpointId 后自取的
    通路是通的。
 
-**结论**：预览/pin 场景只要补推一个带 `checkpointId` 的 toolResult，App 即可自愈渲染。
+**结论（⚠️ v1 误判，已被下方二轮根因部分推翻修正）**：预览/pin 场景只要补推一个带
+`checkpointId` 的 toolResult，App 即可自愈渲染。
 
 ### 修复方案（A，已验证可行性）
 
@@ -117,3 +118,30 @@ excalidraw create_view（会话 session-584bc295）。
 3. ✅ 客户端补推路径由单测覆盖（oninitialized 无 toolCall 但有 invocation → sendToolResult）
 
 快照是 gateway 会话内存：web 进程重启后需重新产生一次真实调用，预览才有内容。
+
+## 二轮根因（2026-09-02 下午，v1 后真机仍空画布 → v2 修复终结）
+
+**v1 的误判**：上面「结论」低估了 toolInput 的地位。App HTML 反编译补看自举
+effect（`P0` 组件）发现开头即 `if (!toolInput) return`——**首帧渲染完全由
+toolInput.elements（模型传给 create_view 的入参）驱动**，走 `isFinal` 分支的
+restoreCheckpoint 路径；`ontoolresult` 的 checkpointId 只用于存档回写
+（save_checkpoint / editedElements 合并），**不是渲染入口**。
+
+会话历史实证：模型传给 create_view 的入参就是 `{"elements": "[…JSON 串…]"}`。
+
+**v2 修复（commit 7ea8311）**：快照把调用入参也记录，客户端补推改为与对话流
+同序的 toolInput + toolResult 齐推：
+
+- `mcp-runtime` 0.3.3：`McpAppInvocationSnapshot` 增加 `arguments` 字段；
+  `preparePresentation(tool, result, args?)` 透传入参。
+- `mcp-tools` 0.1.7：`presentationMeta(args, …)` 与 code dispatch 桥的
+  `exec.arguments` 两个调用点透传。
+- `mcp-apps` 0.1.16：`oninitialized` 无 toolCall 分支按序补推
+  `sendToolInput({arguments})` + `sendToolResult(...)`。
+
+## 最终验收（2026-09-02 用户真机确认 ✅）
+
+- v2 重启后驱动新会话画「客户端→网关→双后端」架构图（12 元素）
+- refresh 快照完整：`arguments.elements`（5994 字节）+ `checkpointId` + documentUrl
+- **用户在浏览器 dock APP tab 点开 `excalidraw:create-view` 预览，渲染成功**
+- 排查闭环，本文件归档。回退点：`git revert 7ea8311`（v2）/ `757c3c5`（v1）
