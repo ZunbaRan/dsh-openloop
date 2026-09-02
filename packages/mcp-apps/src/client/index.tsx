@@ -3,7 +3,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { AppBridge } from '@modelcontextprotocol/ext-apps/app-bridge'
 import type { CallToolResult, ReadResourceResult } from '@modelcontextprotocol/sdk/types.js'
-import type { McpAppResource, McpAppResourceReference, McpCallResult } from '@openloop/dsh-mcp-runtime'
+import type { McpAppInvocationSnapshot, McpAppResource, McpAppResourceReference, McpCallResult } from '@openloop/dsh-mcp-runtime'
 import { SecurePostMessageTransport } from './transport.ts'
 import {
   buildSandboxDocument,
@@ -35,6 +35,22 @@ function firstText(content: readonly unknown[], hiddenText?: string): string | u
 
 function isReferenceResource(resource: McpAppSandboxResource): resource is Exclude<McpAppSandboxResource, McpAppResource> {
   return !('html' in resource)
+}
+
+/** refresh 响应的 invocation 字段宽松校验：形状不对按「无最近调用」处理，不致命。 */
+function parseInvocationSnapshot(value: unknown): McpAppInvocationSnapshot | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'object' || Array.isArray(value)) return undefined
+  const snapshot = value as Partial<McpAppInvocationSnapshot>
+  if (!Array.isArray(snapshot.content) || typeof snapshot.isError !== 'boolean') return undefined
+  return {
+    content: snapshot.content,
+    isError: snapshot.isError,
+    ...(snapshot.structuredContent && typeof snapshot.structuredContent === 'object' && !Array.isArray(snapshot.structuredContent)
+      ? { structuredContent: snapshot.structuredContent }
+      : {}),
+    ...(snapshot._meta && typeof snapshot._meta === 'object' && !Array.isArray(snapshot._meta) ? { _meta: snapshot._meta } : {}),
+  }
 }
 
 /** 对话流工具调用的上下文（pin 场景没有：App 经 callToolUrl 自取数据）。 */
@@ -138,9 +154,13 @@ function McpAppSandbox({ callId, label, serverId, toolName, resource: initialRes
           || value.serverId !== serverId || value.resourceUri !== resource.resourceUri || value.mimeType !== resource.mimeType) {
           throw new Error('MCP App resource refresh returned an invalid reference')
         }
+        const invocation = parseInvocationSnapshot(value.invocation)
         if (!cancelled) {
           setLoadError(undefined)
-          setRefreshedResource(value as McpAppResourceReference)
+          setRefreshedResource({
+            ...(value as McpAppResourceReference),
+            ...(invocation ? { invocation } : {}),
+          })
         }
       }).catch((error: unknown) => {
         if (cancelled) return
@@ -203,9 +223,21 @@ function McpAppSandbox({ callId, label, serverId, toolName, resource: initialRes
       })
       bridgeRef.current = bridge
       bridge.oninitialized = () => {
-        // pin 场景无工具调用上下文：不推送 toolInput/toolResult，App 经
-        // callToolUrl 回环自行取数（方向1 v2 渲染时取数模型）。
-        if (!toolCall) return
+        // pin/预览场景无工具调用上下文：补推最近一次真实调用的结果快照，
+        // App（excalidraw 模式）从 structuredContent 取 checkpointId 等句柄后
+        // 经 callToolUrl 回环自取场景渲染；无快照则不推（空画布语义正确）。
+        if (!toolCall) {
+          const invocation = resource && 'invocation' in resource ? resource.invocation : undefined
+          if (invocation) {
+            void bridge?.sendToolResult({
+              content: invocation.content as CallToolResult['content'],
+              ...(invocation.structuredContent ? { structuredContent: invocation.structuredContent } : {}),
+              ...(invocation._meta ? { _meta: invocation._meta } : {}),
+              ...(invocation.isError ? { isError: true } : {}),
+            })
+          }
+          return
+        }
         void bridge?.sendToolInput({ arguments: toolCall.arguments })
         void bridge?.sendToolResult({
           content: toolCall.result.content as CallToolResult['content'],

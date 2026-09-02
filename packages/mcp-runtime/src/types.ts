@@ -68,6 +68,19 @@ export interface McpAppResource {
   readonly _meta?: JsonObject
 }
 
+/**
+ * 最近一次真实工具调用的结果快照（预览/pin 场景自举渲染用）。
+ * 经 refresh 响应下发给无工具调用上下文的宿主视图，宿主在 initialize 握手后
+ * 补推 sendToolResult；App 从 structuredContent 取 checkpointId 等句柄
+ * 经 callToolUrl 回环自取场景（excalidraw 模式，2026-09-03）。
+ */
+export interface McpAppInvocationSnapshot {
+  readonly content: readonly unknown[]
+  readonly isError: boolean
+  readonly structuredContent?: JsonObject
+  readonly _meta?: JsonObject
+}
+
 export interface McpAppResourceReference {
   readonly serverId: string
   readonly resourceUri: string
@@ -75,6 +88,8 @@ export interface McpAppResourceReference {
   readonly resourceUrl: string
   readonly documentUrl: string
   readonly callToolUrl: string
+  /** 最近一次真实调用的结果快照（仅 refresh 响应携带；工具结果引用不含） */
+  readonly invocation?: McpAppInvocationSnapshot
   readonly _meta?: JsonObject
 }
 

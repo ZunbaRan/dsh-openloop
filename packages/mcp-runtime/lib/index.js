@@ -838,6 +838,7 @@ var McpRuntime = class {
 const MCP_APP_ROUTE = "/api/openloop/mcp-app";
 const MCP_APP_AUTHORITY_TTL_MS = 36e5;
 const MCP_APP_AUTHORITY_LIMIT = 64;
+const MCP_APP_INVOCATION_LIMIT = 128;
 const MCP_APP_CALL_BODY_LIMIT = 1048576;
 function readRequestBody(req, maxBytes) {
 	return new Promise((resolve, reject) => {
@@ -861,6 +862,8 @@ var McpAppGateway = class {
 	runtime;
 	webServer;
 	authorities = /* @__PURE__ */ new Map();
+	/** per-(serverId, resourceUri) 最近一次真实调用快照（refresh 下发给预览/pin 视图） */
+	invocations = /* @__PURE__ */ new Map();
 	constructor(runtime, webServer) {
 		this.runtime = runtime;
 		this.webServer = webServer;
@@ -871,12 +874,29 @@ var McpAppGateway = class {
 			path: MCP_APP_ROUTE,
 			handler: (req, res) => this.handle(req, res)
 		}), "mcp-runtime: App resource and call gateway");
-		ctx.effect(() => () => this.authorities.clear(), "mcp-runtime: App authority store");
+		ctx.effect(() => () => {
+			this.authorities.clear();
+			this.invocations.clear();
+		}, "mcp-runtime: App authority store");
 	}
-	reference(tool, result) {
+	reference(tool, result, options = {}) {
 		const resource = result.uiResource;
 		if (!resource || !("html" in resource) || !tool.ui || resource.resourceUri !== tool.ui.resourceUri) return result;
 		this.prune();
+		if (options.record !== false) {
+			this.invocations.set(this.invocationKey(tool.serverId, tool.ui.resourceUri), {
+				content: result.content,
+				isError: result.isError,
+				...result.structuredContent ? { structuredContent: result.structuredContent } : {},
+				...result._meta ? { _meta: result._meta } : {},
+				expiresAt: Date.now() + MCP_APP_AUTHORITY_TTL_MS
+			});
+			while (this.invocations.size > MCP_APP_INVOCATION_LIMIT) {
+				const oldest = this.invocations.keys().next().value;
+				if (oldest === void 0) break;
+				this.invocations.delete(oldest);
+			}
+		}
 		const token = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
 		this.authorities.set(token, {
 			serverId: tool.serverId,
@@ -901,11 +921,31 @@ var McpAppGateway = class {
 	prune() {
 		const now = Date.now();
 		for (const [token, authority] of this.authorities) if (authority.expiresAt <= now) this.authorities.delete(token);
+		for (const [key, record] of this.invocations) if (record.expiresAt <= now) this.invocations.delete(key);
 		while (this.authorities.size >= MCP_APP_AUTHORITY_LIMIT) {
 			const oldest = this.authorities.keys().next().value;
 			if (oldest === void 0) break;
 			this.authorities.delete(oldest);
 		}
+	}
+	invocationKey(serverId, resourceUri) {
+		return `${serverId} ${resourceUri}`;
+	}
+	/** 最近一次真实调用的结果快照（过期视为无；供 refresh 响应与测试消费） */
+	lastInvocation(serverId, resourceUri) {
+		const key = this.invocationKey(serverId, resourceUri);
+		const record = this.invocations.get(key);
+		if (!record || record.expiresAt <= Date.now()) {
+			this.invocations.delete(key);
+			return;
+		}
+		const { content, isError, structuredContent, _meta } = record;
+		return {
+			content,
+			isError,
+			...structuredContent ? { structuredContent } : {},
+			..._meta ? { _meta } : {}
+		};
 	}
 	authority(token) {
 		const authority = this.authorities.get(token);
@@ -973,8 +1013,12 @@ var McpAppGateway = class {
 				content: [],
 				isError: false,
 				uiResource: resource
+			}, { record: false });
+			const invocation = this.lastInvocation(serverId, resourceUri);
+			return this.respond(res, 200, {
+				...referenced.uiResource,
+				...invocation ? { invocation } : {}
 			});
-			return this.respond(res, 200, referenced.uiResource);
 		} catch {
 			return this.respond(res, 404, { error: "resource_unavailable" });
 		}
@@ -1086,4 +1130,4 @@ var src_default = {
 	apply
 };
 //#endregion
-export { MCP_ADMIN_ROUTE, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpRuntime, McpRuntimeError, McpRuntimeService, appContentSecurityPolicy, apply, asJsonObject, src_default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, listScopedServers, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, registerMcpAdminRoutes, removeServerFromFile, scopedFilePath, upsertServerToFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };
+export { MCP_ADMIN_ROUTE, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppGateway, McpRuntime, McpRuntimeError, McpRuntimeService, appContentSecurityPolicy, apply, asJsonObject, src_default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, listScopedServers, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, registerMcpAdminRoutes, removeServerFromFile, scopedFilePath, upsertServerToFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };

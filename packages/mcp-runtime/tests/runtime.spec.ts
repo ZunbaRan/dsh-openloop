@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  McpAppGateway,
   McpRuntime,
   type McpConnection,
   type McpConnectionFactory,
@@ -204,6 +205,45 @@ describe('McpRuntime', () => {
     expect(runtime.serverIds()).toEqual([])
     await expect(runtime.listTools('fixture')).rejects.toMatchObject({ code: 'UNKNOWN_SERVER' })
     expect(await runtime.removeServer('fixture')).toBe(false)
+    await runtime.close()
+  })
+
+  it('gateway records the last real invocation per binding; synthetic refresh calls never overwrite it', async () => {
+    const fake = fakeFactory()
+    const runtime = new McpRuntime({
+      servers: [{ id: 'fixture', transport: { kind: 'stdio', command: 'unused' } }],
+      connectionFactory: fake.factory,
+    })
+    // webServer 仅 register() 时使用；reference/lastInvocation 路径不触网
+    const gateway = new McpAppGateway(runtime, undefined as never)
+    const tool = (await runtime.listTools('fixture'))[0]!
+
+    // 从未调用过：无快照
+    expect(gateway.lastInvocation('fixture', binding.resourceUri)).toBeUndefined()
+
+    // 真实调用（对话流投影路径 = preparePresentation → reference）
+    const result = await runtime.callTool('fixture', 'mcp_app_tool', {}, { binding })
+    const referenced = gateway.reference(tool, result)
+    expect(referenced.uiResource).toMatchObject({ serverId: 'fixture', resourceUri: binding.resourceUri })
+    expect(gateway.lastInvocation('fixture', binding.resourceUri)).toEqual({
+      content: [{ type: 'text', text: 'fallback' }],
+      isError: false,
+      structuredContent: { ok: true },
+      _meta: { preserved: true },
+    })
+
+    // refresh 合成调用（content:[]）不得覆盖快照
+    gateway.reference(tool, {
+      serverId: 'fixture',
+      toolName: 'mcp_app_tool',
+      content: [],
+      isError: false,
+      uiResource: result.uiResource!,
+    }, { record: false })
+    expect(gateway.lastInvocation('fixture', binding.resourceUri)?.structuredContent).toEqual({ ok: true })
+
+    // 其他 binding 不受影响
+    expect(gateway.lastInvocation('fixture', 'ui://fixture/other.html')).toBeUndefined()
     await runtime.close()
   })
 })

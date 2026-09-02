@@ -57,6 +57,18 @@ interface McpAppResource {
   readonly html: string;
   readonly _meta?: JsonObject;
 }
+/**
+ * 最近一次真实工具调用的结果快照（预览/pin 场景自举渲染用）。
+ * 经 refresh 响应下发给无工具调用上下文的宿主视图，宿主在 initialize 握手后
+ * 补推 sendToolResult；App 从 structuredContent 取 checkpointId 等句柄
+ * 经 callToolUrl 回环自取场景（excalidraw 模式，2026-09-03）。
+ */
+interface McpAppInvocationSnapshot {
+  readonly content: readonly unknown[];
+  readonly isError: boolean;
+  readonly structuredContent?: JsonObject;
+  readonly _meta?: JsonObject;
+}
 interface McpAppResourceReference {
   readonly serverId: string;
   readonly resourceUri: string;
@@ -64,6 +76,8 @@ interface McpAppResourceReference {
   readonly resourceUrl: string;
   readonly documentUrl: string;
   readonly callToolUrl: string;
+  /** 最近一次真实调用的结果快照（仅 refresh 响应携带；工具结果引用不含） */
+  readonly invocation?: McpAppInvocationSnapshot;
   readonly _meta?: JsonObject;
 }
 interface McpCallResult {
@@ -217,6 +231,26 @@ declare class McpRuntime {
   private normalizeTool;
   private assertBinding;
 }
+declare class McpAppGateway {
+  private readonly runtime;
+  private readonly webServer;
+  private readonly authorities;
+  /** per-(serverId, resourceUri) 最近一次真实调用快照（refresh 下发给预览/pin 视图） */
+  private readonly invocations;
+  constructor(runtime: McpRuntime, webServer: WebServer);
+  register(ctx: Context): void;
+  reference(tool: McpToolRecord, result: McpCallResult, options?: {
+    readonly record?: boolean;
+  }): McpCallResult;
+  private prune;
+  private invocationKey;
+  /** 最近一次真实调用的结果快照（过期视为无；供 refresh 响应与测试消费） */
+  lastInvocation(serverId: string, resourceUri: string): McpAppInvocationSnapshot | undefined;
+  private authority;
+  private handle;
+  private refresh;
+  private respond;
+}
 declare class McpRuntimeService extends Service<McpRuntime> {
   static inject: string[];
   readonly runtime: McpRuntime;
@@ -255,4 +289,4 @@ declare const _default: {
   apply: typeof apply;
 };
 //#endregion
-export { JsonObject, MCP_ADMIN_ROUTE, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppResource, McpAppResourceReference, McpCallResult, McpConnection, McpConnectionFactory, McpConnectionFactoryOptions, McpResourceValidationOptions, McpRuntime, McpRuntimeConfig, McpRuntimeError, McpRuntimeErrorCode, McpRuntimeOptions, McpRuntimeService, McpRuntimeStatus, McpServerConfig, McpToolRecord, McpTransportConfig, McpUiBinding, RawMcpResourceContents, ScopedMcpJsonOptions, appContentSecurityPolicy, apply, asJsonObject, _default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, listScopedServers, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, registerMcpAdminRoutes, removeServerFromFile, scopedFilePath, upsertServerToFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };
+export { JsonObject, MCP_ADMIN_ROUTE, MCP_APP_MAX_BYTES, MCP_APP_MIME, McpAppGateway, McpAppInvocationSnapshot, McpAppResource, McpAppResourceReference, McpCallResult, McpConnection, McpConnectionFactory, McpConnectionFactoryOptions, McpResourceValidationOptions, McpRuntime, McpRuntimeConfig, McpRuntimeError, McpRuntimeErrorCode, McpRuntimeOptions, McpRuntimeService, McpRuntimeStatus, McpServerConfig, McpToolRecord, McpTransportConfig, McpUiBinding, RawMcpResourceContents, ScopedMcpJsonOptions, appContentSecurityPolicy, apply, asJsonObject, _default as default, defaultMcpConnectionFactory, inject, interpolateEnv, isRecord, isUiResourceUri, listScopedServers, loadScopedMcpServers, mergeServerConfigs, name, parseServerEntry, readMcpJsonFile, registerMcpAdminRoutes, removeServerFromFile, scopedFilePath, upsertServerToFile, validateAppHtml, validateAppMetadata, validateAppResource, validateUiBinding };

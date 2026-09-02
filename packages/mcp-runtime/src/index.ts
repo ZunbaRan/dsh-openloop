@@ -24,6 +24,7 @@ import { recordApiUsage } from './api-usage-bridge.ts'
 import type {
   JsonObject,
   McpCallResult,
+  McpAppInvocationSnapshot,
   McpAppResource,
   McpAppResourceReference,
   McpConnection,
@@ -478,12 +479,17 @@ export class McpRuntime {
 const MCP_APP_ROUTE = '/api/openloop/mcp-app'
 const MCP_APP_AUTHORITY_TTL_MS = 60 * 60 * 1000
 const MCP_APP_AUTHORITY_LIMIT = 64
+const MCP_APP_INVOCATION_LIMIT = 128
 const MCP_APP_CALL_BODY_LIMIT = 1024 * 1024
 
 interface McpAppAuthority {
   readonly serverId: string
   readonly resourceUri: string
   readonly resource: McpAppResource
+  readonly expiresAt: number
+}
+
+interface McpAppInvocationRecord extends McpAppInvocationSnapshot {
   readonly expiresAt: number
 }
 
@@ -506,8 +512,10 @@ function readRequestBody(req: IncomingMessage, maxBytes: number): Promise<string
   })
 }
 
-class McpAppGateway {
+export class McpAppGateway {
   private readonly authorities = new Map<string, McpAppAuthority>()
+  /** per-(serverId, resourceUri) 最近一次真实调用快照（refresh 下发给预览/pin 视图） */
+  private readonly invocations = new Map<string, McpAppInvocationRecord>()
 
   constructor(private readonly runtime: McpRuntime, private readonly webServer: WebServer) {}
 
@@ -517,13 +525,32 @@ class McpAppGateway {
       path: MCP_APP_ROUTE,
       handler: (req, res) => this.handle(req, res),
     }), 'mcp-runtime: App resource and call gateway')
-    ctx.effect(() => () => this.authorities.clear(), 'mcp-runtime: App authority store')
+    ctx.effect(() => () => {
+      this.authorities.clear()
+      this.invocations.clear()
+    }, 'mcp-runtime: App authority store')
   }
 
-  reference(tool: McpToolRecord, result: McpCallResult): McpCallResult {
+  reference(tool: McpToolRecord, result: McpCallResult, options: { readonly record?: boolean } = {}): McpCallResult {
     const resource = result.uiResource
     if (!resource || !('html' in resource) || !tool.ui || resource.resourceUri !== tool.ui.resourceUri) return result
     this.prune()
+    // 记录最近一次真实调用的结果快照（refresh 合成调用必须传 record:false，
+    // 否则空结果会覆盖快照——预览/pin 视图将永远拿不到 checkpointId）。
+    if (options.record !== false) {
+      this.invocations.set(this.invocationKey(tool.serverId, tool.ui.resourceUri), {
+        content: result.content,
+        isError: result.isError,
+        ...(result.structuredContent ? { structuredContent: result.structuredContent } : {}),
+        ...(result._meta ? { _meta: result._meta } : {}),
+        expiresAt: Date.now() + MCP_APP_AUTHORITY_TTL_MS,
+      })
+      while (this.invocations.size > MCP_APP_INVOCATION_LIMIT) {
+        const oldest = this.invocations.keys().next().value
+        if (oldest === undefined) break
+        this.invocations.delete(oldest)
+      }
+    }
     const token = randomUUID().replaceAll('-', '') + randomUUID().replaceAll('-', '')
     this.authorities.set(token, {
       serverId: tool.serverId,
@@ -548,10 +575,34 @@ class McpAppGateway {
     for (const [token, authority] of this.authorities) {
       if (authority.expiresAt <= now) this.authorities.delete(token)
     }
+    for (const [key, record] of this.invocations) {
+      if (record.expiresAt <= now) this.invocations.delete(key)
+    }
     while (this.authorities.size >= MCP_APP_AUTHORITY_LIMIT) {
       const oldest = this.authorities.keys().next().value
       if (oldest === undefined) break
       this.authorities.delete(oldest)
+    }
+  }
+
+  private invocationKey(serverId: string, resourceUri: string): string {
+    return `${serverId} ${resourceUri}`
+  }
+
+  /** 最近一次真实调用的结果快照（过期视为无；供 refresh 响应与测试消费） */
+  lastInvocation(serverId: string, resourceUri: string): McpAppInvocationSnapshot | undefined {
+    const key = this.invocationKey(serverId, resourceUri)
+    const record = this.invocations.get(key)
+    if (!record || record.expiresAt <= Date.now()) {
+      this.invocations.delete(key)
+      return undefined
+    }
+    const { content, isError, structuredContent, _meta } = record
+    return {
+      content,
+      isError,
+      ...(structuredContent ? { structuredContent } : {}),
+      ...(_meta ? { _meta } : {}),
     }
   }
 
@@ -623,14 +674,19 @@ class McpAppGateway {
       const tool = (await this.runtime.listTools(serverId)).find((candidate) => candidate.name === toolName)
       if (!tool?.ui || tool.ui.resourceUri !== resourceUri) return this.respond(res, 403, { error: 'invalid_binding' })
       const resource = await this.runtime.readAppResource(serverId, resourceUri, tool.ui)
+      // 合成调用（content:[]）：只签发新 authority，不得覆盖最近一次真实调用快照。
       const referenced = this.reference(tool, {
         serverId,
         toolName,
         content: [],
         isError: false,
         uiResource: resource,
+      }, { record: false })
+      const invocation = this.lastInvocation(serverId, resourceUri)
+      return this.respond(res, 200, {
+        ...referenced.uiResource,
+        ...(invocation ? { invocation } : {}),
       })
-      return this.respond(res, 200, referenced.uiResource)
     } catch {
       return this.respond(res, 404, { error: 'resource_unavailable' })
     }

@@ -8180,6 +8180,19 @@ container holding the app. Specify either width or maxWidth, and either height o
 		function isReferenceResource(resource) {
 			return !("html" in resource);
 		}
+		/** refresh 响应的 invocation 字段宽松校验：形状不对按「无最近调用」处理，不致命。 */
+		function parseInvocationSnapshot(value) {
+			if (value === void 0 || value === null) return void 0;
+			if (typeof value !== "object" || Array.isArray(value)) return void 0;
+			const snapshot = value;
+			if (!Array.isArray(snapshot.content) || typeof snapshot.isError !== "boolean") return void 0;
+			return {
+				content: snapshot.content,
+				isError: snapshot.isError,
+				...snapshot.structuredContent && typeof snapshot.structuredContent === "object" && !Array.isArray(snapshot.structuredContent) ? { structuredContent: snapshot.structuredContent } : {},
+				...snapshot._meta && typeof snapshot._meta === "object" && !Array.isArray(snapshot._meta) ? { _meta: snapshot._meta } : {}
+			};
+		}
 		/**
 		* 共享沙箱核心（方向1 v2，2026-08-29 提取）：resource 解析（内联 html / 引用
 		* refresh / resourceUrl fetch）+ opaque-origin iframe + AppBridge 生命周期。
@@ -8249,9 +8262,13 @@ container holding the app. Specify either width or maxWidth, and either height o
 						if (!response.ok) throw new Error(`MCP App resource refresh failed: ${response.status}`);
 						const value = await response.json();
 						if (typeof value.resourceUrl !== "string" || typeof value.documentUrl !== "string" || typeof value.callToolUrl !== "string" || value.serverId !== serverId || value.resourceUri !== resource.resourceUri || value.mimeType !== resource.mimeType) throw new Error("MCP App resource refresh returned an invalid reference");
+						const invocation = parseInvocationSnapshot(value.invocation);
 						if (!cancelled) {
 							setLoadError(void 0);
-							setRefreshedResource(value);
+							setRefreshedResource({
+								...value,
+								...invocation ? { invocation } : {}
+							});
 						}
 					}).catch((error) => {
 						if (cancelled) return;
@@ -8329,7 +8346,16 @@ container holding the app. Specify either width or maxWidth, and either height o
 					} });
 					bridgeRef.current = bridge;
 					bridge.oninitialized = () => {
-						if (!toolCall) return;
+						if (!toolCall) {
+							const invocation = resource && "invocation" in resource ? resource.invocation : void 0;
+							if (invocation) bridge?.sendToolResult({
+								content: invocation.content,
+								...invocation.structuredContent ? { structuredContent: invocation.structuredContent } : {},
+								...invocation._meta ? { _meta: invocation._meta } : {},
+								...invocation.isError ? { isError: true } : {}
+							});
+							return;
+						}
 						bridge?.sendToolInput({ arguments: toolCall.arguments });
 						bridge?.sendToolResult({
 							content: toolCall.result.content,
