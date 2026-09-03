@@ -27,7 +27,7 @@
 
 - [x] **内置 APP 注册进后端**（2026-08-26 完成，app 0.3.1 `e0dc3af`）：seed 33 组件 + 3 API，幂等（用户修改不覆盖），三方 kind 表一致性测试锁定（panels=dock=app）
 - [x] ~~北极星 demo 剧本/录制~~（2026-09-03 用户取消：剧本文档 docs/NORTH_STAR_DEMO_SCRIPT.md 保留备查，录制不做）
-- [ ] **方向 1 · 第三方包协议 v2（MCP Apps 2.0 底座，2026-08-28 拍板）**：v1「安装时概念」草案已废弃（文档已加废弃横幅）。v2 = 第三方包即 MCP Apps 2.0 server，DSH 是 client + 容器；唯一 surface = HTML 沙箱；凭据归 server 自管（方向 2 的 registerApi/set_api_key 不进本协议）。**已落地（`1255eee`）**：mcp-runtime 热加载（addServer/removeServer/onServersChanged）+ mcp-tools 动态订阅。**剩余**：mcp-apps 独立资源视图 → app connect_server action → dock mcp-app tile → 协议文档 v2 重写 → 家族发布。验收对象 = tldraw + excalidraw 真机
+- [ ] **方向 1 · 第三方包协议 v2（MCP Apps 2.0 底座，2026-08-28 拍板）**：v1「安装时概念」草案已废弃（文档已加废弃横幅）。v2 = 第三方包即 MCP Apps 2.0 server，DSH 是 client + 容器；唯一 surface = HTML 沙箱；凭据归 server 自管（方向 2 的 registerApi/set_api_key 不进本协议）。**大部分已落地**（2026-09-03 盘点）：mcp-runtime 热加载（`1255eee`）+ mcp-tools 动态订阅 + connect/disconnect/reconnect action + mcp-app tile（引用形态 pin）+ **mcp-apps 独立资源视图**（McpAppResourceView + refresh 渲染时取数 + invocation 快照补推——excalidraw 预览/pin 空画布已修，`757c3c5`/`7ea8311`）。**真机验收已过**：excalidraw 对话流/dock 预览/pin 全通。**剩余**：协议文档 v2 重写（docs/DIRECTION1_PACK_PROTOCOL_V2.md 更新到与实现一致）→ 家族发布（可选）
 
 ## 低优先 / 观察池
 
