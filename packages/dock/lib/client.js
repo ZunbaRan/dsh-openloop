@@ -5782,6 +5782,151 @@ window.__ModuleLoader__.load({
 			return [...registryCache.values()];
 		}
 		//#endregion
+		//#region src/client/rel-views.tsx
+		/** 组件的 relations（panels 契约形态；无声明返回 undefined） */
+		function relationsOf(rid) {
+			const panels = getPanelsClient();
+			const comp = lookupRegistryComponent(rid);
+			if (!panels || !comp) return void 0;
+			const entry = comp.entry;
+			if (typeof entry !== "object" || entry === null) return void 0;
+			const record = entry;
+			const panel = typeof record.panel === "object" && record.panel !== null ? record.panel : record;
+			return panels.parseRelations(panel.relations);
+		}
+		/**
+		* 全量 registry 的 consumes 索引：event → [{ rid, param }]。
+		* 惰性构建（每次调用读最新 registry 缓存）——registry 刷新后自然生效。
+		*/
+		function buildRelConsumesIndex() {
+			const index = /* @__PURE__ */ new Map();
+			for (const comp of getRegistryComponents()) {
+				const rels = relationsOf(comp.id);
+				if (!rels?.consumes) continue;
+				for (const c of rels.consumes) {
+					const list = index.get(c.event) ?? [];
+					list.push({
+						rid: comp.id,
+						param: c.param
+					});
+					index.set(c.event, list);
+				}
+			}
+			return index;
+		}
+		/** chip 颜色样式（rel 紫） */
+		const chipStyle = {
+			display: "inline-flex",
+			alignItems: "center",
+			gap: 3,
+			fontSize: 9,
+			padding: "1px 6px",
+			borderRadius: 5,
+			color: "#b06ad9",
+			background: "rgba(176,106,217,.12)",
+			whiteSpace: "nowrap"
+		};
+		/** 资源行 relations chip：有 emits 显示「⚡ 可触发」、有 consumes 显示「⇄ 可响应」 */
+		function RelChips({ rid }) {
+			const rels = relationsOf(rid);
+			if (!rels) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [rels.emits && rels.emits.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				style: chipStyle,
+				title: `点行可触发 · emits：${rels.emits.map((e) => e.event).join(", ")}`,
+				children: "⚡ 可触发"
+			}) : null, rels.consumes && rels.consumes.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+				style: chipStyle,
+				title: `可响应事件 · consumes：${rels.consumes.map((c) => c.event).join(", ")}`,
+				children: "⇄ 可响应"
+			}) : null] });
+		}
+		/** 组件详情区：页面关系双语表（预览头部下方） */
+		function RelDeclSection({ rid }) {
+			const rels = relationsOf(rid);
+			if (!rels || (!rels.emits || rels.emits.length === 0) && (!rels.consumes || rels.consumes.length === 0)) return null;
+			const rows = [];
+			for (const e of rels.emits ?? []) rows.push({
+				dir: "out",
+				event: e.event,
+				param: "—",
+				note: e.note ?? "点行时触发 · fires on row click"
+			});
+			for (const c of rels.consumes ?? []) rows.push({
+				dir: "in",
+				event: c.event,
+				param: c.param,
+				note: c.note ?? `按 ${c.param} 取数 · renders by ${c.param}`
+			});
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: { marginTop: 12 },
+				"data-openloop-rel-decl": rid,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						fontSize: 10,
+						fontWeight: 600,
+						letterSpacing: ".06em",
+						color: "var(--dsw-alias-label-caption, #888)",
+						marginBottom: 6
+					},
+					children: ["页面关系 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: { fontWeight: 400 },
+						children: "Relations（emits 可触发 / consumes 可响应）"
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+						borderRadius: 9,
+						overflow: "hidden"
+					},
+					children: rows.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							padding: "6px 10px",
+							fontSize: 10.5,
+							borderTop: i === 0 ? void 0 : "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+							color: "var(--dsw-alias-label-primary, inherit)"
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontSize: 9,
+									fontWeight: 600,
+									padding: "1px 7px",
+									borderRadius: 999,
+									whiteSpace: "nowrap",
+									color: r.dir === "out" ? "#b06ad9" : "var(--dsw-alias-state-business-primary, #4176e6)",
+									background: r.dir === "out" ? "rgba(176,106,217,.1)" : "rgba(65,118,230,.1)"
+								},
+								children: r.dir === "out" ? "→ 可触发 emits" : "← 可响应 consumes"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
+									fontSize: 9.5,
+									color: "#b06ad9"
+								},
+								children: r.event
+							}),
+							r.param !== "—" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: { fontSize: 10 },
+								children: r.param
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									marginLeft: "auto",
+									fontSize: 9.5,
+									color: "var(--dsw-alias-label-caption, #888)"
+								},
+								children: r.note
+							})
+						]
+					}, i))
+				})]
+			});
+		}
+		//#endregion
 		//#region src/client/RelFloatLayer.tsx
 		/**
 		* Board 联动悬浮窗层（M3，2026-09-02 联动特性 v1）。
@@ -5796,45 +5941,11 @@ window.__ModuleLoader__.load({
 		*/
 		let zSeq = 20;
 		let winSeq = 0;
-		/** rid → PanelDefinition 解析器（registry entry → panel 定义），供 panels 侧 RelLinkedSlot 共用 */
+		/** rid → PanelDefinition 解析器（registry entry → panel 定义，经 panels 懒桥） */
 		function registryPanelResolver(rid) {
 			const comp = lookupRegistryComponent(rid);
 			if (!comp) return void 0;
-			return panelsPanelFromEntry(comp.entry);
-		}
-		/** registry entry 宽松解析为 PanelDefinition（经 panels client 的 panelDefinitionFromEntry） */
-		function panelsPanelFromEntry(entry) {
-			const panels = getPanelsClient();
-			if (!panels) return void 0;
-			return panels.panelDefinitionFromEntry(entry);
-		}
-		/** 从 registry 组件 entry 宽松提取 relations（panels 契约形态，经懒桥） */
-		function relationsOfRegistryComponent(rid) {
-			const panels = getPanelsClient();
-			const comp = lookupRegistryComponent(rid);
-			if (!panels || !comp) return void 0;
-			const entry = comp.entry;
-			if (typeof entry !== "object" || entry === null) return void 0;
-			const record = entry;
-			const panel = typeof record.panel === "object" && record.panel !== null ? record.panel : record;
-			return panels.parseRelations(panel.relations);
-		}
-		/** 全量 registry 的 consumes 索引：event → [{ rid, param }]（挂载时构建一次） */
-		function buildConsumesIndex() {
-			const index = /* @__PURE__ */ new Map();
-			for (const comp of getRegistryComponents()) {
-				const rels = relationsOfRegistryComponent(comp.id);
-				if (!rels?.consumes) continue;
-				for (const c of rels.consumes) {
-					const list = index.get(c.event) ?? [];
-					list.push({
-						rid: comp.id,
-						param: c.param
-					});
-					index.set(c.event, list);
-				}
-			}
-			return index;
+			return getPanelsClient()?.panelDefinitionFromEntry(comp.entry);
 		}
 		function RelFloatLayer() {
 			const [wins, setWins] = (0, react.useState)([]);
@@ -5843,7 +5954,7 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				const panels = getPanelsClient();
 				if (!panels) return;
-				const consumesIndex = buildConsumesIndex();
+				const consumesIndex = buildRelConsumesIndex();
 				return panels.relBus().subscribe((event, payload) => {
 					const targets = consumesIndex.get(event);
 					if (!targets || targets.length === 0) return;
@@ -6670,131 +6781,6 @@ window.__ModuleLoader__.load({
 					fontSize: Math.round(size * .46)
 				} : void 0,
 				children: app.name.slice(0, 1)
-			});
-		}
-		//#endregion
-		//#region src/client/rel-views.tsx
-		/** 组件的 relations（panels 契约形态；无声明返回 undefined） */
-		function relationsOf(rid) {
-			const panels = getPanelsClient();
-			const comp = lookupRegistryComponent(rid);
-			if (!panels || !comp) return void 0;
-			const entry = comp.entry;
-			if (typeof entry !== "object" || entry === null) return void 0;
-			const record = entry;
-			const panel = typeof record.panel === "object" && record.panel !== null ? record.panel : record;
-			return panels.parseRelations(panel.relations);
-		}
-		/** chip 颜色样式（rel 紫） */
-		const chipStyle = {
-			display: "inline-flex",
-			alignItems: "center",
-			gap: 3,
-			fontSize: 9,
-			padding: "1px 6px",
-			borderRadius: 5,
-			color: "#b06ad9",
-			background: "rgba(176,106,217,.12)",
-			whiteSpace: "nowrap"
-		};
-		/** 资源行 relations chip：有 emits 显示「⚡ 可触发」、有 consumes 显示「⇄ 可响应」 */
-		function RelChips({ rid }) {
-			const rels = relationsOf(rid);
-			if (!rels) return null;
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [rels.emits && rels.emits.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				style: chipStyle,
-				title: `点行可触发 · emits：${rels.emits.map((e) => e.event).join(", ")}`,
-				children: "⚡ 可触发"
-			}) : null, rels.consumes && rels.consumes.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				style: chipStyle,
-				title: `可响应事件 · consumes：${rels.consumes.map((c) => c.event).join(", ")}`,
-				children: "⇄ 可响应"
-			}) : null] });
-		}
-		/** 组件详情区：页面关系双语表（预览头部下方） */
-		function RelDeclSection({ rid }) {
-			const rels = relationsOf(rid);
-			if (!rels || (!rels.emits || rels.emits.length === 0) && (!rels.consumes || rels.consumes.length === 0)) return null;
-			const rows = [];
-			for (const e of rels.emits ?? []) rows.push({
-				dir: "out",
-				event: e.event,
-				param: "—",
-				note: e.note ?? "点行时触发 · fires on row click"
-			});
-			for (const c of rels.consumes ?? []) rows.push({
-				dir: "in",
-				event: c.event,
-				param: c.param,
-				note: c.note ?? `按 ${c.param} 取数 · renders by ${c.param}`
-			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: { marginTop: 12 },
-				"data-openloop-rel-decl": rid,
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						fontSize: 10,
-						fontWeight: 600,
-						letterSpacing: ".06em",
-						color: "var(--dsw-alias-label-caption, #888)",
-						marginBottom: 6
-					},
-					children: ["页面关系 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-						style: { fontWeight: 400 },
-						children: "Relations（emits 可触发 / consumes 可响应）"
-					})]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: {
-						border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-						borderRadius: 9,
-						overflow: "hidden"
-					},
-					children: rows.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							display: "flex",
-							alignItems: "center",
-							gap: 8,
-							padding: "6px 10px",
-							fontSize: 10.5,
-							borderTop: i === 0 ? void 0 : "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-							color: "var(--dsw-alias-label-primary, inherit)"
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									fontSize: 9,
-									fontWeight: 600,
-									padding: "1px 7px",
-									borderRadius: 999,
-									whiteSpace: "nowrap",
-									color: r.dir === "out" ? "#b06ad9" : "var(--dsw-alias-state-business-primary, #4176e6)",
-									background: r.dir === "out" ? "rgba(176,106,217,.1)" : "rgba(65,118,230,.1)"
-								},
-								children: r.dir === "out" ? "→ 可触发 emits" : "← 可响应 consumes"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
-									fontSize: 9.5,
-									color: "#b06ad9"
-								},
-								children: r.event
-							}),
-							r.param !== "—" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: { fontSize: 10 },
-								children: r.param
-							}) : null,
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									marginLeft: "auto",
-									fontSize: 9.5,
-									color: "var(--dsw-alias-label-caption, #888)"
-								},
-								children: r.note
-							})
-						]
-					}, i))
-				})]
 			});
 		}
 		//#endregion
@@ -8603,6 +8589,7 @@ window.__ModuleLoader__.load({
 				if (!comp) return void 0;
 				return panelsClient.panelDefinitionFromEntry(comp.entry);
 			});
+			panelsClient?.setRelConsumesIndex((event) => buildRelConsumesIndex().get(event) ?? []);
 			ctx.effect(() => {
 				const host = document.createElement("div");
 				host.setAttribute("data-openloop-dock-root", "");

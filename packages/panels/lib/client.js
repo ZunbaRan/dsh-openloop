@@ -8579,24 +8579,22 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		//#endregion
 		//#region src/client/RelLinked.tsx
 		/**
-		* 联动详情渲染槽（M2，2026-09-02 联动特性 v1）。
+		* 联动详情渲染槽（M2，2026-09-02 联动特性 v1；2026-09-03 多消费方扩展）。
 		*
 		* PanelCard 的一部分：列表面板声明了 emits 时，卡片内渲染此槽。
-		* 订阅联动事件总线 → 按（本会话可见的）consumes 注册表把事件映射为
-		* 「目标面板 rid + 参数」→ 解析目标面板定义 → 带参渲染 PanelSurface。
-		*
-		* 目标面板解析路径（M1 范围）：
-		* 1. 对话流内的其它 PanelMeta（同消息上下文）——v1 不做跨卡片查找，
-		*    目标面板定义由资源注册表提供（见 resolveTargetPanel）。
-		* 2. 资源注册表条目 entry.panel（panelFile / registry 组件 entry）。
-		*
-		* v1 简化：目标面板由 emits 事件的 `target.rid` 显式指向（skill 指导 agent
-		* 生成时成对声明），未声明 target 或注册表查不到时不渲染（安全空态）。
+		* 订阅联动事件总线 → 解析「该事件的全部消费方」（dock 注入的 consumes 索引
+		* 优先；缺省回落到 emits.target 显式指向或事件名推断）→ 逐个解析目标面板
+		* 定义 → 带参渲染 PanelSurface（多消费方堆叠）。
 		*/
 		let panelResolver;
+		let consumesIndexFn;
 		/** 注入注册表面板解析器（dock client 启动时调用一次） */
 		function setRelPanelResolver(resolver) {
 			panelResolver = resolver;
+		}
+		/** 注入消费方索引（dock client 启动时调用一次；惰性调用时读取最新 registry） */
+		function setRelConsumesIndex(fn) {
+			consumesIndexFn = fn;
 		}
 		function resolvePanelDefinition(rid) {
 			try {
@@ -8617,29 +8615,38 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		}
 		/**
 		* 联动渲染槽：emits 声明 + 事件 → 目标面板带参渲染。
-		* 行点击（PanelSurface 事件委托）→ relBus 事件 → 这里解析目标并渲染。
+		* 行点击（PanelSurface 事件委托）→ relBus 事件 → 这里解析全部消费方并堆叠渲染。
 		*/
 		function RelLinkedSlot({ relations }) {
-			const [target, setTarget] = (0, react.useState)();
+			const [targets, setTargets] = (0, react.useState)();
+			const [event, setEvent] = (0, react.useState)("");
 			const relationsRef = (0, react.useRef)(relations);
 			relationsRef.current = relations;
 			(0, react.useEffect)(() => {
-				return relBus().subscribe((event, payload) => {
-					const emit = relationsRef.current.emits?.find((e) => e.event === event);
+				return relBus().subscribe((ev, payload) => {
+					const emit = relationsRef.current.emits?.find((e) => e.event === ev);
 					if (!emit) return;
-					const targetRid = emit.target?.rid ?? inferTargetRid(event);
-					if (typeof targetRid !== "string" || targetRid.length === 0) return;
-					const panel = resolvePanelDefinition(targetRid);
-					if (!panel) return;
-					setTarget({
-						rid: targetRid,
-						panel,
-						params: payload,
-						event
-					});
+					const consumers = (() => {
+						try {
+							return consumesIndexFn?.(ev) ?? [];
+						} catch {
+							return [];
+						}
+					})();
+					const resolved = (consumers.length > 0 ? consumers.map((c) => c.rid) : emit.target?.rid !== void 0 ? [emit.target.rid] : inferTargetRid(ev) !== void 0 ? [inferTargetRid(ev)] : []).map((rid) => ({
+						rid,
+						panel: resolvePanelDefinition(rid)
+					})).filter((t) => t.panel !== void 0);
+					if (resolved.length === 0) return;
+					setTargets(resolved.map((t) => ({
+						rid: t.rid,
+						panel: t.panel,
+						params: payload
+					})));
+					setEvent(ev);
 				});
 			}, []);
-			if (!target) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			if (!targets || targets.length === 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: {
 					padding: "10px 14px",
 					fontSize: 12,
@@ -8649,6 +8656,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 				"data-openloop-rel-slot": "empty",
 				children: "点击列表行，关联页面将在这里呈现 · click a row to open the linked page"
 			});
+			const first = targets[0];
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				style: {
 					borderTop: "1px dashed var(--openloop-border)",
@@ -8656,7 +8664,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 					marginTop: 10
 				},
 				"data-openloop-rel-slot": "linked",
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				children: [first !== void 0 && /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
 						display: "flex",
 						alignItems: "center",
@@ -8667,23 +8675,26 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 						color: "var(--openloop-muted-foreground, #888)"
 					},
 					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["⚡ ", target.event] }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", { children: ["⚡ ", event] }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							style: {
 								fontFamily: "ui-monospace, monospace",
 								opacity: .8
 							},
-							children: Object.keys(target.params).map((k) => `${k}=${String(target.params[k])}`).join(" · ")
+							children: Object.keys(first.params).map((k) => `${k}=${String(first.params[k])}`).join(" · ")
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							style: { marginLeft: "auto" },
-							children: target.rid
+							children: targets.map((t) => t.rid).join(" · ")
 						})
 					]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LinkedPanelSurface, {
-					panel: target.panel,
-					params: target.params
-				})]
+				}), targets.map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: targets.length > 1 ? { marginBottom: 12 } : void 0,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(LinkedPanelSurface, {
+						panel: t.panel,
+						params: t.params
+					})
+				}, t.rid))]
 			});
 		}
 		/** 带参面板渲染：api widget 的 {{param}} 经 refresh 端点带参解析（M1 通道） */
@@ -9099,8 +9110,10 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			const dataRef = (0, react.useRef)(data);
 			dataRef.current = data;
 			const relParamsKey = JSON.stringify(relParams ?? null);
+			const awaitingParams = binding?.params !== void 0 && Object.keys(binding.params).length > 0 && (relParams === void 0 || Object.keys(relParams).length === 0);
 			const refresh = (0, react.useCallback)(async () => {
 				if (binding?.source.type !== "api" || inFlightRef.current) return;
+				if (binding.params !== void 0 && Object.keys(binding.params).length > 0 && (relParams === void 0 || Object.keys(relParams).length === 0)) return;
 				inFlightRef.current = true;
 				setBusy(true);
 				try {
@@ -9172,6 +9185,16 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 					error: data.__error,
 					busy,
 					onRetry: policy.manual ? () => void refresh() : void 0
+				}) : awaitingParams ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: placeholderStyle,
+					"data-openloop-widget": "awaiting-params",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: { fontWeight: 600 },
+						children: "⏳ 等待联动参数 · awaiting linkage"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: { marginTop: 2 },
+						children: "此页数据需要从关联列表点选后带参获取——到来源页面点一行，这里会显示对应数据。"
+					})]
 				}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(WidgetCell, {
 					widget,
 					theme,
@@ -9307,6 +9330,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		exports.parseRelations = parseRelations;
 		exports.postRelEvent = postRelEvent;
 		exports.relBus = relBus;
+		exports.setRelConsumesIndex = setRelConsumesIndex;
 		exports.setRelPanelResolver = setRelPanelResolver;
 		return module.exports;
 	}

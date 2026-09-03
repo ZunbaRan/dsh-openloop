@@ -1526,9 +1526,10 @@ function createAppFacade(pb) {
 			const apis = (await listRecords(pb, "apis", `appName = "${name}"`)).map((record) => {
 				const row = toApiRow(record);
 				const secret = record.keySecret;
+				const configured = row.authType === "none" || typeof secret === "string" && secret.length > 0;
 				return {
 					...row,
-					configured: typeof secret === "string" && secret.length > 0
+					configured
 				};
 			}).sort((a, b) => a.rid.localeCompare(b.rid));
 			return {
@@ -7630,7 +7631,7 @@ async function handle(req, res, backend, options) {
 			domain: String(row.domain ?? ""),
 			path: String(row.path ?? ""),
 			authType: row.authType === "key" ? "key" : "none",
-			configured: typeof row.keySecret === "string" && row.keySecret.length > 0
+			configured: row.authType !== "key" || typeof row.keySecret === "string" && row.keySecret.length > 0
 		})).filter((row) => row.rid.length > 0).sort((a, b) => a.rid.localeCompare(b.rid)) });
 		return;
 	}

@@ -11,12 +11,12 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { getPanelsClient } from './openloop-clients.ts'
-import { getRegistryComponents, lookupRegistryComponent } from './app-registry.ts'
+import { lookupRegistryComponent } from './app-registry.ts'
+import { buildRelConsumesIndex } from './rel-views.tsx'
 
 type PanelsClient = NonNullable<ReturnType<typeof getPanelsClient>>
 type PanelMeta = Parameters<NonNullable<PanelsClient['PanelSurface']>>[0]['meta']
 type PanelDefinition = PanelMeta['panel']
-type PanelRelationsDecl = NonNullable<PanelDefinition['relations']>
 type JsonObject = Record<string, unknown>
 
 interface FloatWindowState {
@@ -33,45 +33,11 @@ interface FloatWindowState {
 let zSeq = 20
 let winSeq = 0
 
-/** rid → PanelDefinition 解析器（registry entry → panel 定义），供 panels 侧 RelLinkedSlot 共用 */
+/** rid → PanelDefinition 解析器（registry entry → panel 定义，经 panels 懒桥） */
 function registryPanelResolver(rid: string): PanelDefinition | undefined {
   const comp = lookupRegistryComponent(rid)
   if (!comp) return undefined
-  return panelsPanelFromEntry(comp.entry)
-}
-
-/** registry entry 宽松解析为 PanelDefinition（经 panels client 的 panelDefinitionFromEntry） */
-function panelsPanelFromEntry(entry: unknown): PanelDefinition | undefined {
-  const panels = getPanelsClient()
-  if (!panels) return undefined
-  return panels.panelDefinitionFromEntry(entry)
-}
-
-/** 从 registry 组件 entry 宽松提取 relations（panels 契约形态，经懒桥） */
-function relationsOfRegistryComponent(rid: string): PanelRelationsDecl | undefined {
-  const panels = getPanelsClient()
-  const comp = lookupRegistryComponent(rid)
-  if (!panels || !comp) return undefined
-  const entry = comp.entry
-  if (typeof entry !== 'object' || entry === null) return undefined
-  const record = entry as Record<string, unknown>
-  const panel = typeof record.panel === 'object' && record.panel !== null ? record.panel : record
-  return panels.parseRelations((panel as Record<string, unknown>).relations)
-}
-
-/** 全量 registry 的 consumes 索引：event → [{ rid, param }]（挂载时构建一次） */
-function buildConsumesIndex(): Map<string, Array<{ rid: string; param: string }>> {
-  const index = new Map<string, Array<{ rid: string; param: string }>>()
-  for (const comp of getRegistryComponents()) {
-    const rels = relationsOfRegistryComponent(comp.id)
-    if (!rels?.consumes) continue
-    for (const c of rels.consumes) {
-      const list = index.get(c.event) ?? []
-      list.push({ rid: comp.id, param: c.param })
-      index.set(c.event, list)
-    }
-  }
-  return index
+  return getPanelsClient()?.panelDefinitionFromEntry(comp.entry)
 }
 
 export function RelFloatLayer(): ReactNode {
@@ -82,7 +48,7 @@ export function RelFloatLayer(): ReactNode {
   useEffect(() => {
     const panels = getPanelsClient()
     if (!panels) return
-    const consumesIndex = buildConsumesIndex()
+    const consumesIndex = buildRelConsumesIndex()
     return panels.relBus().subscribe((event, payload) => {
       const targets = consumesIndex.get(event)
       if (!targets || targets.length === 0) return

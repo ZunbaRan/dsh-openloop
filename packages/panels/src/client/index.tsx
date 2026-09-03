@@ -11,8 +11,8 @@ export { PanelCard, PanelSurface, panelMetaFrom } from './PanelCard.tsx'
 export { allPresetKinds } from '../presets/index.ts'
 // 联动 v1（2026-09-02）：事件通道 + 关联声明解析 + 目标面板渲染槽
 export { relBus, dispatchRelEvent, postRelEvent, parseRelations, evalPayloadTemplate, REL_EVENT_PREFIX } from './rel-bus.ts'
-export { RelLinkedSlot, LinkedPanelSurface, setRelPanelResolver, panelDefinitionFromEntry } from './RelLinked.tsx'
-export type { RelPanelResolver } from './RelLinked.tsx'
+export { RelLinkedSlot, LinkedPanelSurface, setRelPanelResolver, setRelConsumesIndex, panelDefinitionFromEntry } from './RelLinked.tsx'
+export type { RelPanelResolver, RelConsumesIndexFn } from './RelLinked.tsx'
 export { applyBindingParams } from '../datasource.ts'
 
 // ---- OpenLoop Dock pin 接线（可选依赖）----

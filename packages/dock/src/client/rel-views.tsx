@@ -5,7 +5,7 @@
  */
 import type { ReactNode } from 'react'
 import { getPanelsClient } from './openloop-clients.ts'
-import { lookupRegistryComponent } from './app-registry.ts'
+import { lookupRegistryComponent, getRegistryComponents } from './app-registry.ts'
 
 /** 组件的 relations（panels 契约形态；无声明返回 undefined） */
 export function relationsOf(rid: string): { emits?: Array<{ event: string; note?: string }>; consumes?: Array<{ event: string; param: string; note?: string }> } | undefined {
@@ -17,6 +17,24 @@ export function relationsOf(rid: string): { emits?: Array<{ event: string; note?
   const record = entry as Record<string, unknown>
   const panel = typeof record.panel === 'object' && record.panel !== null ? record.panel : record
   return panels.parseRelations((panel as Record<string, unknown>).relations)
+}
+
+/**
+ * 全量 registry 的 consumes 索引：event → [{ rid, param }]。
+ * 惰性构建（每次调用读最新 registry 缓存）——registry 刷新后自然生效。
+ */
+export function buildRelConsumesIndex(): Map<string, Array<{ rid: string; param: string }>> {
+  const index = new Map<string, Array<{ rid: string; param: string }>>()
+  for (const comp of getRegistryComponents()) {
+    const rels = relationsOf(comp.id)
+    if (!rels?.consumes) continue
+    for (const c of rels.consumes) {
+      const list = index.get(c.event) ?? []
+      list.push({ rid: comp.id, param: c.param })
+      index.set(c.event, list)
+    }
+  }
+  return index
 }
 
 /** 事件名 → 关系另一端 rid 推断（与 panels RelLinked.inferTargetRid 同规则） */

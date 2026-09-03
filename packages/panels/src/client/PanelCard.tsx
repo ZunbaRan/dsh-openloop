@@ -376,9 +376,16 @@ function RefreshableWidgetCell({
   dataRef.current = data
   // relParams 变化（点选了不同行）→ 视为新取数请求，重新拉取（联动 v1）
   const relParamsKey = JSON.stringify(relParams ?? null)
+  // 联动 v1：声明了参数模板但没有参数值（如 pin 的详情 tile 未经过联动）→
+  // 不发请求（模板原样发出必 404），渲染「等待联动」占位
+  const awaitingParams = binding?.params !== undefined
+    && Object.keys(binding.params).length > 0
+    && (relParams === undefined || Object.keys(relParams).length === 0)
 
   const refresh = useCallback(async (): Promise<void> => {
     if (binding?.source.type !== 'api' || inFlightRef.current) return
+    if (binding.params !== undefined && Object.keys(binding.params).length > 0
+      && (relParams === undefined || Object.keys(relParams).length === 0)) return
     inFlightRef.current = true
     setBusy(true)
     try {
@@ -442,6 +449,11 @@ function RefreshableWidgetCell({
     <div ref={cellRef} style={{ position: 'relative', minWidth: 0 }} data-openloop-cell={widget.id}>
       {errorData ? (
         <DataErrorPlaceholder widgetId={widget.id} error={data.__error} busy={busy} onRetry={policy.manual ? () => void refresh() : undefined} />
+      ) : awaitingParams ? (
+        <div style={placeholderStyle} data-openloop-widget="awaiting-params">
+          <div style={{ fontWeight: 600 }}>⏳ 等待联动参数 · awaiting linkage</div>
+          <div style={{ marginTop: 2 }}>此页数据需要从关联列表点选后带参获取——到来源页面点一行，这里会显示对应数据。</div>
+        </div>
       ) : (
         <WidgetCell widget={widget} theme={theme} data={data} />
       )}
