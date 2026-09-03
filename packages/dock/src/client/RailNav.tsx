@@ -91,8 +91,10 @@ export function RailNav(props: RailNavProps): ReactNode {
         <>
           <div className="d2-rail-sec">
             工作台
-            <SortButton mode={sortMode} onCycle={cycleMode} />
-            <button type="button" className="d2-sec-add" title="新增看板页" onClick={onAddBoard}><icons.plus size={11} /></button>
+            <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <SortButton mode={sortMode} onCycle={cycleMode} />
+              <button type="button" className="d2-sec-add" title="新增看板页" onClick={onAddBoard}><icons.plus size={11} /></button>
+            </span>
           </div>
           {sortedBoards.map(b => (
             editingBoard === b.id ? (

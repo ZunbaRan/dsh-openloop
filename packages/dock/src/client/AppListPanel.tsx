@@ -204,8 +204,10 @@ export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListP
     <aside className="d2-applist" style={{ width: ui.width }} aria-label="APP 列表">
       <div className="d2-col-head">
         <span>APP</span>
-        <SortButton mode={sortMode} onCycle={cycleMode} />
-        <span className="d2-tcap">{filteredApps.length}</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <SortButton mode={sortMode} onCycle={cycleMode} />
+          <span className="d2-tcap">{filteredApps.length}</span>
+        </span>
       </div>
       <div style={{ padding: '0 12px 6px' }}>
         <input

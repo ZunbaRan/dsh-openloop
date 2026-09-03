@@ -6978,6 +6978,11 @@ window.__ModuleLoader__.load({
 				onDragStart: (e) => {
 					e.dataTransfer.effectAllowed = "move";
 					e.dataTransfer.setData("text/plain", id);
+					const ghost = document.createElement("span");
+					ghost.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
+					document.body.appendChild(ghost);
+					e.dataTransfer.setDragImage(ghost, 0, 0);
+					setTimeout(() => ghost.remove(), 0);
 					setDragId(id);
 				},
 				onDragOver: (e) => {
@@ -7070,20 +7075,24 @@ window.__ModuleLoader__.load({
 				"aria-label": "Dock 导航",
 				children: [expanded ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "d2-rail-sec",
-					children: [
-						"工作台",
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
+					children: ["工作台", /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						style: {
+							marginLeft: "auto",
+							display: "flex",
+							alignItems: "center",
+							gap: 4
+						},
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
 							mode: sortMode,
 							onCycle: cycleMode
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							className: "d2-sec-add",
 							title: "新增看板页",
 							onClick: onAddBoard,
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
-						})
-					]
+						})]
+					})]
 				}), sortedBoards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 					className: "d2-board-rename d2-rail-rename",
 					autoFocus: true,
@@ -7372,17 +7381,21 @@ window.__ModuleLoader__.load({
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "d2-col-head",
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								marginLeft: "auto",
+								display: "flex",
+								alignItems: "center",
+								gap: 6
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
 								mode: sortMode,
 								onCycle: cycleMode
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "d2-tcap",
 								children: filteredApps.length
-							})
-						]
+							})]
+						})]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: { padding: "0 12px 6px" },

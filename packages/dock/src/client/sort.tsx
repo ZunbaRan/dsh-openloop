@@ -122,6 +122,13 @@ export function makeRowDragHandlers(args: {
     onDragStart: e => {
       e.dataTransfer.effectAllowed = 'move'
       e.dataTransfer.setData('text/plain', id)
+      // 消除原生 drag image（2026-09-03「影子漂移/飞回原位」反馈）：行在拖动中
+      // 已实时换位，原生影子松开时的飞回动画纯属误导——用 1x1 透明图替代
+      const ghost = document.createElement('span')
+      ghost.style.cssText = 'position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;'
+      document.body.appendChild(ghost)
+      e.dataTransfer.setDragImage(ghost, 0, 0)
+      setTimeout(() => ghost.remove(), 0)
       setDragId(id)
     },
     onDragOver: e => {
