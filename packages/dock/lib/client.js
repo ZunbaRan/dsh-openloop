@@ -4805,6 +4805,18 @@ window.__ModuleLoader__.load({
 					activeBoardId: id
 				});
 			}
+			/** 看板页重排（2026-09-03 拖拽排序）：传入完整 id 顺序；未知 id 忽略，缺漏 id 续后 */
+			reorderBoards(ids) {
+				this.ensureInit();
+				const byId = new Map(this.state.boards.map((b) => [b.id, b]));
+				const next = ids.map((id) => byId.get(id)).filter((b) => b !== void 0);
+				for (const b of this.state.boards) if (!next.includes(b)) next.push(b);
+				if (next.length === 0) return;
+				this.emit({
+					...this.state,
+					boards: next
+				});
+			}
 			setTileAlias(tileId, alias) {
 				this.updateActiveTiles((tiles) => tiles.map((t) => {
 					if (t.tileId !== tileId) return t;
@@ -6876,6 +6888,112 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
+		//#region src/client/sort.tsx
+		const SORT_MODE_LABEL = {
+			custom: "自定义",
+			az: "A → Z",
+			za: "Z → A"
+		};
+		function readSortMode(key) {
+			try {
+				const v = localStorage.getItem(key);
+				return v === "az" || v === "za" ? v : "custom";
+			} catch {
+				return "custom";
+			}
+		}
+		function writeSortMode(key, mode) {
+			try {
+				localStorage.setItem(key, mode);
+			} catch {}
+		}
+		/** custom → az → za → custom 循环 */
+		function cycleSortMode(mode) {
+			return mode === "custom" ? "az" : mode === "az" ? "za" : "custom";
+		}
+		function readOrder(key) {
+			try {
+				const raw = localStorage.getItem(key);
+				if (!raw) return [];
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+			} catch {
+				return [];
+			}
+		}
+		function writeOrder(key, order) {
+			try {
+				localStorage.setItem(key, JSON.stringify(order));
+			} catch {}
+		}
+		/**
+		* 应用排序：custom 模式按 saved order 排（已存 id 按保存顺序在前，新 id 按原顺序续后）；
+		* az/za 按 label 排序（locale 感知，中文友好）。
+		*/
+		function applySortOrder(items, mode, order, keyOf, labelOf) {
+			if (mode === "az" || mode === "za") {
+				const sorted = [...items].sort((a, b) => labelOf(a).localeCompare(labelOf(b), "zh-Hans-CN-u-co-pinyin"));
+				return mode === "az" ? sorted : sorted.reverse();
+			}
+			if (order.length === 0) return [...items];
+			const pos = new Map(order.map((id, i) => [id, i]));
+			return [...items].sort((a, b) => {
+				const pa = pos.get(keyOf(a));
+				const pb = pos.get(keyOf(b));
+				if (pa !== void 0 && pb !== void 0) return pa - pb;
+				if (pa !== void 0) return -1;
+				if (pb !== void 0) return 1;
+				return 0;
+			});
+		}
+		/** 拖拽实时换位：把 dragId 移到 targetId 前面（同位/no-op 返回原数组） */
+		function moveBefore(order, dragId, targetId) {
+			if (dragId === targetId) return [...order];
+			const from = order.indexOf(dragId);
+			const to = order.indexOf(targetId);
+			if (from === -1 || to === -1 || from === to) return [...order];
+			const next = [...order];
+			next.splice(from, 1);
+			next.splice(next.indexOf(targetId) + (from < to ? 1 : 0), 0, dragId);
+			return next;
+		}
+		/** 排序模式切换按钮（小图标，title 显示当前模式与切换目标） */
+		function SortButton({ mode, onCycle }) {
+			const next = cycleSortMode(mode);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				className: "d2-sort-btn",
+				title: `排序：${SORT_MODE_LABEL[mode]}（点击切换为 ${SORT_MODE_LABEL[next]}）`,
+				onClick: (e) => {
+					e.stopPropagation();
+					onCycle();
+				},
+				children: mode === "custom" ? "⇅" : mode === "az" ? "A↓" : "Z↓"
+			});
+		}
+		function makeRowDragHandlers(args) {
+			const { id, getDragId, setDragId, onHover, onCommit } = args;
+			return {
+				draggable: true,
+				onDragStart: (e) => {
+					e.dataTransfer.effectAllowed = "move";
+					e.dataTransfer.setData("text/plain", id);
+					setDragId(id);
+				},
+				onDragOver: (e) => {
+					const dragId = getDragId();
+					if (dragId === null || dragId === id) return;
+					e.preventDefault();
+					e.dataTransfer.dropEffect = "move";
+					onHover(dragId, id);
+				},
+				onDragEnd: () => {
+					setDragId(null);
+					onCommit();
+				}
+			};
+		}
+		//#endregion
 		//#region src/client/drag-resize.ts
 		function dragResize(e, startW, min, max, onLive, onDone) {
 			e.preventDefault();
@@ -6894,6 +7012,20 @@ window.__ModuleLoader__.load({
 			window.addEventListener("pointermove", move);
 			window.addEventListener("pointerup", up);
 		}
+		//#endregion
+		//#region src/client/RailNav.tsx
+		/**
+		* RailNav：Dock 左侧导航轨（两态一轨，只管看板页；0.8.0 起 APP 分区移除——
+		* APP 导航收敛到顶栏 tab + APP tab 的 col1 富状态列表，消灭两列重合）。
+		*
+		* - 图标态 52px：看板 tab + 每个看板页 mini icon（页名首字）
+		* - 中枢态 216px（拖宽 ≥100px 进入，松手吸附 52/216）：「工作台 + ⊕」看板页行
+		*   （双击重命名、悬停 × 删除）
+		* - 右缘 8px 拖拽把手：实时改宽（父层只写 state）；松手吸附后经 onWidthCommit 持久化；
+		*   双击把手 52↔216 快捷切换
+		* - tab 切换（看板 ↔ APP）由顶栏段控负责（DockShell），rail 不再承载
+		*/
+		const BOARDS_SORT_KEY = "openloop.dock.boards-sort.v1";
 		/** 拖宽 ≥ 此值进入中枢态（仅运行时判定；松手仍吸附 52/216） */
 		const RAIL_EXPAND_THRESHOLD = 100;
 		const RAIL_DRAG_MAX = 260;
@@ -6904,6 +7036,14 @@ window.__ModuleLoader__.load({
 			const expanded = width >= RAIL_EXPAND_THRESHOLD;
 			const [dragging, setDragging] = (0, react.useState)(false);
 			const [editingBoard, setEditingBoard] = (0, react.useState)(null);
+			const [sortMode, setSortMode] = (0, react.useState)(() => readSortMode(BOARDS_SORT_KEY));
+			const [dragId, setDragId] = (0, react.useState)(null);
+			const sortedBoards = applySortOrder(boards, sortMode, [], (b) => b.id, (b) => b.name);
+			const cycleMode = () => {
+				const next = cycleSortMode(sortMode);
+				setSortMode(next);
+				writeSortMode(BOARDS_SORT_KEY, next);
+			};
 			const openBoard = (id) => {
 				onSelectBoard(id);
 				onTabChange("board");
@@ -6930,14 +7070,21 @@ window.__ModuleLoader__.load({
 				"aria-label": "Dock 导航",
 				children: [expanded ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "d2-rail-sec",
-					children: ["工作台", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						className: "d2-sec-add",
-						title: "新增看板页",
-						onClick: onAddBoard,
-						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
-					})]
-				}), boards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+					children: [
+						"工作台",
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
+							mode: sortMode,
+							onCycle: cycleMode
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							className: "d2-sec-add",
+							title: "新增看板页",
+							onClick: onAddBoard,
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
+						})
+					]
+				}), sortedBoards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
 					className: "d2-board-rename d2-rail-rename",
 					autoFocus: true,
 					defaultValue: b.name,
@@ -6947,10 +7094,24 @@ window.__ModuleLoader__.load({
 					onKeyDown: (e) => onRenameKeyDown(e, b.id)
 				}, b.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 					type: "button",
-					className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
+					className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}${dragId === b.id ? " d2-row-dragging" : ""}`,
 					onClick: () => openBoard(b.id),
 					onDoubleClick: () => setEditingBoard(b.id),
-					title: "双击重命名",
+					title: "双击重命名；按住上下拖动调整顺序",
+					...makeRowDragHandlers({
+						id: b.id,
+						getDragId: () => dragId,
+						setDragId,
+						onHover: (drag, target) => {
+							dockStore.reorderBoards(moveBefore(sortedBoards.map((x) => x.id), drag, target));
+						},
+						onCommit: () => {
+							if (sortMode !== "custom") {
+								setSortMode("custom");
+								writeSortMode(BOARDS_SORT_KEY, "custom");
+							}
+						}
+					}),
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 14 }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
@@ -7036,6 +7197,8 @@ window.__ModuleLoader__.load({
 		* 旧版（rail APP 分区 + 230px 侧栏 + 详情两列）废止：APP 入口收敛到 col1，
 		* rail 只留看板页；预览复用 tile 渲染链（PanelSurface / McpAppResourceView）。
 		*/
+		const APPS_SORT_KEY = "openloop.dock.apps-sort.v1";
+		const APPS_ORDER_KEY = "openloop.dock.apps-order.v1";
 		/** scope 惰性单例（ArtifactFrame 主题注入；与 DockBoardView 同款） */
 		let appListScopeCache;
 		function getScope() {
@@ -7152,6 +7315,17 @@ window.__ModuleLoader__.load({
 			const { ui, expand, onHandleDown } = useCollapsibleColumn("openloop.dock.apps-col1.v1", 230);
 			const [appQuery, setAppQuery] = (0, react.useState)("");
 			const filteredApps = appQuery.trim().length === 0 ? apps : apps.filter((a) => `${a.name} ${a.id}`.toLowerCase().includes(appQuery.trim().toLowerCase()));
+			const [sortMode, setSortMode] = (0, react.useState)(() => readSortMode(APPS_SORT_KEY));
+			const [order, setOrder] = (0, react.useState)(() => readOrder(APPS_ORDER_KEY));
+			const orderRef = (0, react.useRef)(order);
+			orderRef.current = order;
+			const [dragId, setDragId] = (0, react.useState)(null);
+			const sortedApps = applySortOrder(filteredApps, sortMode, order, (a) => a.id, (a) => a.name);
+			const cycleMode = () => {
+				const next = cycleSortMode(sortMode);
+				setSortMode(next);
+				writeSortMode(APPS_SORT_KEY, next);
+			};
 			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-applist d2-col-collapsed",
 				"aria-label": "APP 列表（缩略）",
@@ -7198,10 +7372,17 @@ window.__ModuleLoader__.load({
 				children: [
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "d2-col-head",
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-tcap",
-							children: filteredApps.length
-						})]
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
+								mode: sortMode,
+								onCycle: cycleMode
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-tcap",
+								children: filteredApps.length
+							})
+						]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						style: { padding: "0 12px 6px" },
@@ -7217,13 +7398,29 @@ window.__ModuleLoader__.load({
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "d2-rows",
-						children: filteredApps.map((a) => {
+						children: sortedApps.map((a) => {
 							const tone = toneOf(a);
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 								type: "button",
-								className: `d2-app-row${a.id === selectedAppId ? " on" : ""}`,
+								className: `d2-app-row${a.id === selectedAppId ? " on" : ""}${dragId === a.id ? " d2-row-dragging" : ""}`,
 								onClick: () => onSelect(a.id),
-								title: tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : void 0,
+								title: `${tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : ""}按住上下拖动调整顺序`,
+								...makeRowDragHandlers({
+									id: a.id,
+									getDragId: () => dragId,
+									setDragId,
+									onHover: (drag, target) => {
+										const base = orderRef.current.length > 0 ? orderRef.current : apps.map((x) => x.id);
+										setOrder(moveBefore(base, drag, target));
+									},
+									onCommit: () => {
+										writeOrder(APPS_ORDER_KEY, orderRef.current);
+										if (sortMode !== "custom") {
+											setSortMode("custom");
+											writeSortMode(APPS_SORT_KEY, "custom");
+										}
+									}
+								}),
 								children: [
 									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
 									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
@@ -7266,6 +7463,34 @@ window.__ModuleLoader__.load({
 			const q = resQuery.trim().toLowerCase();
 			const components = q.length === 0 ? app.components : app.components.filter((c) => `${c.title} ${c.id}`.toLowerCase().includes(q));
 			const apis = q.length === 0 ? app.apis : app.apis.filter((a) => `${a.path} ${a.domain}`.toLowerCase().includes(q));
+			const COMP_ORDER_KEY = `openloop.dock.res-comp-order.v1:${app.id}`;
+			const API_ORDER_KEY = `openloop.dock.res-api-order.v1:${app.id}`;
+			const RES_SORT_KEY = "openloop.dock.res-sort.v1";
+			const [sortMode, setSortMode] = (0, react.useState)(() => readSortMode(RES_SORT_KEY));
+			const [compOrder, setCompOrder] = (0, react.useState)(() => readOrder(COMP_ORDER_KEY));
+			const [apiOrder, setApiOrder] = (0, react.useState)(() => readOrder(API_ORDER_KEY));
+			const compOrderRef = (0, react.useRef)(compOrder);
+			compOrderRef.current = compOrder;
+			const apiOrderRef = (0, react.useRef)(apiOrder);
+			apiOrderRef.current = apiOrder;
+			(0, react.useEffect)(() => {
+				setCompOrder(readOrder(COMP_ORDER_KEY));
+				setApiOrder(readOrder(API_ORDER_KEY));
+			}, [app.id]);
+			const [dragId, setDragId] = (0, react.useState)(null);
+			const sortedComponents = applySortOrder(components, sortMode, compOrder, (c) => c.id, (c) => c.title);
+			const sortedApis = applySortOrder(apis, sortMode, apiOrder, (a) => a.id, (a) => a.path);
+			const cycleMode = () => {
+				const next = cycleSortMode(sortMode);
+				setSortMode(next);
+				writeSortMode(RES_SORT_KEY, next);
+			};
+			const commitCustom = (mode) => {
+				if (mode !== "custom") {
+					setSortMode("custom");
+					writeSortMode(RES_SORT_KEY, "custom");
+				}
+			};
 			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-rescol d2-col-collapsed",
 				"aria-label": "资源列表（缩略）",
@@ -7352,6 +7577,13 @@ window.__ModuleLoader__.load({
 							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 								className: "d2-rescol-kind",
 								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind })
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: { marginLeft: "auto" },
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortButton, {
+									mode: sortMode,
+									onCycle: cycleMode
+								})
 							})
 						]
 					}),
@@ -7404,14 +7636,27 @@ window.__ModuleLoader__.load({
 											cursor: "default"
 										},
 										children: "暂无组件资源"
-									}) : null, components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									}) : null, sortedComponents.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 										type: "button",
-										className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
+										className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}${dragId === c.id ? " d2-row-dragging" : ""}`,
 										onClick: () => onSelect({
 											kind: "component",
 											rid: c.id
 										}),
-										title: "选中后在右侧预览",
+										title: "选中后在右侧预览；按住上下拖动调整顺序",
+										...makeRowDragHandlers({
+											id: c.id,
+											getDragId: () => dragId,
+											setDragId,
+											onHover: (drag, target) => {
+												const base = compOrderRef.current.length > 0 ? compOrderRef.current : components.map((x) => x.id);
+												setCompOrder(moveBefore(base, drag, target));
+											},
+											onCommit: () => {
+												writeOrder(COMP_ORDER_KEY, compOrderRef.current);
+												commitCustom(sortMode);
+											}
+										}),
 										children: [
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
 											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -7455,14 +7700,27 @@ window.__ModuleLoader__.load({
 											cursor: "default"
 										},
 										children: "暂无 API 资源"
-									}) : null, apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									}) : null, sortedApis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 										type: "button",
-										className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
+										className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}${dragId === a.id ? " d2-row-dragging" : ""}`,
 										onClick: () => onSelect({
 											kind: "api",
 											rid: a.id
 										}),
-										title: "选中后在右侧查看详情",
+										title: "选中后在右侧查看详情；按住上下拖动调整顺序",
+										...makeRowDragHandlers({
+											id: a.id,
+											getDragId: () => dragId,
+											setDragId,
+											onHover: (drag, target) => {
+												const base = apiOrderRef.current.length > 0 ? apiOrderRef.current : apis.map((x) => x.id);
+												setApiOrder(moveBefore(base, drag, target));
+											},
+											onCommit: () => {
+												writeOrder(API_ORDER_KEY, apiOrderRef.current);
+												commitCustom(sortMode);
+											}
+										}),
 										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 											className: "d2-meta",
 											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -7559,7 +7817,10 @@ window.__ModuleLoader__.load({
 								})
 							] }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 								className: "d2-desc",
-								children: app.desc
+								children: app.desc.trim().length > 0 ? app.desc : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: { opacity: .55 },
+									children: "暂无描述——让 Agent 经 app_backend upsert_app 补充 description（面向用户的一句话：这个 APP 是什么、给谁用）"
+								})
 							})]
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: app.kind }),
@@ -8278,6 +8539,11 @@ window.__ModuleLoader__.load({
 .d2-resize-h { position: absolute; top: 0; right: -2px; width: 14px; height: 100%; cursor: col-resize; z-index: 50; touch-action: none; }
 .d2-search { width: 128px; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-2, #f6f6f7); color: var(--dsw-alias-label-primary, inherit); font-size: 11px; font-family: inherit; outline: none; }
 .d2-search:focus { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 45%, transparent); }
+.d2-sort-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 18px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); background: none; color: var(--dsw-alias-label-tertiary, inherit); font-size: 9.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.d2-sort-btn:hover { color: var(--dsw-alias-label-primary, inherit); background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-row-dragging { opacity: .45; }
+.d2-app-row, .d2-rail-row, .d2-resource-row { cursor: grab; }
+.d2-app-row:active, .d2-rail-row:active, .d2-resource-row:active { cursor: grabbing; }
 .d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; right: 3px; width: 4px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.3)); transition: background .15s, width .15s; }
 .d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 6px; }
 

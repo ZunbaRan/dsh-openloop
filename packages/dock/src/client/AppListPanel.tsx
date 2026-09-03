@@ -7,11 +7,15 @@
  * 旧版（rail APP 分区 + 230px 侧栏 + 详情两列）废止：APP 入口收敛到 col1，
  * rail 只留看板页；预览复用 tile 渲染链（PanelSurface / McpAppResourceView）。
  */
-import { useEffect, useState, type PointerEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import type { AppDescriptor, AppComponentDescriptor } from './app-registry.ts'
 import { buildTileSourceForComponent } from './app-registry.ts'
 import { AppIcon, KindBadge, TypeBadge } from './badges.tsx'
 import { RelChips, RelDeclSection, RelTryIt, RelatedPages } from './rel-views.tsx'
+import { applySortOrder, cycleSortMode, makeRowDragHandlers, moveBefore, readOrder, readSortMode, SortButton, writeOrder, writeSortMode, type SortMode } from './sort.tsx'
+
+const APPS_SORT_KEY = 'openloop.dock.apps-sort.v1'
+const APPS_ORDER_KEY = 'openloop.dock.apps-order.v1'
 import { icons } from './icons.tsx'
 import { DependencyMissing, getBaseClient } from './base-bridge.tsx'
 import { getPanelsClient, getMcpAppsClient, getArtifactClient } from './openloop-clients.ts'
@@ -159,6 +163,18 @@ export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListP
   const filteredApps = appQuery.trim().length === 0
     ? apps
     : apps.filter(a => `${a.name} ${a.id}`.toLowerCase().includes(appQuery.trim().toLowerCase()))
+  // 应用拖拽排序（2026-09-03）：custom = 用户拖拽顺序（localStorage 持久化）；az/za 仅影响展示
+  const [sortMode, setSortMode] = useState<SortMode>(() => readSortMode(APPS_SORT_KEY))
+  const [order, setOrder] = useState<string[]>(() => readOrder(APPS_ORDER_KEY))
+  const orderRef = useRef(order)
+  orderRef.current = order
+  const [dragId, setDragId] = useState<string | null>(null)
+  const sortedApps = applySortOrder(filteredApps, sortMode, order, a => a.id, a => a.name)
+  const cycleMode = (): void => {
+    const next = cycleSortMode(sortMode)
+    setSortMode(next)
+    writeSortMode(APPS_SORT_KEY, next)
+  }
 
   if (ui.collapsed) {
     return (
@@ -188,6 +204,7 @@ export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListP
     <aside className="d2-applist" style={{ width: ui.width }} aria-label="APP 列表">
       <div className="d2-col-head">
         <span>APP</span>
+        <SortButton mode={sortMode} onCycle={cycleMode} />
         <span className="d2-tcap">{filteredApps.length}</span>
       </div>
       <div style={{ padding: '0 12px 6px' }}>
@@ -202,15 +219,28 @@ export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListP
         />
       </div>
       <div className="d2-rows">
-        {filteredApps.map(a => {
+        {sortedApps.map(a => {
           const tone = toneOf(a)
           return (
             <button
               type="button"
               key={a.id}
-              className={`d2-app-row${a.id === selectedAppId ? ' on' : ''}`}
+              className={`d2-app-row${a.id === selectedAppId ? ' on' : ''}${dragId === a.id ? ' d2-row-dragging' : ''}`}
               onClick={() => onSelect(a.id)}
-              title={tone === 'warn' ? 'MCP server 不可达（惰性重连中）' : tone === 'off' ? 'MCP server 已关闭' : undefined}
+              title={`${tone === 'warn' ? 'MCP server 不可达（惰性重连中）' : tone === 'off' ? 'MCP server 已关闭' : ''}按住上下拖动调整顺序`}
+              {...makeRowDragHandlers({
+                id: a.id,
+                getDragId: () => dragId,
+                setDragId,
+                onHover: (drag, target) => {
+                  const base = orderRef.current.length > 0 ? orderRef.current : apps.map(x => x.id)
+                  setOrder(moveBefore(base, drag, target))
+                },
+                onCommit: () => {
+                  writeOrder(APPS_ORDER_KEY, orderRef.current)
+                  if (sortMode !== 'custom') { setSortMode('custom'); writeSortMode(APPS_SORT_KEY, 'custom') }
+                },
+              })}
             >
               <AppIcon app={a} />
               <span className="d2-meta">
@@ -243,6 +273,31 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
   const q = resQuery.trim().toLowerCase()
   const components = q.length === 0 ? app.components : app.components.filter(c => `${c.title} ${c.id}`.toLowerCase().includes(q))
   const apis = q.length === 0 ? app.apis : app.apis.filter(a => `${a.path} ${a.domain}`.toLowerCase().includes(q))
+  // 资源拖拽排序（2026-09-03）：组件/API 分组各自维护拖拽顺序，按 app 持久化
+  const COMP_ORDER_KEY = `openloop.dock.res-comp-order.v1:${app.id}`
+  const API_ORDER_KEY = `openloop.dock.res-api-order.v1:${app.id}`
+  const RES_SORT_KEY = 'openloop.dock.res-sort.v1'
+  const [sortMode, setSortMode] = useState<SortMode>(() => readSortMode(RES_SORT_KEY))
+  const [compOrder, setCompOrder] = useState<string[]>(() => readOrder(COMP_ORDER_KEY))
+  const [apiOrder, setApiOrder] = useState<string[]>(() => readOrder(API_ORDER_KEY))
+  const compOrderRef = useRef(compOrder); compOrderRef.current = compOrder
+  const apiOrderRef = useRef(apiOrder); apiOrderRef.current = apiOrder
+  useEffect(() => {
+    setCompOrder(readOrder(COMP_ORDER_KEY))
+    setApiOrder(readOrder(API_ORDER_KEY))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.id])
+  const [dragId, setDragId] = useState<string | null>(null)
+  const sortedComponents = applySortOrder(components, sortMode, compOrder, c => c.id, c => c.title)
+  const sortedApis = applySortOrder(apis, sortMode, apiOrder, a => a.id, a => a.path)
+  const cycleMode = (): void => {
+    const next = cycleSortMode(sortMode)
+    setSortMode(next)
+    writeSortMode(RES_SORT_KEY, next)
+  }
+  const commitCustom = (mode: SortMode): void => {
+    if (mode !== 'custom') { setSortMode('custom'); writeSortMode(RES_SORT_KEY, 'custom') }
+  }
 
   if (ui.collapsed) {
     return (
@@ -293,6 +348,7 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
         <AppIcon app={app} size={24} />
         <span className="d2-rescol-name">{app.name}</span>
         <span className="d2-rescol-kind"><KindBadge kind={app.kind} /></span>
+        <span style={{ marginLeft: 'auto' }}><SortButton mode={sortMode} onCycle={cycleMode} /></span>
       </div>
       <div style={{ padding: '0 12px 6px' }}>
         <input
@@ -320,13 +376,23 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
           <h3>组件资源 <span className="d2-badge kind">{components.length}</span></h3>
           <div className="d2-resource-list">
             {components.length === 0 ? <div className="d2-resource-row" style={{ color: 'var(--dsw-alias-label-caption, #888)', fontSize: 11.5, cursor: 'default' }}>暂无组件资源</div> : null}
-            {components.map(c => (
+            {sortedComponents.map(c => (
               <button
                 type="button"
                 key={c.id}
-                className={`d2-resource-row${selection.kind === 'component' && selection.rid === c.id ? ' on' : ''}`}
+                className={`d2-resource-row${selection.kind === 'component' && selection.rid === c.id ? ' on' : ''}${dragId === c.id ? ' d2-row-dragging' : ''}`}
                 onClick={() => onSelect({ kind: 'component', rid: c.id })}
-                title="选中后在右侧预览"
+                title="选中后在右侧预览；按住上下拖动调整顺序"
+                {...makeRowDragHandlers({
+                  id: c.id,
+                  getDragId: () => dragId,
+                  setDragId,
+                  onHover: (drag, target) => {
+                    const base = compOrderRef.current.length > 0 ? compOrderRef.current : components.map(x => x.id)
+                    setCompOrder(moveBefore(base, drag, target))
+                  },
+                  onCommit: () => { writeOrder(COMP_ORDER_KEY, compOrderRef.current); commitCustom(sortMode) },
+                })}
               >
                 <TypeBadge type={c.type} />
                 <div className="d2-meta">
@@ -344,13 +410,23 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
           <h3>API 资源 <span className="d2-badge kind">{apis.length}</span></h3>
           <div className="d2-resource-list">
             {apis.length === 0 ? <div className="d2-resource-row" style={{ color: 'var(--dsw-alias-label-caption, #888)', fontSize: 11.5, cursor: 'default' }}>暂无 API 资源</div> : null}
-            {apis.map(a => (
+            {sortedApis.map(a => (
               <button
                 type="button"
                 key={a.id}
-                className={`d2-resource-row${selection.kind === 'api' && selection.rid === a.id ? ' on' : ''}`}
+                className={`d2-resource-row${selection.kind === 'api' && selection.rid === a.id ? ' on' : ''}${dragId === a.id ? ' d2-row-dragging' : ''}`}
                 onClick={() => onSelect({ kind: 'api', rid: a.id })}
-                title="选中后在右侧查看详情"
+                title="选中后在右侧查看详情；按住上下拖动调整顺序"
+                {...makeRowDragHandlers({
+                  id: a.id,
+                  getDragId: () => dragId,
+                  setDragId,
+                  onHover: (drag, target) => {
+                    const base = apiOrderRef.current.length > 0 ? apiOrderRef.current : apis.map(x => x.id)
+                    setApiOrder(moveBefore(base, drag, target))
+                  },
+                  onCommit: () => { writeOrder(API_ORDER_KEY, apiOrderRef.current); commitCustom(sortMode) },
+                })}
               >
                 <span className={`d2-dot ${a.status}`} />
                 <div className="d2-meta">
@@ -428,7 +504,11 @@ export function AppDetail({ app, pinnedIds, onPin, onSelectComponent, onManaged 
         <AppIcon app={app} size={36} />
         <div className="d2-title-block">
           <h2>{app.name} <span className="d2-ver">v{app.version}</span></h2>
-          <div className="d2-desc">{app.desc}</div>
+          <div className="d2-desc">
+            {app.desc.trim().length > 0
+              ? app.desc
+              : <span style={{ opacity: 0.55 }}>暂无描述——让 Agent 经 app_backend upsert_app 补充 description（面向用户的一句话：这个 APP 是什么、给谁用）</span>}
+          </div>
         </div>
         <KindBadge kind={app.kind} />
         {/* 管理入口（0.4.0 自管理：第三方=断开/删除；自研=删除；内置=无） */}

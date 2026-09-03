@@ -10,6 +10,10 @@
  * - tab 切换（看板 ↔ APP）由顶栏段控负责（DockShell），rail 不再承载
  */
 import { useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { applySortOrder, cycleSortMode, makeRowDragHandlers, moveBefore, readSortMode, SortButton, writeSortMode, type SortMode } from './sort.tsx'
+
+const BOARDS_SORT_KEY = 'openloop.dock.boards-sort.v1'
+import { dockStore } from './store.ts'
 import { icons } from './icons.tsx'
 import { dragResize } from './drag-resize.ts'
 import type { DockBoardEntry } from './store.ts'
@@ -46,6 +50,16 @@ export function RailNav(props: RailNavProps): ReactNode {
   const expanded = width >= RAIL_EXPAND_THRESHOLD
   const [dragging, setDragging] = useState(false)
   const [editingBoard, setEditingBoard] = useState<string | null>(null)
+  // 拖拽排序（2026-09-03）：看板页顺序 = dockStore 的 boards 顺序（custom 模式即存储序）；
+  // az/za 仅影响展示。拖动即切回 custom。
+  const [sortMode, setSortMode] = useState<SortMode>(() => readSortMode(BOARDS_SORT_KEY))
+  const [dragId, setDragId] = useState<string | null>(null)
+  const sortedBoards = applySortOrder(boards, sortMode, [], b => b.id, b => b.name)
+  const cycleMode = (): void => {
+    const next = cycleSortMode(sortMode)
+    setSortMode(next)
+    writeSortMode(BOARDS_SORT_KEY, next)
+  }
 
   const openBoard = (id: string): void => {
     onSelectBoard(id)
@@ -77,9 +91,10 @@ export function RailNav(props: RailNavProps): ReactNode {
         <>
           <div className="d2-rail-sec">
             工作台
+            <SortButton mode={sortMode} onCycle={cycleMode} />
             <button type="button" className="d2-sec-add" title="新增看板页" onClick={onAddBoard}><icons.plus size={11} /></button>
           </div>
-          {boards.map(b => (
+          {sortedBoards.map(b => (
             editingBoard === b.id ? (
               <input
                 key={b.id}
@@ -95,10 +110,22 @@ export function RailNav(props: RailNavProps): ReactNode {
               <button
                 type="button"
                 key={b.id}
-                className={`d2-rail-row${tab === 'board' && b.id === activeBoardId ? ' on' : ''}`}
+                className={`d2-rail-row${tab === 'board' && b.id === activeBoardId ? ' on' : ''}${dragId === b.id ? ' d2-row-dragging' : ''}`}
                 onClick={() => openBoard(b.id)}
                 onDoubleClick={() => setEditingBoard(b.id)}
-                title="双击重命名"
+                title="双击重命名；按住上下拖动调整顺序"
+                {...makeRowDragHandlers({
+                  id: b.id,
+                  getDragId: () => dragId,
+                  setDragId,
+                  onHover: (drag, target) => {
+                    // 实时换位（存储序即 custom 序）
+                    dockStore.reorderBoards(moveBefore(sortedBoards.map(x => x.id), drag, target))
+                  },
+                  onCommit: () => {
+                    if (sortMode !== 'custom') { setSortMode('custom'); writeSortMode(BOARDS_SORT_KEY, 'custom') }
+                  },
+                })}
               >
                 <icons.board size={14} />
                 <span className="d2-lbl">{b.name}</span>

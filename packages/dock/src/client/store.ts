@@ -298,6 +298,16 @@ export class DockStore {
     this.emit({ ...this.state, activeBoardId: id })
   }
 
+  /** 看板页重排（2026-09-03 拖拽排序）：传入完整 id 顺序；未知 id 忽略，缺漏 id 续后 */
+  reorderBoards(ids: readonly string[]): void {
+    this.ensureInit()
+    const byId = new Map(this.state.boards.map(b => [b.id, b]))
+    const next = ids.map(id => byId.get(id)).filter((b): b is (typeof this.state.boards)[number] => b !== undefined)
+    for (const b of this.state.boards) if (!next.includes(b)) next.push(b)
+    if (next.length === 0) return
+    this.emit({ ...this.state, boards: next })
+  }
+
   // ---- tile 操作（全部作用于激活板） ----
 
   setTileAlias(tileId: string, alias: string | null): void {

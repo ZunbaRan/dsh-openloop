@@ -66,6 +66,11 @@ export const V2_CSS = `
 .d2-resize-h { position: absolute; top: 0; right: -2px; width: 14px; height: 100%; cursor: col-resize; z-index: 50; touch-action: none; }
 .d2-search { width: 128px; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-2, #f6f6f7); color: var(--dsw-alias-label-primary, inherit); font-size: 11px; font-family: inherit; outline: none; }
 .d2-search:focus { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 45%, transparent); }
+.d2-sort-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 18px; padding: 0 5px; border-radius: 5px; border: 1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18)); background: none; color: var(--dsw-alias-label-tertiary, inherit); font-size: 9.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.d2-sort-btn:hover { color: var(--dsw-alias-label-primary, inherit); background: var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12)); }
+.d2-row-dragging { opacity: .45; }
+.d2-app-row, .d2-rail-row, .d2-resource-row { cursor: grab; }
+.d2-app-row:active, .d2-rail-row:active, .d2-resource-row:active { cursor: grabbing; }
 .d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; right: 3px; width: 4px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.3)); transition: background .15s, width .15s; }
 .d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 6px; }
 

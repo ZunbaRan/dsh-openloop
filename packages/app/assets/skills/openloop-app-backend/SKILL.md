@@ -46,7 +46,8 @@
 
 注册一个自研 APP 并登记资源：
 
-1. `upsert_app`：`app: { name: "my-sales", displayName: "我的销售看板", kind: "local", version: "0.1.0", description: "…" }`
+1. `upsert_app`：`app: { name: "my-sales", displayName: "我的销售看板", kind: "local", version: "0.1.0", description: "面向一线销售：周度业绩与订单追踪的一站式看板" }`
+   - **description 必填且面向用户**（≤360 字符）：写「这个 APP 是什么、给谁用、解决什么」，用户会在 APP 详情页第一眼看到它——不要写技术实现、不要写"MCP/panel/组件"这类内部术语；已有 APP 缺描述时用 `upsert_app` 同名补上（幂等更新，不会覆盖用户改动）
 2. `register_component`：`appName: "my-sales"`, `component: { rid: "my-sales:weekly", kind: "panel", title: "周度业绩" }`
 3. `register_api`：`appName: "my-sales"`, `api: { rid: "my-sales:orders", domain: "api.example.com", path: "/v1/orders", authType: "key" }`
 4. `set_api_key`：`rid: "my-sales:orders"`, `apiKey: "<用户提供的 key>"`
