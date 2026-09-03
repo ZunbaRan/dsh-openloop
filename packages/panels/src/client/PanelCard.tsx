@@ -493,8 +493,14 @@ function WidgetCell({ widget, theme, data }: { widget: WidgetUnit; theme: PanelV
   const props = asRecord(source.props) ?? {}
   // §5.2 数据注入：api/static 解析结果为 plain object 时浅合并覆盖 props（数据优先），
   // 合并后重新过该组件 validate（fail-closed：数据形态越界同样降级占位而非硬渲染）。
+  // 数组形态（联动 v1 列表场景：posts?userId=… 等数组接口）注入为 rows——
+  // data-table 等列表型 preset 直接可渲染。
   const dataRecord = asRecord(data)
-  const effectiveProps = dataRecord ? { ...props, ...dataRecord } : props
+  const effectiveProps = dataRecord
+    ? { ...props, ...dataRecord }
+    : Array.isArray(data)
+      ? { ...props, rows: data }
+      : props
   const result = preset.validate(effectiveProps)
   if (!result.ok) {
     const first = result.errors[0]

@@ -9243,6 +9243,9 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			const effectiveProps = dataRecord ? {
 				...props,
 				...dataRecord
+			} : Array.isArray(data) ? {
+				...props,
+				rows: data
 			} : props;
 			const result = preset.validate(effectiveProps);
 			if (!result.ok) {
