@@ -6022,232 +6022,100 @@ window.__ModuleLoader__.load({
 				})]
 			});
 		}
-		/** 从面板定义取静态 rows（首个 preset widget 的 props.rows；api 列表无静态行返回 undefined） */
-		function staticRowsOf(rid) {
-			const panels = getPanelsClient();
-			const comp = lookupRegistryComponent(rid);
-			if (!panels || !comp) return void 0;
-			const def = panels.panelDefinitionFromEntry(comp.entry);
-			if (!def) return void 0;
-			for (const w of def.widgets) {
-				if (w.source.type !== "preset") continue;
-				const rows = w.source.props?.rows;
-				if (Array.isArray(rows)) return rows;
-			}
-		}
+		/**
+		* 不再渲染小预览表（2026-09-03 用户反馈）：上方 ComponentPreview 的
+		* PanelSurface 自带行点击事件委托，点行即发事件到 relBus；这里订阅同一
+		* 事件，把全部消费方面板带参渲染在下方。
+		*/
 		function RelTryIt({ rid }) {
 			const emit = relationsOf(rid)?.emits?.[0];
-			const rows = (0, react.useMemo)(() => emit ? staticRowsOf(rid) : void 0, [rid, emit]);
+			const emitEvent = emit?.event;
 			const [selected, setSelected] = (0, react.useState)(null);
+			(0, react.useEffect)(() => {
+				const panels = getPanelsClient();
+				if (!emitEvent || !panels) return;
+				return panels.relBus().subscribe((event, payload) => {
+					if (event === emitEvent) setSelected(payload);
+				});
+			}, [emitEvent]);
 			const panels = getPanelsClient();
 			if (!emit || !panels) return null;
 			const consumers = buildRelConsumesIndex().get(emit.event) ?? (emit.target ? [{
 				rid: emit.target.rid,
 				param: ""
 			}] : []);
-			const pick = (rowIndex) => {
-				const row = rows?.[rowIndex];
-				if (!row) return;
-				const payload = panels.evalPayloadTemplate(emit.payload, row, {});
-				setSelected({
-					rowIndex,
-					payload
-				});
-			};
-			const th = {
-				fontSize: 9.5,
-				fontWeight: 600,
-				color: "var(--dsw-alias-label-caption, #888)",
-				textAlign: "left",
-				padding: "5px 10px",
-				borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
-			};
-			const td = {
-				fontSize: 10.5,
-				padding: "5px 10px",
-				borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-				color: "var(--dsw-alias-label-primary, inherit)"
-			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				"data-openloop-rel-try": rid,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: secLabelStyle,
 					children: ["关联预览 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						style: { fontWeight: 400 },
-						children: "Try it · 点行看效果"
+						children: "Try it · 在上方预览里点行看效果"
 					})]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				}), selected ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
 						display: "flex",
-						alignItems: "stretch",
+						alignItems: "center",
+						gap: 7,
+						marginBottom: 8,
+						fontSize: 10.5,
+						color: "var(--dsw-alias-label-secondary, inherit)"
+					},
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+						style: {
+							fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
+							fontSize: 9.5,
+							color: "#b06ad9"
+						},
+						children: ["⚡ ", emit.event]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: {
+							fontFamily: "ui-monospace, monospace",
+							fontSize: 9.5,
+							opacity: .75
+						},
+						children: Object.entries(selected).map(([k, v]) => `${k}=${String(v)}`).join(" · ")
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						display: "flex",
+						flexDirection: "column",
 						gap: 10
 					},
+					children: consumers.map((c) => {
+						const panel = panels.panelDefinitionFromEntry(lookupRegistryComponent(c.rid)?.entry);
+						if (!panel) return null;
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+								borderRadius: 9,
+								overflow: "hidden"
+							},
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(panels.PanelSurface, {
+								meta: {
+									kind: "openloop.panel",
+									version: 1,
+									panel,
+									resolved: {},
+									resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+								},
+								relParams: selected
+							})
+						}, c.rid);
+					})
+				})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						border: "1px dashed var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+						borderRadius: 9,
+						padding: "14px 16px",
+						fontSize: 11,
+						color: "var(--dsw-alias-label-caption, #888)",
+						lineHeight: 1.7
+					},
 					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: {
-								flex: 1,
-								minWidth: 0
-							},
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								style: {
-									border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-									borderRadius: 9,
-									overflow: "hidden"
-								},
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-									style: {
-										padding: "6px 10px",
-										fontSize: 10.5,
-										fontWeight: 600,
-										background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
-										borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
-									},
-									children: [
-										titleOfRid(rid),
-										" ",
-										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											style: {
-												fontWeight: 400,
-												fontSize: 9,
-												color: "var(--dsw-alias-label-caption, #888)"
-											},
-											children: "点行试试"
-										})
-									]
-								}), rows ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
-									style: {
-										width: "100%",
-										borderCollapse: "collapse"
-									},
-									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
-										style: th,
-										children: "#"
-									}), Object.keys(rows[0] ?? {}).slice(0, 3).map((k) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
-										style: th,
-										children: k
-									}, k))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: rows.slice(0, 5).map((row, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
-										style: {
-											cursor: "pointer",
-											background: selected?.rowIndex === i ? "rgba(65,118,230,.1)" : void 0,
-											boxShadow: selected?.rowIndex === i ? "inset 3px 0 0 var(--dsw-alias-state-business-primary, #4176e6)" : void 0
-										},
-										onClick: () => pick(i),
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-											style: td,
-											children: i + 1
-										}), Object.keys(row).slice(0, 3).map((k) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
-											style: {
-												...td,
-												maxWidth: 90,
-												overflow: "hidden",
-												textOverflow: "ellipsis",
-												whiteSpace: "nowrap"
-											},
-											children: String(row[k])
-										}, k))]
-									}, i)) })]
-								}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: {
-										padding: 12,
-										fontSize: 10.5,
-										color: "var(--dsw-alias-label-caption, #888)"
-									},
-									children: "行数据来自接口——请在对话流或看板里点选体验"
-								})]
-							})
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: {
-								flex: "0 0 46px",
-								display: "flex",
-								flexDirection: "column",
-								alignItems: "center",
-								justifyContent: "center",
-								gap: 4,
-								color: "#b06ad9"
-							},
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: {
-										fontSize: 9,
-										color: selected ? "#b06ad9" : "var(--dsw-alias-label-caption, #888)",
-										fontWeight: selected ? 600 : 400,
-										textAlign: "center",
-										lineHeight: 1.4
-									},
-									children: selected ? Object.entries(selected.payload).map(([k, v]) => `${k}=${String(v)}`).join(" ") : "等待点选"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: {
-										width: "100%",
-										height: 2,
-										background: selected ? "linear-gradient(90deg, transparent, #b06ad9, transparent)" : "var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-										position: "relative"
-									},
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-										position: "absolute",
-										right: 0,
-										top: -3,
-										border: "4px solid transparent",
-										borderLeftColor: selected ? "#b06ad9" : "var(--dsw-alias-border-l2, rgba(127,127,127,.18))"
-									} })
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: {
-										fontSize: 9,
-										color: "var(--dsw-alias-label-caption, #888)",
-										textAlign: "center"
-									},
-									children: selected ? "即时打开" : "click a row"
-								})
-							]
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: {
-								flex: 1,
-								minWidth: 0,
-								display: "flex",
-								flexDirection: "column",
-								gap: 10
-							},
-							children: selected ? consumers.map((c) => {
-								const panel = panels.panelDefinitionFromEntry(lookupRegistryComponent(c.rid)?.entry);
-								if (!panel) return null;
-								return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-									style: {
-										border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-										borderRadius: 9,
-										overflow: "hidden"
-									},
-									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(panels.PanelSurface, {
-										meta: {
-											kind: "openloop.panel",
-											version: 1,
-											panel,
-											resolved: {},
-											resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
-										},
-										relParams: selected.payload
-									})
-								}, c.rid);
-							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: {
-									border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-									borderRadius: 9,
-									minHeight: 120,
-									display: "flex",
-									alignItems: "center",
-									justifyContent: "center"
-								},
-								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-									style: {
-										fontSize: 10.5,
-										color: "var(--dsw-alias-label-caption, #888)"
-									},
-									children: "详情将在这里出现"
-								})
-							})
-						})
+						"在上面的预览里点一行，",
+						consumers.map((c) => `「${titleOfRid(c.rid)}」`).join("、"),
+						" 会即时出现在这里 · click a row in the preview above to open the linked pages"
 					]
 				})]
 			});

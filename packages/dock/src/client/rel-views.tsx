@@ -6,7 +6,7 @@
  * - RelatedPages：相关页面跳转 chips
  * 数据源：registry 组件 entry.relations（panels 契约形态，经懒桥解析）。
  */
-import { useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { getPanelsClient } from './openloop-clients.ts'
 import { lookupRegistryComponent, getRegistryComponents } from './app-registry.ts'
 
@@ -169,105 +169,63 @@ export function RelDeclSection({ rid }: { rid: string }): ReactNode {
 }
 
 // ---------------------------------------------------------------------
-// 组件详情：关联预览（可交互——点行 → 目标面板带参渲染）
+// 组件详情：关联预览（直接点上方真实预览的行 → 联动页面出现在下方）
 // ---------------------------------------------------------------------
 
-/** 从面板定义取静态 rows（首个 preset widget 的 props.rows；api 列表无静态行返回 undefined） */
-function staticRowsOf(rid: string): JsonObject[] | undefined {
-  const panels = getPanelsClient()
-  const comp = lookupRegistryComponent(rid)
-  if (!panels || !comp) return undefined
-  const def = panels.panelDefinitionFromEntry(comp.entry)
-  if (!def) return undefined
-  for (const w of def.widgets) {
-    if (w.source.type !== 'preset') continue
-    const rows = (w.source.props as Record<string, unknown> | undefined)?.rows
-    if (Array.isArray(rows)) return rows as JsonObject[]
-  }
-  return undefined
-}
-
+/**
+ * 不再渲染小预览表（2026-09-03 用户反馈）：上方 ComponentPreview 的
+ * PanelSurface 自带行点击事件委托，点行即发事件到 relBus；这里订阅同一
+ * 事件，把全部消费方面板带参渲染在下方。
+ */
 export function RelTryIt({ rid }: { rid: string }): ReactNode {
   const rels = relationsOf(rid)
   const emit = rels?.emits?.[0]
-  const rows = useMemo(() => (emit ? staticRowsOf(rid) : undefined), [rid, emit])
-  const [selected, setSelected] = useState<{ rowIndex: number; payload: JsonObject } | null>(null)
+  const emitEvent = emit?.event
+  const [selected, setSelected] = useState<JsonObject | null>(null)
+
+  useEffect(() => {
+    const panels = getPanelsClient()
+    if (!emitEvent || !panels) return
+    return panels.relBus().subscribe((event, payload) => {
+      if (event === emitEvent) setSelected(payload)
+    })
+  }, [emitEvent])
+
   const panels = getPanelsClient()
   if (!emit || !panels) return null
   const consumers = buildRelConsumesIndex().get(emit.event)
     ?? (emit.target ? [{ rid: emit.target.rid, param: '' }] : [])
 
-  const pick = (rowIndex: number): void => {
-    const row = rows?.[rowIndex]
-    if (!row) return
-    const payload = panels.evalPayloadTemplate(emit.payload, row, {})
-    setSelected({ rowIndex, payload })
-  }
-
-  const th: CSSProperties = { fontSize: 9.5, fontWeight: 600, color: 'var(--dsw-alias-label-caption, #888)', textAlign: 'left', padding: '5px 10px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))' }
-  const td: CSSProperties = { fontSize: 10.5, padding: '5px 10px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', color: 'var(--dsw-alias-label-primary, inherit)' }
   return (
     <div data-openloop-rel-try={rid}>
-      <div style={secLabelStyle}>关联预览 <span style={{ fontWeight: 400 }}>Try it · 点行看效果</span></div>
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', borderRadius: 9, overflow: 'hidden' }}>
-            <div style={{ padding: '6px 10px', fontSize: 10.5, fontWeight: 600, background: 'var(--dsw-alias-bg-layer-2, #f6f6f7)', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))' }}>
-              {titleOfRid(rid)} <span style={{ fontWeight: 400, fontSize: 9, color: 'var(--dsw-alias-label-caption, #888)' }}>点行试试</span>
-            </div>
-            {rows ? (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><th style={th}>#</th>{Object.keys(rows[0] ?? {}).slice(0, 3).map(k => <th key={k} style={th}>{k}</th>)}</tr></thead>
-                <tbody>
-                  {rows.slice(0, 5).map((row, i) => (
-                    <tr
-                      key={i}
-                      style={{
-                        cursor: 'pointer',
-                        background: selected?.rowIndex === i ? 'rgba(65,118,230,.1)' : undefined,
-                        boxShadow: selected?.rowIndex === i ? 'inset 3px 0 0 var(--dsw-alias-state-business-primary, #4176e6)' : undefined,
-                      }}
-                      onClick={() => pick(i)}
-                    >
-                      <td style={td}>{i + 1}</td>
-                      {Object.keys(row).slice(0, 3).map(k => <td key={k} style={{ ...td, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(row[k])}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div style={{ padding: 12, fontSize: 10.5, color: 'var(--dsw-alias-label-caption, #888)' }}>行数据来自接口——请在对话流或看板里点选体验</div>
-            )}
+      <div style={secLabelStyle}>关联预览 <span style={{ fontWeight: 400 }}>Try it · 在上方预览里点行看效果</span></div>
+      {selected ? (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8, fontSize: 10.5, color: 'var(--dsw-alias-label-secondary, inherit)' }}>
+            <span style={{ fontFamily: 'ui-monospace, SF Mono, Menlo, monospace', fontSize: 9.5, color: '#b06ad9' }}>⚡ {emit.event}</span>
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 9.5, opacity: .75 }}>{Object.entries(selected).map(([k, v]) => `${k}=${String(v)}`).join(' · ')}</span>
           </div>
-        </div>
-        <div style={{ flex: '0 0 46px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: '#b06ad9' }}>
-          <div style={{ fontSize: 9, color: selected ? '#b06ad9' : 'var(--dsw-alias-label-caption, #888)', fontWeight: selected ? 600 : 400, textAlign: 'center', lineHeight: 1.4 }}>
-            {selected ? Object.entries(selected.payload).map(([k, v]) => `${k}=${String(v)}`).join(' ') : '等待点选'}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {consumers.map(c => {
+              const panel = panels.panelDefinitionFromEntry(lookupRegistryComponent(c.rid)?.entry)
+              if (!panel) return null
+              return (
+                <div key={c.rid} style={{ border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', borderRadius: 9, overflow: 'hidden' }}>
+                  <panels.PanelSurface
+                    meta={{ kind: 'openloop.panel', version: 1, panel, resolved: {}, resolvedAt: new Date().toISOString() }}
+                    relParams={selected}
+                  />
+                </div>
+              )
+            })}
           </div>
-          <div style={{ width: '100%', height: 2, background: selected ? 'linear-gradient(90deg, transparent, #b06ad9, transparent)' : 'var(--dsw-alias-border-l2, rgba(127,127,127,.18))', position: 'relative' }}>
-            <div style={{ position: 'absolute', right: 0, top: -3, border: '4px solid transparent', borderLeftColor: selected ? '#b06ad9' : 'var(--dsw-alias-border-l2, rgba(127,127,127,.18))' }} />
-          </div>
-          <div style={{ fontSize: 9, color: 'var(--dsw-alias-label-caption, #888)', textAlign: 'center' }}>{selected ? '即时打开' : 'click a row'}</div>
+        </>
+      ) : (
+        <div style={{ border: '1px dashed var(--dsw-alias-border-l2, rgba(127,127,127,.18))', borderRadius: 9, padding: '14px 16px', fontSize: 11, color: 'var(--dsw-alias-label-caption, #888)', lineHeight: 1.7 }}>
+          在上面的预览里点一行，{consumers.map(c => `「${titleOfRid(c.rid)}」`).join('、')} 会即时出现在这里 ·
+          click a row in the preview above to open the linked pages
         </div>
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {selected ? consumers.map(c => {
-            const panel = panels.panelDefinitionFromEntry(lookupRegistryComponent(c.rid)?.entry)
-            if (!panel) return null
-            return (
-              <div key={c.rid} style={{ border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', borderRadius: 9, overflow: 'hidden' }}>
-                <panels.PanelSurface
-                  meta={{ kind: 'openloop.panel', version: 1, panel, resolved: {}, resolvedAt: new Date().toISOString() }}
-                  relParams={selected.payload}
-                />
-              </div>
-            )
-          }) : (
-            <div style={{ border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', borderRadius: 9, minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ fontSize: 10.5, color: 'var(--dsw-alias-label-caption, #888)' }}>详情将在这里出现</span>
-            </div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   )
 }
