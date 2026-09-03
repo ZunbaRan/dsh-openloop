@@ -114,6 +114,8 @@ DSH（DeepSeek Harness）插件 monorepo，pnpm workspace，11 个 `@openloop/ds
 8. **seed 幂等是「APP 存在即全跳过」**——升级路径需定向 PATCH（只 upsert 自己拥有的 rid，不动用户组件）
 9. **panels 零依赖 app**——跨包通信用 window 直通桥或 globalThis 单例，不引入包间依赖
 10. **cordis apply 必须同步**；启动为 void 异步
+11. **看板 tile 不随容器缩放 = 宽度测量点错了**（2026-09-04 实证，DockBoardView）：ResizeObserver 必须挂在**随布局伸缩的容器自身**（滚动容器），不能挂在 overflow 容器内层的 block div——内容比容器宽时测量链路停传收缩值，`useContainerWidth` 的 width 卡在旧值，RGL 收到的一直是旧宽 → tile「完全固定」。教训：测「谁会被布局压窄」就 RO 谁，别测其子元素
+12. **flex 宽度收缩排查先怀疑 min-width:auto**（2026-09-03 同事故第一现场）：flex 子项默认 `min-width: auto`（不缩到 min-content 以下；但 overflow≠visible 的滚动容器自动最小值是 0），滚动容器显式给 `minWidth: 0` 虽非根因也是必须项。这类问题症状统一是「容器缩不下去、内容被裁」
 
 ## 发布纪律
 
