@@ -50,6 +50,7 @@
 
 ## 已完成（按时间倒序，详情见 git log）
 
+- **2026-09-02/03 页面关联（relations）联动特性 v1**（`c545104` → `9847a03`，原型 designs/linkage-proto 已批）：列表点行 → 详情即时打开，未经 Agent。契约层 relations 声明（emits/consumes，{app}:{entity}:{action} 命名空间）+ {{param}} 模板带参取数（refresh 端点）；对话流卡片内下方渲染（决策 A）+ Board 悬浮窗多开对比（决策 B）+ hover 亮灯（决策 C，DeepSeek 蓝）+ 资源列表具名 chip/双语声明表/关联预览/相关页面跳转（M4）。CRM demo（my-crm 五组件，多级级联 + 多消费方）真机验收通过。数组 api 数据注入 rows、无参数不发请求（等待联动占位）、flexbox 宽度收缩死锁修复、搜索栏三处、内置 API configured 恒 true 修复均含在内
 - 2026-08-25 批 5：本地后端预设族 7 预设 + 5 端点（panels 0.4.0 / app 0.2.0 / dock 0.6.1，`233f376`）
 - 2026-08-25 dock M3：后端同步 + registry 合并 + 降级（dock 0.6.0，`560a1b3`）
 - 2026-08-25 dsh-app MVP：PocketBase 门面 + tool/skill/路由（`731574d`）
