@@ -11,7 +11,10 @@ export default [
   { entry: { index: 'src/index.ts' }, outDir: 'lib', format: ['esm'], platform: 'node', target: 'es2024', fixedExtension: false, dts: true, clean: true, deps: { neverBundle: ['@deepseek-ai/schemastery', '@deepseek-ai/cordis'] } },
   {
     entry: { client: 'src/client/index.tsx' }, outDir: 'lib', format: 'cjs', platform: 'browser', dts: false, clean: false,
-    deps: { neverBundle: externals }, define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
+    // @dnd-kit 必须内联：DSH ModuleLoader 无法提供这些 id，externalize 会被
+    // verify-client-bundle 拦截（0.9.14 排序迁移 dnd-kit）
+    deps: { neverBundle: externals, alwaysBundle: [/^@dnd-kit\//] },
+    define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
     outputOptions: { entryFileNames: 'client.js', banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {`, footer: 'return module.exports; } });', intro: 'var module = { exports: {} }; var exports = module.exports;' },
   },
 ] satisfies UserConfig[]
