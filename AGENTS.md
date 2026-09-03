@@ -48,3 +48,9 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 **路由验证结论（2026-09-01）**：subagent、dynamic workflow（runs.run options 同字段）、swarm（agent-file frontmatter 声明 model，内部转 `--provider <p> --model <m>`）三条通道此前在 codebuddy 上实测路由成功。渠道迁移到 tokenhub 后沿用同一套字段，需按 `tokenhub/glm-5.3-flash` 重新验证。
 
 > codebuddy 渠道已移除（含 `patches/agent-sdk-teardown-crash.patch` 与重打脚本），原「agent-sdk teardown 崩溃」一节随渠道删除，不再适用。
+
+## 联动特性踩坑（2026-09-04 实测，勿再犯）
+
+1. **`useEffect` 依赖里放对象/数组字面量 → 无限循环**：`useLinkHighlight(tiles)` / `useStreamLink(payload)` 内部 effect 依赖 `tiles`/`payload`，而 `TileGrid` 每次渲染传入新字面量 → effect 反复跑、反复 postMessage/setState → React Maximum update depth exceeded 白屏。**修复：依赖用稳定原始值（`tiles.map(t=>t.id).join(',')`、`payload==null`），数组本体改用 ref 读**。教训：给「宿主每渲染都新建字面量」的消费方写 hook，依赖只能是原始值。
+2. **面板预览代码 1:1 搬进 dock 必崩**：panels 的 iframe 预览作用域只有 presets，`TileGrid`/`tileUrl`/widgetRuntime 全不存在；且 panels 契约包对 widget 是 external——bundle 里 `widgetContract_1.default` 是 undefined，`.default.safeParse` 直接 TypeError。**修复：作用域用 `LINK_SCOPE`（契约 + TileGrid + tileUrl），iframe html 预校验字符串字面量、契约 parse 加防御**（undefined 走兜底不抛）。教训：跨包搬运行时代码必须核对目标作用域 + external 依赖在目标 bundle 的真实形态。
+3. **Panels 类实例在 render 期间新建 → 每次渲染全量卸载重建**：`TileGrid` 原来每次渲染都 `new Panels(document.createElement('div'))` + `setDocument`，即使 tiles 没变也全部 dispose→重建，点击后 DOM 闪烁。**修复：`useRef` 持久化 Panels 实例，未初始化时同步建一次（无闪烁窗口），之后 `setTiles` 增量更新；dispose 走 effect cleanup 防 StrictMode 双重挂载泄漏**。
