@@ -5783,6 +5783,14 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/client/rel-views.tsx
+		/**
+		* 联动关系 UI 组件（M4，2026-09-02 联动特性 v1；2026-09-03 补齐原型形态）：
+		* - RelChips：资源列表行的具名关系 chip（→ 目标页名 / ← 来源页名，可点跳）
+		* - RelDeclSection：组件详情页「页面关系」双语声明表
+		* - RelTryIt：关联预览（可交互最小闭环——点行 → 目标面板带参渲染）
+		* - RelatedPages：相关页面跳转 chips
+		* 数据源：registry 组件 entry.relations（panels 契约形态，经懒桥解析）。
+		*/
 		/** 组件的 relations（panels 契约形态；无声明返回 undefined） */
 		function relationsOf(rid) {
 			const panels = getPanelsClient();
@@ -5794,10 +5802,45 @@ window.__ModuleLoader__.load({
 			const panel = typeof record.panel === "object" && record.panel !== null ? record.panel : record;
 			return panels.parseRelations(panel.relations);
 		}
-		/**
-		* 全量 registry 的 consumes 索引：event → [{ rid, param }]。
-		* 惰性构建（每次调用读最新 registry 缓存）——registry 刷新后自然生效。
-		*/
+		/** 事件名 → 目标 rid 推断（与 panels RelLinked.inferTargetRid 同规则） */
+		function inferTargetRid(event) {
+			const m = /^([a-z0-9][a-z0-9-]*):([a-z][a-z0-9-]*):selected$/.exec(event);
+			return m ? `${m[1]}:${m[2]}-detail` : void 0;
+		}
+		/** 组件标题解析（未注册返回 rid 的组件名段） */
+		function titleOfRid(rid) {
+			return lookupRegistryComponent(rid)?.title ?? rid.split(":")[1] ?? rid;
+		}
+		/** 组件的全部具名关系端点：out = 本组件触发指向谁；in = 谁触发打开本组件 */
+		function relPeersOf(rid) {
+			const rels = relationsOf(rid);
+			if (!rels) return [];
+			const peers = [];
+			for (const e of rels.emits ?? []) {
+				const targetRid = e.target?.rid ?? inferTargetRid(e.event);
+				if (!targetRid) continue;
+				peers.push({
+					dir: "out",
+					rid: targetRid,
+					title: titleOfRid(targetRid),
+					event: e.event,
+					how: e.note ?? "点行打开"
+				});
+			}
+			for (const c of rels.consumes ?? []) for (const comp of getRegistryComponents()) {
+				if (comp.id === rid) continue;
+				if (!relationsOf(comp.id)?.emits?.some((e) => e.event === c.event)) continue;
+				peers.push({
+					dir: "in",
+					rid: comp.id,
+					title: comp.title,
+					event: c.event,
+					how: `按 ${c.param} 取数`
+				});
+			}
+			return peers;
+		}
+		/** 全量 registry 的 consumes 索引：event → [{ rid, param }]（惰性构建） */
 		function buildRelConsumesIndex() {
 			const index = /* @__PURE__ */ new Map();
 			for (const comp of getRegistryComponents()) {
@@ -5814,33 +5857,46 @@ window.__ModuleLoader__.load({
 			}
 			return index;
 		}
-		/** chip 颜色样式（rel 紫） */
 		const chipStyle = {
 			display: "inline-flex",
 			alignItems: "center",
-			gap: 3,
-			fontSize: 9,
-			padding: "1px 6px",
-			borderRadius: 5,
+			gap: 4,
+			fontSize: 9.5,
+			padding: "1.5px 7px",
+			borderRadius: 6,
 			color: "#b06ad9",
-			background: "rgba(176,106,217,.12)",
-			whiteSpace: "nowrap"
+			background: "rgba(176,106,217,.1)",
+			border: "1px solid rgba(176,106,217,.3)",
+			whiteSpace: "nowrap",
+			cursor: "pointer",
+			fontFamily: "inherit"
 		};
-		/** 资源行 relations chip：有 emits 显示「⚡ 可触发」、有 consumes 显示「⇄ 可响应」 */
-		function RelChips({ rid }) {
-			const rels = relationsOf(rid);
-			if (!rels) return null;
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [rels.emits && rels.emits.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+		const secLabelStyle = {
+			fontSize: 10,
+			fontWeight: 600,
+			letterSpacing: ".06em",
+			color: "var(--dsw-alias-label-caption, #888)",
+			marginBottom: 6,
+			marginTop: 14
+		};
+		function RelChips({ rid, onJump }) {
+			const peers = relPeersOf(rid);
+			if (peers.length === 0) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(react_jsx_runtime.Fragment, { children: peers.slice(0, 3).map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+				type: "button",
 				style: chipStyle,
-				title: `点行可触发 · emits：${rels.emits.map((e) => e.event).join(", ")}`,
-				children: "⚡ 可触发"
-			}) : null, rels.consumes && rels.consumes.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-				style: chipStyle,
-				title: `可响应事件 · consumes：${rels.consumes.map((c) => c.event).join(", ")}`,
-				children: "⇄ 可响应"
-			}) : null] });
+				title: `${p.dir === "out" ? "点行打开" : "被联动打开"} · ${p.event}`,
+				onClick: (e) => {
+					e.stopPropagation();
+					onJump?.(p.rid);
+				},
+				children: [
+					p.dir === "out" ? "→" : "←",
+					" ",
+					p.title
+				]
+			}, `${p.dir}:${p.rid}:${p.event}`)) });
 		}
-		/** 组件详情区：页面关系双语表（预览头部下方） */
 		function RelDeclSection({ rid }) {
 			const rels = relationsOf(rid);
 			if (!rels || (!rels.emits || rels.emits.length === 0) && (!rels.consumes || rels.consumes.length === 0)) return null;
@@ -5857,74 +5913,373 @@ window.__ModuleLoader__.load({
 				param: c.param,
 				note: c.note ?? `按 ${c.param} 取数 · renders by ${c.param}`
 			});
+			const cellStyle = {
+				fontSize: 10.5,
+				padding: "7px 10px",
+				borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+				color: "var(--dsw-alias-label-primary, inherit)"
+			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: { marginTop: 12 },
 				"data-openloop-rel-decl": rid,
 				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						fontSize: 10,
-						fontWeight: 600,
-						letterSpacing: ".06em",
-						color: "var(--dsw-alias-label-caption, #888)",
-						marginBottom: 6
-					},
+					style: secLabelStyle,
 					children: ["页面关系 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 						style: { fontWeight: 400 },
 						children: "Relations（emits 可触发 / consumes 可响应）"
 					})]
-				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
 					style: {
+						width: "100%",
+						borderCollapse: "collapse",
 						border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
 						borderRadius: 9,
 						overflow: "hidden"
 					},
-					children: rows.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							display: "flex",
-							alignItems: "center",
-							gap: 8,
-							padding: "6px 10px",
-							fontSize: 10.5,
-							borderTop: i === 0 ? void 0 : "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-							color: "var(--dsw-alias-label-primary, inherit)"
-						},
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
+						style: { background: "var(--dsw-alias-bg-layer-2, #f6f6f7)" },
 						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
 								style: {
-									fontSize: 9,
-									fontWeight: 600,
-									padding: "1px 7px",
-									borderRadius: 999,
-									whiteSpace: "nowrap",
-									color: r.dir === "out" ? "#b06ad9" : "var(--dsw-alias-state-business-primary, #4176e6)",
-									background: r.dir === "out" ? "rgba(176,106,217,.1)" : "rgba(65,118,230,.1)"
+									...cellStyle,
+									textAlign: "left",
+									fontSize: 10,
+									color: "var(--dsw-alias-label-caption, #888)"
 								},
-								children: r.dir === "out" ? "→ 可触发 emits" : "← 可响应 consumes"
+								children: "方向"
 							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
 								style: {
+									...cellStyle,
+									textAlign: "left",
+									fontSize: 10,
+									color: "var(--dsw-alias-label-caption, #888)"
+								},
+								children: "事件 Event"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: {
+									...cellStyle,
+									textAlign: "left",
+									fontSize: 10,
+									color: "var(--dsw-alias-label-caption, #888)"
+								},
+								children: "参数 Param"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+								style: {
+									...cellStyle,
+									textAlign: "left",
+									fontSize: 10,
+									color: "var(--dsw-alias-label-caption, #888)"
+								},
+								children: "说明"
+							})
+						]
+					}) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: rows.map((r, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
+						style: i === rows.length - 1 ? { borderBottom: 0 } : void 0,
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: cellStyle,
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: {
+										fontSize: 9,
+										fontWeight: 600,
+										padding: "1px 7px",
+										borderRadius: 999,
+										whiteSpace: "nowrap",
+										color: r.dir === "out" ? "#b06ad9" : "var(--dsw-alias-state-business-primary, #4176e6)",
+										background: r.dir === "out" ? "rgba(176,106,217,.1)" : "rgba(65,118,230,.1)"
+									},
+									children: r.dir === "out" ? "→ 可触发 emits" : "← 可响应 consumes"
+								})
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: {
+									...cellStyle,
 									fontFamily: "ui-monospace, SF Mono, Menlo, monospace",
 									fontSize: 9.5,
 									color: "#b06ad9"
 								},
 								children: r.event
 							}),
-							r.param !== "—" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: { fontSize: 10 },
-								children: r.param
-							}) : null,
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
 								style: {
-									marginLeft: "auto",
+									...cellStyle,
+									fontSize: 10
+								},
+								children: r.param
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+								style: {
+									...cellStyle,
 									fontSize: 9.5,
 									color: "var(--dsw-alias-label-caption, #888)"
 								},
 								children: r.note
 							})
 						]
-					}, i))
+					}, i)) })]
 				})]
 			});
+		}
+		/** 从面板定义取静态 rows（首个 preset widget 的 props.rows；api 列表无静态行返回 undefined） */
+		function staticRowsOf(rid) {
+			const panels = getPanelsClient();
+			const comp = lookupRegistryComponent(rid);
+			if (!panels || !comp) return void 0;
+			const def = panels.panelDefinitionFromEntry(comp.entry);
+			if (!def) return void 0;
+			for (const w of def.widgets) {
+				if (w.source.type !== "preset") continue;
+				const rows = w.source.props?.rows;
+				if (Array.isArray(rows)) return rows;
+			}
+		}
+		function RelTryIt({ rid }) {
+			const emit = relationsOf(rid)?.emits?.[0];
+			const rows = (0, react.useMemo)(() => emit ? staticRowsOf(rid) : void 0, [rid, emit]);
+			const [selected, setSelected] = (0, react.useState)(null);
+			const panels = getPanelsClient();
+			if (!emit || !panels) return null;
+			const consumers = buildRelConsumesIndex().get(emit.event) ?? (emit.target ? [{
+				rid: emit.target.rid,
+				param: ""
+			}] : []);
+			const pick = (rowIndex) => {
+				const row = rows?.[rowIndex];
+				if (!row) return;
+				const payload = panels.evalPayloadTemplate(emit.payload, row, {});
+				setSelected({
+					rowIndex,
+					payload
+				});
+			};
+			const th = {
+				fontSize: 9.5,
+				fontWeight: 600,
+				color: "var(--dsw-alias-label-caption, #888)",
+				textAlign: "left",
+				padding: "5px 10px",
+				borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
+			};
+			const td = {
+				fontSize: 10.5,
+				padding: "5px 10px",
+				borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+				color: "var(--dsw-alias-label-primary, inherit)"
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				"data-openloop-rel-try": rid,
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: secLabelStyle,
+					children: ["关联预览 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: { fontWeight: 400 },
+						children: "Try it · 点行看效果"
+					})]
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						display: "flex",
+						alignItems: "stretch",
+						gap: 10
+					},
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								flex: 1,
+								minWidth: 0
+							},
+							children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								style: {
+									border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+									borderRadius: 9,
+									overflow: "hidden"
+								},
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									style: {
+										padding: "6px 10px",
+										fontSize: 10.5,
+										fontWeight: 600,
+										background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
+										borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
+									},
+									children: [
+										titleOfRid(rid),
+										" ",
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											style: {
+												fontWeight: 400,
+												fontSize: 9,
+												color: "var(--dsw-alias-label-caption, #888)"
+											},
+											children: "点行试试"
+										})
+									]
+								}), rows ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("table", {
+									style: {
+										width: "100%",
+										borderCollapse: "collapse"
+									},
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("thead", { children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+										style: th,
+										children: "#"
+									}), Object.keys(rows[0] ?? {}).slice(0, 3).map((k) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("th", {
+										style: th,
+										children: k
+									}, k))] }) }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("tbody", { children: rows.slice(0, 5).map((row, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("tr", {
+										style: {
+											cursor: "pointer",
+											background: selected?.rowIndex === i ? "rgba(65,118,230,.1)" : void 0,
+											boxShadow: selected?.rowIndex === i ? "inset 3px 0 0 var(--dsw-alias-state-business-primary, #4176e6)" : void 0
+										},
+										onClick: () => pick(i),
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+											style: td,
+											children: i + 1
+										}), Object.keys(row).slice(0, 3).map((k) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("td", {
+											style: {
+												...td,
+												maxWidth: 90,
+												overflow: "hidden",
+												textOverflow: "ellipsis",
+												whiteSpace: "nowrap"
+											},
+											children: String(row[k])
+										}, k))]
+									}, i)) })]
+								}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										padding: 12,
+										fontSize: 10.5,
+										color: "var(--dsw-alias-label-caption, #888)"
+									},
+									children: "行数据来自接口——请在对话流或看板里点选体验"
+								})]
+							})
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								flex: "0 0 46px",
+								display: "flex",
+								flexDirection: "column",
+								alignItems: "center",
+								justifyContent: "center",
+								gap: 4,
+								color: "#b06ad9"
+							},
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										fontSize: 9,
+										color: selected ? "#b06ad9" : "var(--dsw-alias-label-caption, #888)",
+										fontWeight: selected ? 600 : 400,
+										textAlign: "center",
+										lineHeight: 1.4
+									},
+									children: selected ? Object.entries(selected.payload).map(([k, v]) => `${k}=${String(v)}`).join(" ") : "等待点选"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										width: "100%",
+										height: 2,
+										background: selected ? "linear-gradient(90deg, transparent, #b06ad9, transparent)" : "var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+										position: "relative"
+									},
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+										position: "absolute",
+										right: 0,
+										top: -3,
+										border: "4px solid transparent",
+										borderLeftColor: selected ? "#b06ad9" : "var(--dsw-alias-border-l2, rgba(127,127,127,.18))"
+									} })
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										fontSize: 9,
+										color: "var(--dsw-alias-label-caption, #888)",
+										textAlign: "center"
+									},
+									children: selected ? "即时打开" : "click a row"
+								})
+							]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								flex: 1,
+								minWidth: 0,
+								display: "flex",
+								flexDirection: "column",
+								gap: 10
+							},
+							children: selected ? consumers.map((c) => {
+								const panel = panels.panelDefinitionFromEntry(lookupRegistryComponent(c.rid)?.entry);
+								if (!panel) return null;
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: {
+										border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+										borderRadius: 9,
+										overflow: "hidden"
+									},
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(panels.PanelSurface, {
+										meta: {
+											kind: "openloop.panel",
+											version: 1,
+											panel,
+											resolved: {},
+											resolvedAt: (/* @__PURE__ */ new Date()).toISOString()
+										},
+										relParams: selected.payload
+									})
+								}, c.rid);
+							}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								style: {
+									border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+									borderRadius: 9,
+									minHeight: 120,
+									display: "flex",
+									alignItems: "center",
+									justifyContent: "center"
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+									style: {
+										fontSize: 10.5,
+										color: "var(--dsw-alias-label-caption, #888)"
+									},
+									children: "详情将在这里出现"
+								})
+							})
+						})
+					]
+				})]
+			});
+		}
+		function RelatedPages({ rid, onJump }) {
+			const peers = relPeersOf(rid);
+			if (peers.length === 0) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: secLabelStyle,
+				children: ["相关页面 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					style: { fontWeight: 400 },
+					children: "Related pages"
+				})]
+			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					display: "flex",
+					gap: 6,
+					flexWrap: "wrap"
+				},
+				children: peers.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+					type: "button",
+					style: chipStyle,
+					onClick: () => onJump(p.rid),
+					children: [
+						p.dir === "out" ? "→" : "←",
+						" ",
+						p.title,
+						" · ",
+						p.how
+					]
+				}, `${p.dir}:${p.rid}:${p.event}`))
+			})] });
 		}
 		//#endregion
 		//#region src/client/RelFloatLayer.tsx
@@ -7152,7 +7507,13 @@ window.__ModuleLoader__.load({
 													children: c.id
 												})]
 											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelChips, { rid: c.id }),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelChips, {
+												rid: c.id,
+												onJump: (rid) => onSelect({
+													kind: "component",
+													rid
+												})
+											}),
 											pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 												className: "d2-pin-dot",
 												title: "已固定到看板",
@@ -7409,7 +7770,7 @@ window.__ModuleLoader__.load({
 				})]
 			});
 		}
-		function ComponentPreview({ app, comp, pinned, onPin, tone }) {
+		function ComponentPreview({ app, comp, pinned, onPin, tone, onSelectComponent }) {
 			const source = buildTileSourceForComponent(comp);
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				className: "d2-detailpane",
@@ -7444,7 +7805,6 @@ window.__ModuleLoader__.load({
 				}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					className: "d2-preview-canvas",
 					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelDeclSection, { rid: comp.id }),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 							className: "d2-preview-note",
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` }), tone === "warn" ? "MCP server 当前不可达——pin 后 tile 会显示可重试错误态（惰性重连自愈）" : tone === "off" ? "MCP server 已关闭" : comp.type === "mcp-app" ? `来自 ${app.name} · 渲染时经 refresh 端点取数（沙箱）` : `来自 ${app.name} · 宿主车道渲染`]
@@ -7485,6 +7845,12 @@ window.__ModuleLoader__.load({
 									source.kind === "artifact" ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactPreviewBody, { meta: source.meta }) : null
 								]
 							})]
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelDeclSection, { rid: comp.id }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelTryIt, { rid: comp.id }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelatedPages, {
+							rid: comp.id,
+							onJump: onSelectComponent
 						})
 					]
 				})]
@@ -7696,7 +8062,11 @@ window.__ModuleLoader__.load({
 								comp: selectedComp,
 								pinned: pinnedIds.has(selectedComp.id),
 								onPin: () => onPin(app, selectedComp),
-								tone: toneOf(app)
+								tone: toneOf(app),
+								onSelectComponent: (rid) => setSelection({
+									kind: "component",
+									rid
+								})
 							}) : null,
 							selection.kind === "api" && selectedApi !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ApiDetail, {
 								app,

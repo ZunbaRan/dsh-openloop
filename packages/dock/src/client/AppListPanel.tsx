@@ -11,7 +11,7 @@ import { useEffect, useState, type PointerEvent, type ReactNode } from 'react'
 import type { AppDescriptor, AppComponentDescriptor } from './app-registry.ts'
 import { buildTileSourceForComponent } from './app-registry.ts'
 import { AppIcon, KindBadge, TypeBadge } from './badges.tsx'
-import { RelChips, RelDeclSection } from './rel-views.tsx'
+import { RelChips, RelDeclSection, RelTryIt, RelatedPages } from './rel-views.tsx'
 import { icons } from './icons.tsx'
 import { DependencyMissing, getBaseClient } from './base-bridge.tsx'
 import { getPanelsClient, getMcpAppsClient, getArtifactClient } from './openloop-clients.ts'
@@ -301,7 +301,7 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
                   <div className="d2-name">{c.title}</div>
                   <div className="d2-rid">{c.id}</div>
                 </div>
-                <RelChips rid={c.id} />
+                <RelChips rid={c.id} onJump={rid => onSelect({ kind: 'component', rid })} />
                 {pinnedIds.has(c.id) ? <span className="d2-pin-dot" title="已固定到看板"><span className="d2-dot ok" /></span> : null}
               </button>
             ))}
@@ -485,9 +485,11 @@ interface ComponentPreviewProps {
   pinned: boolean
   onPin: () => void
   tone: AppTone
+  /** 相关页面跳转（M4）：选中另一个组件预览 */
+  onSelectComponent: (rid: string) => void
 }
 
-function ComponentPreview({ app, comp, pinned, onPin, tone }: ComponentPreviewProps): ReactNode {
+function ComponentPreview({ app, comp, pinned, onPin, tone, onSelectComponent }: ComponentPreviewProps): ReactNode {
   const source = buildTileSourceForComponent(comp)
   return (
     <div className="d2-detailpane">
@@ -507,7 +509,6 @@ function ComponentPreview({ app, comp, pinned, onPin, tone }: ComponentPreviewPr
         )}
       </div>
       <div className="d2-preview-canvas">
-        <RelDeclSection rid={comp.id} />
         <div className="d2-preview-note">
           <span className={`d2-dot ${tone}`} />
           {tone === 'warn'
@@ -537,6 +538,10 @@ function ComponentPreview({ app, comp, pinned, onPin, tone }: ComponentPreviewPr
             </div>
           </div>
         )}
+        {/* 联动 v1（M4）：页面关系双语表 → 关联预览（可交互）→ 相关页面跳转（原型对齐） */}
+        <RelDeclSection rid={comp.id} />
+        <RelTryIt rid={comp.id} />
+        <RelatedPages rid={comp.id} onJump={onSelectComponent} />
       </div>
     </div>
   )
@@ -651,7 +656,7 @@ export function AppsTab({ apps, selectedAppId, onOpenApp, pinnedIds, onPin, onMa
           <AppDetail app={app} pinnedIds={pinnedIds} onPin={onPin} onSelectComponent={c => setSelection({ kind: 'component', rid: c.id })} onManaged={onManaged} />
         ) : null}
         {selection.kind === 'component' && selectedComp !== undefined ? (
-          <ComponentPreview app={app} comp={selectedComp} pinned={pinnedIds.has(selectedComp.id)} onPin={() => onPin(app, selectedComp)} tone={toneOf(app)} />
+          <ComponentPreview app={app} comp={selectedComp} pinned={pinnedIds.has(selectedComp.id)} onPin={() => onPin(app, selectedComp)} tone={toneOf(app)} onSelectComponent={rid => setSelection({ kind: 'component', rid })} />
         ) : null}
         {selection.kind === 'api' && selectedApi !== undefined ? (
           <ApiDetail app={app} api={selectedApi} />
