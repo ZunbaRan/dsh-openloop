@@ -385,9 +385,10 @@ export function DockBoardView(): ReactNode {
         </div>
       </header>
 
-      {/* minWidth: 0 必须——flex 子项 min-width:auto 会被 GridLayout 的旧宽撑住，
-          容器缩不下去 → RO 不触发 → width 不更新 → tile 永不缩放（2026-09-03 死锁定位） */}
-      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto' }}>
+      {/* 宽度测量挂在滚动容器自身（2026-09-04 重定位）：RO 观测对象 = 随 section
+          伸缩的容器，自身宽度不受 GridLayout 内容影响。此前观测内层 block div——
+          overflow:auto 容器内宽内容会把它撑住不缩，width 停在旧值 → tile 永不缩放 */}
+      <div ref={containerRef as RefObject<HTMLDivElement>} style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto' }}>
         {tiles.length === 0 ? (
           <div className="d2-empty-note" style={{ paddingTop: 60 }}>
             <div style={{ fontSize: 22, opacity: 0.6 }}>📌</div>
@@ -395,7 +396,7 @@ export function DockBoardView(): ReactNode {
             <div className="d2-tcap">到 APP 页把组件「固定」到看板，或让 Agent 帮你生成</div>
           </div>
         ) : (
-          <div ref={containerRef as RefObject<HTMLDivElement>} style={{ minHeight: 104 }}>
+          <div style={{ minHeight: 104 }}>
             <GridStyles />
             {mounted && width > 0
               ? (

@@ -6815,6 +6815,7 @@ window.__ModuleLoader__.load({
 						]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						ref: containerRef,
 						style: {
 							flex: 1,
 							minHeight: 0,
@@ -6839,7 +6840,6 @@ window.__ModuleLoader__.load({
 								})
 							]
 						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							ref: containerRef,
 							style: { minHeight: 104 },
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridStyles, {}), mounted && width > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(GridLayout, {
 								width,
