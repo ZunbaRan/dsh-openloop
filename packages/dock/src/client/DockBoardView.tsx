@@ -153,8 +153,9 @@ function TileChrome({ tile, relTone, onRemove, onAlias, children }: { tile: Dock
         transition: 'box-shadow .18s, border-color .18s, opacity .18s',
         ...(relTone === 'glow'
           ? {
-              borderColor: 'rgba(176,106,217,.65)',
-              boxShadow: '0 0 0 3px rgba(176,106,217,.22), 0 4px 18px rgba(0,0,0,.18)',
+              // DeepSeek 品牌蓝（2026-09-03 用户拍板：联动高亮从紫色换蓝）
+              borderColor: 'rgba(77,107,254,.7)',
+              boxShadow: '0 0 0 3px rgba(77,107,254,.22), 0 4px 18px rgba(0,0,0,.18)',
             }
           : {}),
         ...(relTone === 'dim' ? { opacity: 0.45 } : {}),
@@ -296,7 +297,7 @@ export function DockBoardView(): ReactNode {
 
   const [editingName, setEditingName] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
-  // 联动 v1（hover 亮灯，决策 C）：hover 某 tile → 关联 tile 紫框亮起，无关 tile 降透明
+  // 联动 v1（hover 亮灯，决策 C）：hover 某 tile → 关联 tile 蓝框亮起，无关 tile 降透明
   const [hoveredTileId, setHoveredTileId] = useState<string | null>(null)
   const relToneOfTile = (tileId: string): 'glow' | 'dim' | undefined => {
     if (hoveredTileId === null) return undefined
@@ -309,6 +310,14 @@ export function DockBoardView(): ReactNode {
     if (!h || !c) return 'dim'
     const linked = [...h.emits].some(e => c.consumes.has(e)) || [...c.emits].some(e => h.consumes.has(e))
     return linked ? 'glow' : 'dim'
+  }
+  // 看板搜索（2026-09-03）：按 tile 标题/别名/来源 rid 匹配，未命中降透明（布局不动）
+  const [tileQuery, setTileQuery] = useState('')
+  const tileMatches = (tile: DockTile): boolean => {
+    const q = tileQuery.trim().toLowerCase()
+    if (q.length === 0) return true
+    const hay = `${tile.title} ${tile.alias ?? ''} ${sourceIdOf(tile.source) ?? ''}`.toLowerCase()
+    return hay.includes(q)
   }
   // 两步确认 3 秒未确认自动复位（替代原生 confirm 弹窗）
   useEffect(() => {
@@ -346,6 +355,14 @@ export function DockBoardView(): ReactNode {
           <span className="d2-board-name" title="双击重命名看板页" onDoubleClick={() => setEditingName(true)}>{board.name}</span>
         )}
         <span className="d2-badge kind">{tiles.length} tiles</span>
+        <input
+          className="d2-search"
+          type="search"
+          value={tileQuery}
+          placeholder="搜索 tile…"
+          aria-label="搜索看板 tile"
+          onChange={e => setTileQuery(e.target.value)}
+        />
         <div className="d2-actions">
           <button type="button" className="d2-ghost-btn" title="重力紧凑：消除空洞，保持相对顺序" onClick={() => dockStore.compact()}>
             <icons.sort size={13} /> 整理
@@ -368,7 +385,9 @@ export function DockBoardView(): ReactNode {
         </div>
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      {/* minWidth: 0 必须——flex 子项 min-width:auto 会被 GridLayout 的旧宽撑住，
+          容器缩不下去 → RO 不触发 → width 不更新 → tile 永不缩放（2026-09-03 死锁定位） */}
+      <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: 'auto' }}>
         {tiles.length === 0 ? (
           <div className="d2-empty-note" style={{ paddingTop: 60 }}>
             <div style={{ fontSize: 22, opacity: 0.6 }}>📌</div>
@@ -391,6 +410,7 @@ export function DockBoardView(): ReactNode {
                     {tiles.map(tile => (
                       <div
                         key={tile.tileId}
+                        style={tileMatches(tile) ? undefined : { opacity: 0.3, transition: 'opacity .15s' }}
                         onMouseEnter={() => setHoveredTileId(tile.tileId)}
                         onMouseLeave={() => setHoveredTileId(prev => prev === tile.tileId ? null : prev)}
                       >

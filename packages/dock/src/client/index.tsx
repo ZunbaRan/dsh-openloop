@@ -164,6 +164,7 @@ function DockShell(): ReactNode {
   const [tabState, setTabState] = useState<TabState>(readTabState)
   const [railWidth, setRailWidth] = useState(readRailWidth)
   const [toast, setToast] = useState<string | null>(null)
+  const widthPersistTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // M3：后端同步模式（degraded → 提示条；remote/local 静默）
   const [backendMode, setBackendMode] = useState<BackendMode>('local')
   // 探测循环闭包读最新模式用（不触发重渲染）
@@ -326,7 +327,14 @@ function DockShell(): ReactNode {
   return (
     <>
       <DockToggle open={open} onToggle={() => setOpen(o => !o)} count={totalTiles} right={toggleRight} />
-      <DockHost open={open} width={width} onWidthChange={(w) => { setWidth(w); try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ } }}>
+      <DockHost open={open} width={width} onWidthChange={(w) => {
+        setWidth(w)
+        // 拖动中每帧写 localStorage 是同步 IO 卡顿源——防抖到 400ms 静止后落盘（2026-09-03 拖动手感修复）
+        if (widthPersistTimer.current !== undefined) clearTimeout(widthPersistTimer.current)
+        widthPersistTimer.current = setTimeout(() => {
+          try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ }
+        }, 400)
+      }}>
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }} data-dock-version={version}>
           {/* 顶栏（0.8.0 issue 2：收起按钮随展开态常驻；tab 段控取代 rail 的 APP 入口） */}
           <header className="d2-topbar">

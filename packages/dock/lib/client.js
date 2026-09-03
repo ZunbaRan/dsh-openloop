@@ -6532,8 +6532,8 @@ window.__ModuleLoader__.load({
 					overflow: "hidden",
 					transition: "box-shadow .18s, border-color .18s, opacity .18s",
 					...relTone === "glow" ? {
-						borderColor: "rgba(176,106,217,.65)",
-						boxShadow: "0 0 0 3px rgba(176,106,217,.22), 0 4px 18px rgba(0,0,0,.18)"
+						borderColor: "rgba(77,107,254,.7)",
+						boxShadow: "0 0 0 3px rgba(77,107,254,.22), 0 4px 18px rgba(0,0,0,.18)"
 					} : {},
 					...relTone === "dim" ? { opacity: .45 } : {}
 				},
@@ -6714,6 +6714,12 @@ window.__ModuleLoader__.load({
 				if (!h || !c) return "dim";
 				return [...h.emits].some((e) => c.consumes.has(e)) || [...c.emits].some((e) => h.consumes.has(e)) ? "glow" : "dim";
 			};
+			const [tileQuery, setTileQuery] = (0, react.useState)("");
+			const tileMatches = (tile) => {
+				const q = tileQuery.trim().toLowerCase();
+				if (q.length === 0) return true;
+				return `${tile.title} ${tile.alias ?? ""} ${sourceIdOf(tile.source) ?? ""}`.toLowerCase().includes(q);
+			};
 			(0, react.useEffect)(() => {
 				if (!confirmingClear) return;
 				const timer = setTimeout(() => setConfirmingClear(false), 3e3);
@@ -6761,6 +6767,14 @@ window.__ModuleLoader__.load({
 								className: "d2-badge kind",
 								children: [tiles.length, " tiles"]
 							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+								className: "d2-search",
+								type: "search",
+								value: tileQuery,
+								placeholder: "搜索 tile…",
+								"aria-label": "搜索看板 tile",
+								onChange: (e) => setTileQuery(e.target.value)
+							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 								className: "d2-actions",
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
@@ -6792,6 +6806,7 @@ window.__ModuleLoader__.load({
 						style: {
 							flex: 1,
 							minHeight: 0,
+							minWidth: 0,
 							overflow: "auto"
 						},
 						children: tiles.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
@@ -6837,6 +6852,10 @@ window.__ModuleLoader__.load({
 								},
 								onLayoutChange: (items) => dockStore.applyLayout(items),
 								children: tiles.map((tile) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									style: tileMatches(tile) ? void 0 : {
+										opacity: .3,
+										transition: "opacity .15s"
+									},
 									onMouseEnter: () => setHoveredTileId(tile.tileId),
 									onMouseLeave: () => setHoveredTileId((prev) => prev === tile.tileId ? null : prev),
 									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(TileChrome, {
@@ -7131,6 +7150,8 @@ window.__ModuleLoader__.load({
 		}
 		function AppListPanel({ apps, selectedAppId, onSelect, toneOf }) {
 			const { ui, expand, onHandleDown } = useCollapsibleColumn("openloop.dock.apps-col1.v1", 230);
+			const [appQuery, setAppQuery] = (0, react.useState)("");
+			const filteredApps = appQuery.trim().length === 0 ? apps : apps.filter((a) => `${a.name} ${a.id}`.toLowerCase().includes(appQuery.trim().toLowerCase()));
 			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-applist d2-col-collapsed",
 				"aria-label": "APP 列表（缩略）",
@@ -7179,12 +7200,24 @@ window.__ModuleLoader__.load({
 						className: "d2-col-head",
 						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "APP" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "d2-tcap",
-							children: apps.length
+							children: filteredApps.length
 						})]
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: { padding: "0 12px 6px" },
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							className: "d2-search",
+							style: { width: "100%" },
+							type: "search",
+							value: appQuery,
+							placeholder: "搜索应用…",
+							"aria-label": "搜索应用",
+							onChange: (e) => setAppQuery(e.target.value)
+						})
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "d2-rows",
-						children: apps.map((a) => {
+						children: filteredApps.map((a) => {
 							const tone = toneOf(a);
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 								type: "button",
@@ -7229,6 +7262,10 @@ window.__ModuleLoader__.load({
 		}
 		function AppResourceList({ app, selection, onSelect, pinnedIds }) {
 			const { ui, expand, onHandleDown } = useCollapsibleColumn("openloop.dock.apps-col2.v1", 290);
+			const [resQuery, setResQuery] = (0, react.useState)("");
+			const q = resQuery.trim().toLowerCase();
+			const components = q.length === 0 ? app.components : app.components.filter((c) => `${c.title} ${c.id}`.toLowerCase().includes(q));
+			const apis = q.length === 0 ? app.apis : app.apis.filter((a) => `${a.path} ${a.domain}`.toLowerCase().includes(q));
 			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-rescol d2-col-collapsed",
 				"aria-label": "资源列表（缩略）",
@@ -7318,6 +7355,18 @@ window.__ModuleLoader__.load({
 							})
 						]
 					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: { padding: "0 12px 6px" },
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+							className: "d2-search",
+							style: { width: "100%" },
+							type: "search",
+							value: resQuery,
+							placeholder: "搜索组件 / API…",
+							"aria-label": "搜索组件或 API",
+							onChange: (e) => setResQuery(e.target.value)
+						})
+					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						className: "d2-rescol-rows",
 						children: [
@@ -7344,10 +7393,10 @@ window.__ModuleLoader__.load({
 								className: "d2-resource-group",
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["组件资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "d2-badge kind",
-									children: app.components.length
+									children: components.length
 								})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "d2-resource-list",
-									children: [app.components.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									children: [components.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 										className: "d2-resource-row",
 										style: {
 											color: "var(--dsw-alias-label-caption, #888)",
@@ -7355,7 +7404,7 @@ window.__ModuleLoader__.load({
 											cursor: "default"
 										},
 										children: "暂无组件资源"
-									}) : null, app.components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									}) : null, components.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 										type: "button",
 										className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
 										onClick: () => onSelect({
@@ -7395,10 +7444,10 @@ window.__ModuleLoader__.load({
 								className: "d2-resource-group",
 								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("h3", { children: ["API 资源 ", /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 									className: "d2-badge kind",
-									children: app.apis.length
+									children: apis.length
 								})] }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 									className: "d2-resource-list",
-									children: [app.apis.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+									children: [apis.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 										className: "d2-resource-row",
 										style: {
 											color: "var(--dsw-alias-label-caption, #888)",
@@ -7406,7 +7455,7 @@ window.__ModuleLoader__.load({
 											cursor: "default"
 										},
 										children: "暂无 API 资源"
-									}) : null, app.apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									}) : null, apis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 										type: "button",
 										className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
 										onClick: () => onSelect({
@@ -8226,7 +8275,9 @@ window.__ModuleLoader__.load({
 /* ---------- 横向拖拽把手（col 右缘内侧；0.8.4 常驻 4px 宽条对齐 bsb 手感。
  *  0.8.3 的 right:-5px 伸出列外——常驻线恰与相邻 border 重合并被下一列内容层盖住，
  *  导致「没有宽条 + hover 难触发」；收进列内后视觉与命中都确定。） ---------- */
-.d2-resize-h { position: absolute; top: 0; right: 0; width: 12px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+.d2-resize-h { position: absolute; top: 0; right: -2px; width: 14px; height: 100%; cursor: col-resize; z-index: 50; touch-action: none; }
+.d2-search { width: 128px; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-2, #f6f6f7); color: var(--dsw-alias-label-primary, inherit); font-size: 11px; font-family: inherit; outline: none; }
+.d2-search:focus { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 45%, transparent); }
 .d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; right: 3px; width: 4px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.3)); transition: background .15s, width .15s; }
 .d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 6px; }
 
@@ -8517,6 +8568,7 @@ window.__ModuleLoader__.load({
 			const [tabState, setTabState] = (0, react.useState)(readTabState);
 			const [railWidth, setRailWidth] = (0, react.useState)(readRailWidth);
 			const [toast, setToast] = (0, react.useState)(null);
+			const widthPersistTimer = (0, react.useRef)(void 0);
 			const [backendMode, setBackendMode] = (0, react.useState)("local");
 			const backendModeRef = (0, react.useRef)("local");
 			(0, react.useEffect)(() => {
@@ -8692,9 +8744,12 @@ window.__ModuleLoader__.load({
 					width,
 					onWidthChange: (w) => {
 						setWidth(w);
-						try {
-							localStorage.setItem(WIDTH_KEY, String(w));
-						} catch {}
+						if (widthPersistTimer.current !== void 0) clearTimeout(widthPersistTimer.current);
+						widthPersistTimer.current = setTimeout(() => {
+							try {
+								localStorage.setItem(WIDTH_KEY, String(w));
+							} catch {}
+						}, 400);
 					},
 					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 						style: {

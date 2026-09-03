@@ -154,6 +154,11 @@ export interface AppListPanelProps {
 
 export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListPanelProps): ReactNode {
   const { ui, expand, onHandleDown } = useCollapsibleColumn('openloop.dock.apps-col1.v1', 230)
+  // 应用搜索（2026-09-03）：按名称 / id 过滤 col1
+  const [appQuery, setAppQuery] = useState('')
+  const filteredApps = appQuery.trim().length === 0
+    ? apps
+    : apps.filter(a => `${a.name} ${a.id}`.toLowerCase().includes(appQuery.trim().toLowerCase()))
 
   if (ui.collapsed) {
     return (
@@ -183,10 +188,21 @@ export function AppListPanel({ apps, selectedAppId, onSelect, toneOf }: AppListP
     <aside className="d2-applist" style={{ width: ui.width }} aria-label="APP 列表">
       <div className="d2-col-head">
         <span>APP</span>
-        <span className="d2-tcap">{apps.length}</span>
+        <span className="d2-tcap">{filteredApps.length}</span>
+      </div>
+      <div style={{ padding: '0 12px 6px' }}>
+        <input
+          className="d2-search"
+          style={{ width: '100%' }}
+          type="search"
+          value={appQuery}
+          placeholder="搜索应用…"
+          aria-label="搜索应用"
+          onChange={e => setAppQuery(e.target.value)}
+        />
       </div>
       <div className="d2-rows">
-        {apps.map(a => {
+        {filteredApps.map(a => {
           const tone = toneOf(a)
           return (
             <button
@@ -222,6 +238,11 @@ export interface AppResourceListProps {
 
 export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppResourceListProps): ReactNode {
   const { ui, expand, onHandleDown } = useCollapsibleColumn('openloop.dock.apps-col2.v1', 290)
+  // 资源搜索（2026-09-03）：按组件标题/rid 与 API 路径/域过滤 col2
+  const [resQuery, setResQuery] = useState('')
+  const q = resQuery.trim().toLowerCase()
+  const components = q.length === 0 ? app.components : app.components.filter(c => `${c.title} ${c.id}`.toLowerCase().includes(q))
+  const apis = q.length === 0 ? app.apis : app.apis.filter(a => `${a.path} ${a.domain}`.toLowerCase().includes(q))
 
   if (ui.collapsed) {
     return (
@@ -273,6 +294,17 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
         <span className="d2-rescol-name">{app.name}</span>
         <span className="d2-rescol-kind"><KindBadge kind={app.kind} /></span>
       </div>
+      <div style={{ padding: '0 12px 6px' }}>
+        <input
+          className="d2-search"
+          style={{ width: '100%' }}
+          type="search"
+          value={resQuery}
+          placeholder="搜索组件 / API…"
+          aria-label="搜索组件或 API"
+          onChange={e => setResQuery(e.target.value)}
+        />
+      </div>
       <div className="d2-rescol-rows">
         <button
           type="button"
@@ -285,10 +317,10 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
         </button>
 
         <section className="d2-resource-group">
-          <h3>组件资源 <span className="d2-badge kind">{app.components.length}</span></h3>
+          <h3>组件资源 <span className="d2-badge kind">{components.length}</span></h3>
           <div className="d2-resource-list">
-            {app.components.length === 0 ? <div className="d2-resource-row" style={{ color: 'var(--dsw-alias-label-caption, #888)', fontSize: 11.5, cursor: 'default' }}>暂无组件资源</div> : null}
-            {app.components.map(c => (
+            {components.length === 0 ? <div className="d2-resource-row" style={{ color: 'var(--dsw-alias-label-caption, #888)', fontSize: 11.5, cursor: 'default' }}>暂无组件资源</div> : null}
+            {components.map(c => (
               <button
                 type="button"
                 key={c.id}
@@ -309,10 +341,10 @@ export function AppResourceList({ app, selection, onSelect, pinnedIds }: AppReso
         </section>
 
         <section className="d2-resource-group">
-          <h3>API 资源 <span className="d2-badge kind">{app.apis.length}</span></h3>
+          <h3>API 资源 <span className="d2-badge kind">{apis.length}</span></h3>
           <div className="d2-resource-list">
-            {app.apis.length === 0 ? <div className="d2-resource-row" style={{ color: 'var(--dsw-alias-label-caption, #888)', fontSize: 11.5, cursor: 'default' }}>暂无 API 资源</div> : null}
-            {app.apis.map(a => (
+            {apis.length === 0 ? <div className="d2-resource-row" style={{ color: 'var(--dsw-alias-label-caption, #888)', fontSize: 11.5, cursor: 'default' }}>暂无 API 资源</div> : null}
+            {apis.map(a => (
               <button
                 type="button"
                 key={a.id}

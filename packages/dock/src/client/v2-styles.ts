@@ -63,7 +63,9 @@ export const V2_CSS = `
 /* ---------- 横向拖拽把手（col 右缘内侧；0.8.4 常驻 4px 宽条对齐 bsb 手感。
  *  0.8.3 的 right:-5px 伸出列外——常驻线恰与相邻 border 重合并被下一列内容层盖住，
  *  导致「没有宽条 + hover 难触发」；收进列内后视觉与命中都确定。） ---------- */
-.d2-resize-h { position: absolute; top: 0; right: 0; width: 12px; height: 100%; cursor: col-resize; z-index: 6; touch-action: none; }
+.d2-resize-h { position: absolute; top: 0; right: -2px; width: 14px; height: 100%; cursor: col-resize; z-index: 50; touch-action: none; }
+.d2-search { width: 128px; height: 24px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12)); background: var(--dsw-alias-bg-layer-2, #f6f6f7); color: var(--dsw-alias-label-primary, inherit); font-size: 11px; font-family: inherit; outline: none; }
+.d2-search:focus { border-color: color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 45%, transparent); }
 .d2-resize-h::after { content: ""; position: absolute; top: 0; bottom: 0; right: 3px; width: 4px; border-radius: 2px; background: var(--dsw-alias-border-l2, rgba(127,127,127,.3)); transition: background .15s, width .15s; }
 .d2-resize-h:hover::after { background: var(--dsw-alias-state-business-primary, #4176e6); width: 6px; }
 
