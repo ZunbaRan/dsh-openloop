@@ -26,13 +26,12 @@
 ## 平台里程碑（APP_PLATFORM_DESIGN §9 对应）
 
 - [x] **内置 APP 注册进后端**（2026-08-26 完成，app 0.3.1 `e0dc3af`）：seed 33 组件 + 3 API，幂等（用户修改不覆盖），三方 kind 表一致性测试锁定（panels=dock=app）
-- [x] **北极星 demo 剧本**（2026-08-26，docs/NORTH_STAR_DEMO_SCRIPT.md）：形态 B 三层递进（内置目录 → agent 生成 → 用户组装）+ 自愈彩蛋；双场景节奏（团队完整版 6min / 社区剪辑版 2min）；验收清单 + 风险规避表已备。**正式录制前置**：真机过一遍验收清单（7 项）
-- [ ] **北极星 demo 录制**：按剧本走查 + 录屏（待用户安排）
+- [x] ~~北极星 demo 剧本/录制~~（2026-09-03 用户取消：剧本文档 docs/NORTH_STAR_DEMO_SCRIPT.md 保留备查，录制不做）
 - [ ] **方向 1 · 第三方包协议 v2（MCP Apps 2.0 底座，2026-08-28 拍板）**：v1「安装时概念」草案已废弃（文档已加废弃横幅）。v2 = 第三方包即 MCP Apps 2.0 server，DSH 是 client + 容器；唯一 surface = HTML 沙箱；凭据归 server 自管（方向 2 的 registerApi/set_api_key 不进本协议）。**已落地（`1255eee`）**：mcp-runtime 热加载（addServer/removeServer/onServersChanged）+ mcp-tools 动态订阅。**剩余**：mcp-apps 独立资源视图 → app connect_server action → dock mcp-app tile → 协议文档 v2 重写 → 家族发布。验收对象 = tldraw + excalidraw 真机
 
 ## 低优先 / 观察池
 
-- [ ] **dock 左列 APP 行卡片化**（A 方案 demo 已出，2026-09-02 用户拍板：暂不实施，保留待办与原型）：
+- [ ] **dock 左列 APP 行卡片化**（A 方案 demo 已出，2026-09-03 用户拍板：**待定事项**，原型保留）：
   - 原型：`designs/dock-col1-cards/col1-cards-demo.html`（现状 vs 卡片化并排对比 + 变化点标注，样式词汇取自 v2-styles.ts，数据取自真机 registry）
   - 方案要点：description 副文本（2 行截断）+ 组件类型小标签（panel/artifact/mcp-app/API 只显示非零项）；选中态升级为左缘强调条 + 描边；warn 态 desc 位显示连接提示；保留图标/名称/状态点/kind 配色/230px 列宽/缩略模式
   - 实现落点：`packages/dock/src/client/AppListPanel.tsx` col1 行渲染 + `v2-styles.ts` 新增 ~40 行样式，dock 单包 bump
