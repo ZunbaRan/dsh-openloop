@@ -1,0 +1,14 @@
+{
+  "project": "linkage-proto",
+  "description": "panel/artifact 页面关联（relations）联动特性交互原型：①对话流点选即览 ②Board 悬浮窗多开 ③资源列表页面关系（真实预览+双语声明+关联预览）。四决策已由用户拍板（A 卡片内下方 / B 悬浮窗多开 / C hover 亮灯 / D {app}:{entity}:{action} 命名空间）",
+  "createdAt": "2026-09-02",
+  "status": "approved",
+  "deliverables": [
+    { "file": "index.html", "kind": "interactive-prototype", "notes": "设计令牌 + 布局 + 样式（CDN 用 jsdelivr——本机 unpkg 不可达）" },
+    { "file": "data.jsx", "kind": "mock-data", "notes": "CRM 模拟数据 + 共享组件（LeadTable/LeadDetail/ContactCard/SalesKpi）" },
+    { "file": "scene-chat.jsx", "kind": "scene", "notes": "场景1：对话流点选即览" },
+    { "file": "scene-board.jsx", "kind": "scene", "notes": "场景2：Board 悬浮窗多开 + hover 亮灯" },
+    { "file": "scene-registry.jsx", "kind": "scene", "notes": "场景3：资源列表页面关系 + 关联预览" },
+    { "file": "app.jsx", "kind": "shell", "notes": "场景导航 + 标注栏" }
+  ]
+}
