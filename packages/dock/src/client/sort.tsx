@@ -1,10 +1,13 @@
 /**
- * 列表排序助手（2026-09-03 用户自定义排序迭代）：
+ * 列表排序助手（2026-09-03 用户自定义排序迭代；2026-09-04 拖拽层迁移 dnd-kit）：
  * - 排序模式：custom（用户拖拽顺序，持久化）/ az / za
  * - 拖拽顺序存 localStorage（key 由调用方定）；拖动即切回 custom 模式
- * - HTML5 DnD 拖拽重排：行 dragover 时实时预览换位，dragend 提交持久化
+ * - 拖拽交互：@dnd-kit/sortable（FLIP 滑动动画 + 键盘可达性 + 无原生影子漂移）
  */
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 export type SortMode = 'custom' | 'az' | 'za'
 
@@ -101,46 +104,70 @@ export function SortButton({ mode, onCycle }: { mode: SortMode; onCycle: () => v
   )
 }
 
-/** HTML5 DnD 行拖拽 props 生成器：返回挂到行元素上的事件集（dragover 实时换位） */
-export interface RowDragHandlers {
-  draggable: true
-  onDragStart: (e: React.DragEvent) => void
-  onDragOver: (e: React.DragEvent) => void
-  onDragEnd: () => void
+// ---------------------------------------------------------------------
+// dnd-kit 封装（2026-09-04：手搓 HTML5 DnD → @dnd-kit/sortable）
+// ---------------------------------------------------------------------
+
+/** 每行渲染 props（由 useSortable 产出，调用方挂到行元素上） */
+export interface SortableRowRenderProps {
+  setNodeRef: (el: HTMLElement | null) => void
+  attributes: Record<string, unknown>
+  listeners: Record<string, unknown> | undefined
+  style: CSSProperties
+  isDragging: boolean
 }
 
-export function makeRowDragHandlers(args: {
-  id: string
-  getDragId: () => string | null
-  setDragId: (id: string | null) => void
-  onHover: (dragId: string, targetId: string) => void
-  onCommit: () => void
-}): RowDragHandlers {
-  const { id, getDragId, setDragId, onHover, onCommit } = args
-  return {
-    draggable: true,
-    onDragStart: e => {
-      e.dataTransfer.effectAllowed = 'move'
-      e.dataTransfer.setData('text/plain', id)
-      // 消除原生 drag image（2026-09-03「影子漂移/飞回原位」反馈）：行在拖动中
-      // 已实时换位，原生影子松开时的飞回动画纯属误导——用 1x1 透明图替代
-      const ghost = document.createElement('span')
-      ghost.style.cssText = 'position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;'
-      document.body.appendChild(ghost)
-      e.dataTransfer.setDragImage(ghost, 0, 0)
-      setTimeout(() => ghost.remove(), 0)
-      setDragId(id)
+function SortableRow({ id, children }: { id: string; children: (p: SortableRowRenderProps) => ReactNode }): ReactNode {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return children({
+    setNodeRef,
+    attributes: attributes as unknown as Record<string, unknown>,
+    listeners: listeners as unknown as Record<string, unknown> | undefined,
+    style: {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.6 : undefined,
+      zIndex: isDragging ? 5 : undefined,
+      position: 'relative' as const,
+      touchAction: 'none',
     },
-    onDragOver: e => {
-      const dragId = getDragId()
-      if (dragId === null || dragId === id) return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = 'move'
-      onHover(dragId, id)
-    },
-    onDragEnd: () => {
-      setDragId(null)
-      onCommit()
-    },
+    isDragging,
+  })
+}
+
+/**
+ * 可拖拽排序列表：包一层 DndContext + SortableContext，逐行给 useSortable props。
+ * 拖动中其它行 FLIP 滑动让位（dnd-kit transform transition 自带动画）；
+ * onReorder 在松手时拿到完整新顺序（调用方负责持久化 + 切回 custom 模式）。
+ */
+export function SortableRows<T>({ items, keyOf, onReorder, children }: {
+  items: readonly T[]
+  keyOf: (item: T) => string
+  onReorder: (ids: string[]) => void
+  children: (item: T, rowProps: SortableRowRenderProps) => ReactNode
+}): ReactNode {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const ids = items.map(keyOf)
+  const onDragEnd = (e: DragEndEvent): void => {
+    const { active, over } = e
+    if (over === null || active.id === over.id) return
+    const from = ids.indexOf(String(active.id))
+    const to = ids.indexOf(String(over.id))
+    if (from === -1 || to === -1) return
+    onReorder(arrayMove(ids, from, to))
   }
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+        {items.map(item => (
+          <SortableRow key={keyOf(item)} id={keyOf(item)}>
+            {rowProps => children(item, rowProps)}
+          </SortableRow>
+        ))}
+      </SortableContext>
+    </DndContext>
+  )
 }

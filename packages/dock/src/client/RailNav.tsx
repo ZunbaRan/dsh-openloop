@@ -10,7 +10,7 @@
  * - tab 切换（看板 ↔ APP）由顶栏段控负责（DockShell），rail 不再承载
  */
 import { useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
-import { applySortOrder, cycleSortMode, makeRowDragHandlers, moveBefore, readSortMode, SortButton, writeSortMode, type SortMode } from './sort.tsx'
+import { applySortOrder, cycleSortMode, readSortMode, SortableRows, SortButton, writeSortMode, type SortMode } from './sort.tsx'
 
 const BOARDS_SORT_KEY = 'openloop.dock.boards-sort.v1'
 import { dockStore } from './store.ts'
@@ -50,15 +50,18 @@ export function RailNav(props: RailNavProps): ReactNode {
   const expanded = width >= RAIL_EXPAND_THRESHOLD
   const [dragging, setDragging] = useState(false)
   const [editingBoard, setEditingBoard] = useState<string | null>(null)
-  // 拖拽排序（2026-09-03）：看板页顺序 = dockStore 的 boards 顺序（custom 模式即存储序）；
-  // az/za 仅影响展示。拖动即切回 custom。
+  // 拖拽排序（2026-09-04 dnd-kit）：看板页顺序 = dockStore 的 boards 顺序（custom 即存储序）；
+  // az/za 仅影响展示。拖动松手即切回 custom。
   const [sortMode, setSortMode] = useState<SortMode>(() => readSortMode(BOARDS_SORT_KEY))
-  const [dragId, setDragId] = useState<string | null>(null)
   const sortedBoards = applySortOrder(boards, sortMode, [], b => b.id, b => b.name)
   const cycleMode = (): void => {
     const next = cycleSortMode(sortMode)
     setSortMode(next)
     writeSortMode(BOARDS_SORT_KEY, next)
+  }
+  const onReorder = (ids: string[]): void => {
+    dockStore.reorderBoards(ids)
+    if (sortMode !== 'custom') { setSortMode('custom'); writeSortMode(BOARDS_SORT_KEY, 'custom') }
   }
 
   const openBoard = (id: string): void => {
@@ -96,53 +99,47 @@ export function RailNav(props: RailNavProps): ReactNode {
               <button type="button" className="d2-sec-add" title="新增看板页" onClick={onAddBoard}><icons.plus size={11} /></button>
             </span>
           </div>
-          {sortedBoards.map(b => (
-            editingBoard === b.id ? (
-              <input
-                key={b.id}
-                className="d2-board-rename d2-rail-rename"
-                autoFocus
-                defaultValue={b.name}
-                size={Math.max(4, b.name.length + 2)}
-                aria-label="重命名看板页"
-                onBlur={e => commitRename(b.id, e.target.value)}
-                onKeyDown={e => onRenameKeyDown(e, b.id)}
-              />
-            ) : (
-              <button
-                type="button"
-                key={b.id}
-                className={`d2-rail-row${tab === 'board' && b.id === activeBoardId ? ' on' : ''}${dragId === b.id ? ' d2-row-dragging' : ''}`}
-                onClick={() => openBoard(b.id)}
-                onDoubleClick={() => setEditingBoard(b.id)}
-                title="双击重命名；按住上下拖动调整顺序"
-                {...makeRowDragHandlers({
-                  id: b.id,
-                  getDragId: () => dragId,
-                  setDragId,
-                  onHover: (drag, target) => {
-                    // 实时换位（存储序即 custom 序）
-                    dockStore.reorderBoards(moveBefore(sortedBoards.map(x => x.id), drag, target))
-                  },
-                  onCommit: () => {
-                    if (sortMode !== 'custom') { setSortMode('custom'); writeSortMode(BOARDS_SORT_KEY, 'custom') }
-                  },
-                })}
-              >
-                <icons.board size={14} />
-                <span className="d2-lbl">{b.name}</span>
-                <span className="d2-cnt">{b.tiles.length}</span>
-                {boards.length > 1 ? (
-                  <span
-                    role="button"
-                    aria-label={`删除 ${b.name}`}
-                    title="删除此页"
-                    onClick={e => { e.stopPropagation(); onRemoveBoard(b.id) }}
-                  ><icons.x size={9} /></span>
-                ) : null}
-              </button>
-            )
-          ))}
+          <SortableRows items={sortedBoards} keyOf={b => b.id} onReorder={onReorder}>
+            {(b, rowProps) => (
+              editingBoard === b.id ? (
+                <input
+                  key={b.id}
+                  className="d2-board-rename d2-rail-rename"
+                  autoFocus
+                  defaultValue={b.name}
+                  size={Math.max(4, b.name.length + 2)}
+                  aria-label="重命名看板页"
+                  onBlur={e => commitRename(b.id, e.target.value)}
+                  onKeyDown={e => onRenameKeyDown(e, b.id)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  key={b.id}
+                  ref={rowProps.setNodeRef}
+                  {...rowProps.attributes}
+                  {...rowProps.listeners}
+                  style={rowProps.style}
+                  className={`d2-rail-row${tab === 'board' && b.id === activeBoardId ? ' on' : ''}`}
+                  onClick={() => openBoard(b.id)}
+                  onDoubleClick={() => setEditingBoard(b.id)}
+                  title="双击重命名；按住上下拖动调整顺序"
+                >
+                  <icons.board size={14} />
+                  <span className="d2-lbl">{b.name}</span>
+                  <span className="d2-cnt">{b.tiles.length}</span>
+                  {boards.length > 1 ? (
+                    <span
+                      role="button"
+                      aria-label={`删除 ${b.name}`}
+                      title="删除此页"
+                      onClick={e => { e.stopPropagation(); onRemoveBoard(b.id) }}
+                    ><icons.x size={9} /></span>
+                  ) : null}
+                </button>
+              )
+            )}
+          </SortableRows>
         </>
       ) : (
         <>

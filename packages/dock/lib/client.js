@@ -33,6 +33,9 @@ window.__ModuleLoader__.load({
 		let react_dom = require("react-dom");
 		react_dom = __toESM(react_dom, 1);
 		let react_jsx_runtime = require("react/jsx-runtime");
+		let _dnd_kit_core = require("@dnd-kit/core");
+		let _dnd_kit_sortable = require("@dnd-kit/sortable");
+		let _dnd_kit_utilities = require("@dnd-kit/utilities");
 		/** 拖宽上限：视口全宽（2026-08-30 用户要求「想拖多宽就多宽」——满屏是用户的合法选择，不再预设 1200/70vw 封顶） */
 		const dockMaxWidth = () => {
 			const viewport = globalThis.innerWidth;
@@ -6946,17 +6949,6 @@ window.__ModuleLoader__.load({
 				return 0;
 			});
 		}
-		/** 拖拽实时换位：把 dragId 移到 targetId 前面（同位/no-op 返回原数组） */
-		function moveBefore(order, dragId, targetId) {
-			if (dragId === targetId) return [...order];
-			const from = order.indexOf(dragId);
-			const to = order.indexOf(targetId);
-			if (from === -1 || to === -1 || from === to) return [...order];
-			const next = [...order];
-			next.splice(from, 1);
-			next.splice(next.indexOf(targetId) + (from < to ? 1 : 0), 0, dragId);
-			return next;
-		}
 		/** 排序模式切换按钮（小图标，title 显示当前模式与切换目标） */
 		function SortButton({ mode, onCycle }) {
 			const next = cycleSortMode(mode);
@@ -6971,32 +6963,52 @@ window.__ModuleLoader__.load({
 				children: mode === "custom" ? "⇅" : mode === "az" ? "A↓" : "Z↓"
 			});
 		}
-		function makeRowDragHandlers(args) {
-			const { id, getDragId, setDragId, onHover, onCommit } = args;
-			return {
-				draggable: true,
-				onDragStart: (e) => {
-					e.dataTransfer.effectAllowed = "move";
-					e.dataTransfer.setData("text/plain", id);
-					const ghost = document.createElement("span");
-					ghost.style.cssText = "position:absolute;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;";
-					document.body.appendChild(ghost);
-					e.dataTransfer.setDragImage(ghost, 0, 0);
-					setTimeout(() => ghost.remove(), 0);
-					setDragId(id);
+		function SortableRow({ id, children }) {
+			const { attributes, listeners, setNodeRef, transform, transition, isDragging } = (0, _dnd_kit_sortable.useSortable)({ id });
+			return children({
+				setNodeRef,
+				attributes,
+				listeners,
+				style: {
+					transform: _dnd_kit_utilities.CSS.Transform.toString(transform),
+					transition,
+					opacity: isDragging ? .6 : void 0,
+					zIndex: isDragging ? 5 : void 0,
+					position: "relative",
+					touchAction: "none"
 				},
-				onDragOver: (e) => {
-					const dragId = getDragId();
-					if (dragId === null || dragId === id) return;
-					e.preventDefault();
-					e.dataTransfer.dropEffect = "move";
-					onHover(dragId, id);
-				},
-				onDragEnd: () => {
-					setDragId(null);
-					onCommit();
-				}
+				isDragging
+			});
+		}
+		/**
+		* 可拖拽排序列表：包一层 DndContext + SortableContext，逐行给 useSortable props。
+		* 拖动中其它行 FLIP 滑动让位（dnd-kit transform transition 自带动画）；
+		* onReorder 在松手时拿到完整新顺序（调用方负责持久化 + 切回 custom 模式）。
+		*/
+		function SortableRows({ items, keyOf, onReorder, children }) {
+			const sensors = (0, _dnd_kit_core.useSensors)((0, _dnd_kit_core.useSensor)(_dnd_kit_core.PointerSensor, { activationConstraint: { distance: 4 } }), (0, _dnd_kit_core.useSensor)(_dnd_kit_core.KeyboardSensor, { coordinateGetter: _dnd_kit_sortable.sortableKeyboardCoordinates }));
+			const ids = items.map(keyOf);
+			const onDragEnd = (e) => {
+				const { active, over } = e;
+				if (over === null || active.id === over.id) return;
+				const from = ids.indexOf(String(active.id));
+				const to = ids.indexOf(String(over.id));
+				if (from === -1 || to === -1) return;
+				onReorder((0, _dnd_kit_sortable.arrayMove)(ids, from, to));
 			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_dnd_kit_core.DndContext, {
+				sensors,
+				collisionDetection: _dnd_kit_core.closestCenter,
+				onDragEnd,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_dnd_kit_sortable.SortableContext, {
+					items: ids,
+					strategy: _dnd_kit_sortable.verticalListSortingStrategy,
+					children: items.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortableRow, {
+						id: keyOf(item),
+						children: (rowProps) => children(item, rowProps)
+					}, keyOf(item)))
+				})
+			});
 		}
 		//#endregion
 		//#region src/client/drag-resize.ts
@@ -7042,12 +7054,18 @@ window.__ModuleLoader__.load({
 			const [dragging, setDragging] = (0, react.useState)(false);
 			const [editingBoard, setEditingBoard] = (0, react.useState)(null);
 			const [sortMode, setSortMode] = (0, react.useState)(() => readSortMode(BOARDS_SORT_KEY));
-			const [dragId, setDragId] = (0, react.useState)(null);
 			const sortedBoards = applySortOrder(boards, sortMode, [], (b) => b.id, (b) => b.name);
 			const cycleMode = () => {
 				const next = cycleSortMode(sortMode);
 				setSortMode(next);
 				writeSortMode(BOARDS_SORT_KEY, next);
+			};
+			const onReorder = (ids) => {
+				dockStore.reorderBoards(ids);
+				if (sortMode !== "custom") {
+					setSortMode("custom");
+					writeSortMode(BOARDS_SORT_KEY, "custom");
+				}
 			};
 			const openBoard = (id) => {
 				onSelectBoard(id);
@@ -7093,56 +7111,51 @@ window.__ModuleLoader__.load({
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.plus, { size: 11 })
 						})]
 					})]
-				}), sortedBoards.map((b) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
-					className: "d2-board-rename d2-rail-rename",
-					autoFocus: true,
-					defaultValue: b.name,
-					size: Math.max(4, b.name.length + 2),
-					"aria-label": "重命名看板页",
-					onBlur: (e) => commitRename(b.id, e.target.value),
-					onKeyDown: (e) => onRenameKeyDown(e, b.id)
-				}, b.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-					type: "button",
-					className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}${dragId === b.id ? " d2-row-dragging" : ""}`,
-					onClick: () => openBoard(b.id),
-					onDoubleClick: () => setEditingBoard(b.id),
-					title: "双击重命名；按住上下拖动调整顺序",
-					...makeRowDragHandlers({
-						id: b.id,
-						getDragId: () => dragId,
-						setDragId,
-						onHover: (drag, target) => {
-							dockStore.reorderBoards(moveBefore(sortedBoards.map((x) => x.id), drag, target));
-						},
-						onCommit: () => {
-							if (sortMode !== "custom") {
-								setSortMode("custom");
-								writeSortMode(BOARDS_SORT_KEY, "custom");
-							}
-						}
-					}),
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 14 }),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-lbl",
-							children: b.name
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							className: "d2-cnt",
-							children: b.tiles.length
-						}),
-						boards.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							role: "button",
-							"aria-label": `删除 ${b.name}`,
-							title: "删除此页",
-							onClick: (e) => {
-								e.stopPropagation();
-								onRemoveBoard(b.id);
-							},
-							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.x, { size: 9 })
-						}) : null
-					]
-				}, b.id))] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortableRows, {
+					items: sortedBoards,
+					keyOf: (b) => b.id,
+					onReorder,
+					children: (b, rowProps) => editingBoard === b.id ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("input", {
+						className: "d2-board-rename d2-rail-rename",
+						autoFocus: true,
+						defaultValue: b.name,
+						size: Math.max(4, b.name.length + 2),
+						"aria-label": "重命名看板页",
+						onBlur: (e) => commitRename(b.id, e.target.value),
+						onKeyDown: (e) => onRenameKeyDown(e, b.id)
+					}, b.id) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+						type: "button",
+						ref: rowProps.setNodeRef,
+						...rowProps.attributes,
+						...rowProps.listeners,
+						style: rowProps.style,
+						className: `d2-rail-row${tab === "board" && b.id === activeBoardId ? " on" : ""}`,
+						onClick: () => openBoard(b.id),
+						onDoubleClick: () => setEditingBoard(b.id),
+						title: "双击重命名；按住上下拖动调整顺序",
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.board, { size: 14 }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-lbl",
+								children: b.name
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								className: "d2-cnt",
+								children: b.tiles.length
+							}),
+							boards.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								role: "button",
+								"aria-label": `删除 ${b.name}`,
+								title: "删除此页",
+								onClick: (e) => {
+									e.stopPropagation();
+									onRemoveBoard(b.id);
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.x, { size: 9 })
+							}) : null
+						]
+					}, b.id)
+				})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 					type: "button",
 					className: `d2-rail-tab${tab === "board" ? " on" : ""}`,
 					title: "看板",
@@ -7326,14 +7339,19 @@ window.__ModuleLoader__.load({
 			const filteredApps = appQuery.trim().length === 0 ? apps : apps.filter((a) => `${a.name} ${a.id}`.toLowerCase().includes(appQuery.trim().toLowerCase()));
 			const [sortMode, setSortMode] = (0, react.useState)(() => readSortMode(APPS_SORT_KEY));
 			const [order, setOrder] = (0, react.useState)(() => readOrder(APPS_ORDER_KEY));
-			const orderRef = (0, react.useRef)(order);
-			orderRef.current = order;
-			const [dragId, setDragId] = (0, react.useState)(null);
 			const sortedApps = applySortOrder(filteredApps, sortMode, order, (a) => a.id, (a) => a.name);
 			const cycleMode = () => {
 				const next = cycleSortMode(sortMode);
 				setSortMode(next);
 				writeSortMode(APPS_SORT_KEY, next);
+			};
+			const onReorder = (ids) => {
+				setOrder(ids);
+				writeOrder(APPS_ORDER_KEY, ids);
+				if (sortMode !== "custom") {
+					setSortMode("custom");
+					writeSortMode(APPS_SORT_KEY, "custom");
+				}
 			};
 			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-applist d2-col-collapsed",
@@ -7411,53 +7429,46 @@ window.__ModuleLoader__.load({
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 						className: "d2-rows",
-						children: sortedApps.map((a) => {
-							const tone = toneOf(a);
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-								type: "button",
-								className: `d2-app-row${a.id === selectedAppId ? " on" : ""}${dragId === a.id ? " d2-row-dragging" : ""}`,
-								onClick: () => onSelect(a.id),
-								title: `${tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : ""}按住上下拖动调整顺序`,
-								...makeRowDragHandlers({
-									id: a.id,
-									getDragId: () => dragId,
-									setDragId,
-									onHover: (drag, target) => {
-										const base = orderRef.current.length > 0 ? orderRef.current : apps.map((x) => x.id);
-										setOrder(moveBefore(base, drag, target));
-									},
-									onCommit: () => {
-										writeOrder(APPS_ORDER_KEY, orderRef.current);
-										if (sortMode !== "custom") {
-											setSortMode("custom");
-											writeSortMode(APPS_SORT_KEY, "custom");
-										}
-									}
-								}),
-								children: [
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										className: "d2-meta",
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-											className: "d2-name",
-											children: a.name
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											className: "d2-sub",
-											children: [
-												a.components.length,
-												" 组件 · ",
-												a.apis.length,
-												" API ",
-												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
-											]
-										})]
-									}),
-									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-										className: "d2-status",
-										children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` })
-									})
-								]
-							}, a.id);
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortableRows, {
+							items: sortedApps,
+							keyOf: (a) => a.id,
+							onReorder,
+							children: (a, rowProps) => {
+								const tone = toneOf(a);
+								return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									ref: rowProps.setNodeRef,
+									...rowProps.attributes,
+									...rowProps.listeners,
+									style: rowProps.style,
+									className: `d2-app-row${a.id === selectedAppId ? " on" : ""}`,
+									onClick: () => onSelect(a.id),
+									title: `${tone === "warn" ? "MCP server 不可达（惰性重连中）" : tone === "off" ? "MCP server 已关闭" : ""}按住上下拖动调整顺序`,
+									children: [
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AppIcon, { app: a }),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											className: "d2-meta",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												className: "d2-name",
+												children: a.name
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												className: "d2-sub",
+												children: [
+													a.components.length,
+													" 组件 · ",
+													a.apis.length,
+													" API ",
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)(KindBadge, { kind: a.kind })
+												]
+											})]
+										}),
+										/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-status",
+											children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${tone}` })
+										})
+									]
+								});
+							}
 						})
 					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -7482,15 +7493,10 @@ window.__ModuleLoader__.load({
 			const [sortMode, setSortMode] = (0, react.useState)(() => readSortMode(RES_SORT_KEY));
 			const [compOrder, setCompOrder] = (0, react.useState)(() => readOrder(COMP_ORDER_KEY));
 			const [apiOrder, setApiOrder] = (0, react.useState)(() => readOrder(API_ORDER_KEY));
-			const compOrderRef = (0, react.useRef)(compOrder);
-			compOrderRef.current = compOrder;
-			const apiOrderRef = (0, react.useRef)(apiOrder);
-			apiOrderRef.current = apiOrder;
 			(0, react.useEffect)(() => {
 				setCompOrder(readOrder(COMP_ORDER_KEY));
 				setApiOrder(readOrder(API_ORDER_KEY));
 			}, [app.id]);
-			const [dragId, setDragId] = (0, react.useState)(null);
 			const sortedComponents = applySortOrder(components, sortMode, compOrder, (c) => c.id, (c) => c.title);
 			const sortedApis = applySortOrder(apis, sortMode, apiOrder, (a) => a.id, (a) => a.path);
 			const cycleMode = () => {
@@ -7498,11 +7504,21 @@ window.__ModuleLoader__.load({
 				setSortMode(next);
 				writeSortMode(RES_SORT_KEY, next);
 			};
-			const commitCustom = (mode) => {
-				if (mode !== "custom") {
+			const commitCustom = () => {
+				if (sortMode !== "custom") {
 					setSortMode("custom");
 					writeSortMode(RES_SORT_KEY, "custom");
 				}
+			};
+			const onCompReorder = (ids) => {
+				setCompOrder(ids);
+				writeOrder(COMP_ORDER_KEY, ids);
+				commitCustom();
+			};
+			const onApiReorder = (ids) => {
+				setApiOrder(ids);
+				writeOrder(API_ORDER_KEY, ids);
+				commitCustom();
 			};
 			if (ui.collapsed) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("aside", {
 				className: "d2-rescol d2-col-collapsed",
@@ -7649,53 +7665,49 @@ window.__ModuleLoader__.load({
 											cursor: "default"
 										},
 										children: "暂无组件资源"
-									}) : null, sortedComponents.map((c) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-										type: "button",
-										className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}${dragId === c.id ? " d2-row-dragging" : ""}`,
-										onClick: () => onSelect({
-											kind: "component",
-											rid: c.id
-										}),
-										title: "选中后在右侧预览；按住上下拖动调整顺序",
-										...makeRowDragHandlers({
-											id: c.id,
-											getDragId: () => dragId,
-											setDragId,
-											onHover: (drag, target) => {
-												const base = compOrderRef.current.length > 0 ? compOrderRef.current : components.map((x) => x.id);
-												setCompOrder(moveBefore(base, drag, target));
-											},
-											onCommit: () => {
-												writeOrder(COMP_ORDER_KEY, compOrderRef.current);
-												commitCustom(sortMode);
-											}
-										}),
-										children: [
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "d2-meta",
-												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-													className: "d2-name",
-													children: c.title
-												}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-													className: "d2-rid",
-													children: c.id
-												})]
+									}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortableRows, {
+										items: sortedComponents,
+										keyOf: (c) => c.id,
+										onReorder: onCompReorder,
+										children: (c, rowProps) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+											type: "button",
+											ref: rowProps.setNodeRef,
+											...rowProps.attributes,
+											...rowProps.listeners,
+											style: rowProps.style,
+											className: `d2-resource-row${selection.kind === "component" && selection.rid === c.id ? " on" : ""}`,
+											onClick: () => onSelect({
+												kind: "component",
+												rid: c.id
 											}),
-											/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelChips, {
-												rid: c.id,
-												onJump: (rid) => onSelect({
-													kind: "component",
-													rid
-												})
-											}),
-											pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-												className: "d2-pin-dot",
-												title: "已固定到看板",
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "d2-dot ok" })
-											}) : null
-										]
-									}, c.id))]
+											title: "选中后在右侧预览；按住上下拖动调整顺序",
+											children: [
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(TypeBadge, { type: c.type }),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "d2-meta",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+														className: "d2-name",
+														children: c.title
+													}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+														className: "d2-rid",
+														children: c.id
+													})]
+												}),
+												/* @__PURE__ */ (0, react_jsx_runtime.jsx)(RelChips, {
+													rid: c.id,
+													onJump: (rid) => onSelect({
+														kind: "component",
+														rid
+													})
+												}),
+												pinnedIds.has(c.id) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													className: "d2-pin-dot",
+													title: "已固定到看板",
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: "d2-dot ok" })
+												}) : null
+											]
+										})
+									})]
 								})]
 							}),
 							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
@@ -7713,45 +7725,41 @@ window.__ModuleLoader__.load({
 											cursor: "default"
 										},
 										children: "暂无 API 资源"
-									}) : null, sortedApis.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-										type: "button",
-										className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}${dragId === a.id ? " d2-row-dragging" : ""}`,
-										onClick: () => onSelect({
-											kind: "api",
-											rid: a.id
-										}),
-										title: "选中后在右侧查看详情；按住上下拖动调整顺序",
-										...makeRowDragHandlers({
-											id: a.id,
-											getDragId: () => dragId,
-											setDragId,
-											onHover: (drag, target) => {
-												const base = apiOrderRef.current.length > 0 ? apiOrderRef.current : apis.map((x) => x.id);
-												setApiOrder(moveBefore(base, drag, target));
-											},
-											onCommit: () => {
-												writeOrder(API_ORDER_KEY, apiOrderRef.current);
-												commitCustom(sortMode);
-											}
-										}),
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											className: "d2-meta",
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-												className: "d2-name",
-												children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-													className: "d2-mono",
-													children: a.path
-												})
-											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-												className: "d2-rid",
-												children: [
-													a.domain,
-													" · ",
-													a.id
-												]
+									}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SortableRows, {
+										items: sortedApis,
+										keyOf: (a) => a.id,
+										onReorder: onApiReorder,
+										children: (a, rowProps) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+											type: "button",
+											ref: rowProps.setNodeRef,
+											...rowProps.attributes,
+											...rowProps.listeners,
+											style: rowProps.style,
+											className: `d2-resource-row${selection.kind === "api" && selection.rid === a.id ? " on" : ""}`,
+											onClick: () => onSelect({
+												kind: "api",
+												rid: a.id
+											}),
+											title: "选中后在右侧查看详情；按住上下拖动调整顺序",
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { className: `d2-dot ${a.status}` }), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												className: "d2-meta",
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+													className: "d2-name",
+													children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+														className: "d2-mono",
+														children: a.path
+													})
+												}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+													className: "d2-rid",
+													children: [
+														a.domain,
+														" · ",
+														a.id
+													]
+												})]
 											})]
-										})]
-									}, a.id))]
+										})
+									})]
 								})]
 							})
 						]
