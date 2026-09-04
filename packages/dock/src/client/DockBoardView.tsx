@@ -23,7 +23,7 @@ import { RelFloatLayer } from './RelFloatLayer.tsx'
 
 /** scope 惰性单例（base 缺失时 undefined——ArtifactFrame 外壳自行降级） */
 let scopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>['createOpenLoopSettingsScope']> | undefined
-function getScope() {
+export function getScope() {
   if (scopeCache === undefined) scopeCache = getBaseClient()?.createOpenLoopSettingsScope()
   return scopeCache
 }

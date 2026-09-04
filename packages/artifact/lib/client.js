@@ -347,6 +347,16 @@ svg text { fill: var(--foreground); font: 12px system-ui, sans-serif; }
 							gap: 8
 						},
 						children: [
+							getDockService()?.openSnapshot !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+								size: "sm",
+								variant: "toolbar",
+								title: "投影为快照（冻结当前内容，悬浮只读回看）",
+								onClick: () => getDockService()?.openSnapshot?.({
+									kind: "artifact",
+									meta
+								}, meta.title),
+								children: "⧉ 快照"
+							}) : null,
 							getDockService() ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
 								size: "sm",
 								variant: "toolbar",

@@ -8756,25 +8756,57 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 		function PinToDock({ meta, title }) {
 			const dock = getDockService();
 			if (!dock) return null;
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-				type: "button",
-				title: "固定到 OpenLoop Dock",
-				onClick: () => dock.pinPanel(meta, title),
+			const btn = {
+				width: 24,
+				height: 24,
+				borderRadius: 7,
+				border: "1px solid var(--openloop-border)",
+				background: "var(--openloop-elevated)",
+				cursor: "pointer",
+				fontSize: 11,
+				lineHeight: 1,
+				display: "inline-flex",
+				alignItems: "center",
+				justifyContent: "center",
+				color: "inherit",
+				padding: 0
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
 				style: {
 					position: "absolute",
 					top: 6,
 					right: 6,
 					zIndex: 5,
-					width: 24,
-					height: 24,
-					borderRadius: 7,
-					border: "1px solid var(--openloop-border)",
-					background: "var(--openloop-elevated)",
-					cursor: "pointer",
-					fontSize: 11,
-					lineHeight: 1
+					display: "inline-flex",
+					gap: 5
 				},
-				children: "📌"
+				children: [dock.openSnapshot !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					title: "投影为快照（冻结当前内容，悬浮只读回看）",
+					onClick: () => dock.openSnapshot?.({
+						kind: "panel",
+						meta
+					}, title),
+					style: btn,
+					children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+						width: "12",
+						height: "12",
+						viewBox: "0 0 24 24",
+						fill: "none",
+						stroke: "currentColor",
+						strokeWidth: "1.8",
+						strokeLinecap: "round",
+						strokeLinejoin: "round",
+						"aria-hidden": "true",
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M11 4h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M6.5 9.5H6a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h6.5a2 2 0 0 0 2-2v-.5" })]
+					})
+				}) : null, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					title: "固定到 OpenLoop Dock",
+					onClick: () => dock.pinPanel(meta, title),
+					style: btn,
+					children: "📌"
+				})]
 			});
 		}
 		function PanelCard({ block }) {
@@ -8834,7 +8866,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 			lineHeight: 1.5,
 			color: "var(--openloop-muted-foreground)"
 		};
-		function PanelSurface({ meta, relParams }) {
+		function PanelSurface({ meta, relParams, relReadonly }) {
 			const theme = usePanelVisualTheme();
 			const themeVars = (0, react.useMemo)(() => {
 				const vars = {};
@@ -8853,7 +8885,7 @@ body { background: var(--openloop-background, transparent); color: var(--openloo
 					[widgetId]: data
 				}));
 			}, []);
-			const emits = panel.relations?.emits;
+			const emits = relReadonly === true ? void 0 : panel.relations?.emits;
 			const onRowClick = (0, react.useCallback)((event) => {
 				if (!emits || emits.length === 0) return;
 				const rowEl = event.target.closest("tr[data-openloop-row-index]");

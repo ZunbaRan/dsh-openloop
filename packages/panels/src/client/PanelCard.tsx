@@ -51,13 +51,30 @@ export function panelMetaFrom(value: unknown): PanelMeta | undefined {
 function PinToDock({ meta, title }: { meta: PanelMeta; title: string }): ReactNode {
   const dock = getDockService()
   if (!dock) return null
+  const btn: CSSProperties = { width: 24, height: 24, borderRadius: 7, border: '1px solid var(--openloop-border)', background: 'var(--openloop-elevated)', cursor: 'pointer', fontSize: 11, lineHeight: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'inherit', padding: 0 }
   return (
-    <button
-      type="button"
-      title="固定到 OpenLoop Dock"
-      onClick={() => dock.pinPanel(meta, title)}
-      style={{ position: 'absolute', top: 6, right: 6, zIndex: 5, width: 24, height: 24, borderRadius: 7, border: '1px solid var(--openloop-border)', background: 'var(--openloop-elevated)', cursor: 'pointer', fontSize: 11, lineHeight: 1 }}
-    >📌</button>
+    <span style={{ position: 'absolute', top: 6, right: 6, zIndex: 5, display: 'inline-flex', gap: 5 }}>
+      {/* 快照 v1：pin 左侧「投影为快照」（冻结当前 meta，悬浮只读回看）；旧版 dock 无 openSnapshot 时隐藏 */}
+      {dock.openSnapshot !== undefined ? (
+        <button
+          type="button"
+          title="投影为快照（冻结当前内容，悬浮只读回看）"
+          onClick={() => dock.openSnapshot?.({ kind: 'panel', meta }, title)}
+          style={btn}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 4h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+            <path d="M6.5 9.5H6a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h6.5a2 2 0 0 0 2-2v-.5" />
+          </svg>
+        </button>
+      ) : null}
+      <button
+        type="button"
+        title="固定到 OpenLoop Dock"
+        onClick={() => dock.pinPanel(meta, title)}
+        style={btn}
+      >📌</button>
+    </span>
   )
 }
 
@@ -114,7 +131,7 @@ const descStyle: CSSProperties = {
   color: 'var(--openloop-muted-foreground)',
 }
 
-export function PanelSurface({ meta, relParams }: { meta: PanelMeta; relParams?: JsonObject }) {
+export function PanelSurface({ meta, relParams, relReadonly }: { meta: PanelMeta; relParams?: JsonObject; relReadonly?: boolean }) {
   const theme = usePanelVisualTheme()
   // 主题变量注入宿主 DOM（真机事故：此前 tokens 只经桥发给沙箱格，宿主车道从未注入，
   // 所有 var(--openloop-*) 落空 → 面板无样式、换肤无效）
@@ -138,7 +155,8 @@ export function PanelSurface({ meta, relParams }: { meta: PanelMeta; relParams?:
   // 联动 v1（M2）：emits 声明存在时启用行点击事件委托——点击 data-table 行
   // → 取行数据 → payload 模板求值（$row.x / $panel.x）→ relBus 发事件。
   // preset 零改动；行数据来源：该面板内含 api 数据的 widget 快照 rows。
-  const emits = panel.relations?.emits
+  // relReadonly（快照悬浮窗，2026-09-04）：只读回看，不派发联动事件。
+  const emits = relReadonly === true ? undefined : panel.relations?.emits
   const onRowClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (!emits || emits.length === 0) return
     const rowEl = (event.target as HTMLElement).closest('tr[data-openloop-row-index]')

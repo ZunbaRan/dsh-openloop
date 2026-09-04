@@ -90,6 +90,7 @@ function ArtifactSurface({ meta, callId, scope }: { meta: ArtifactMeta; callId: 
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px 10px 15px', borderBottom: '1px solid var(--openloop-border)' }}>
         <div style={{ minWidth: 0 }}><div style={{ fontSize: 13, fontWeight: 650, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{meta.title}</div><div style={{ ...caption, marginTop: 2 }}>{meta.path}</div></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {getDockService()?.openSnapshot !== undefined ? <Button size="sm" variant="toolbar" title="投影为快照（冻结当前内容，悬浮只读回看）" onClick={() => getDockService()?.openSnapshot?.({ kind: 'artifact', meta }, meta.title)}>⧉ 快照</Button> : null}
           {getDockService() ? <Button size="sm" variant="toolbar" onClick={() => getDockService()?.pinArtifact(meta, meta.title)}>📌 Pin</Button> : null}
           <Pill>{meta.runtime === 'static' ? 'Static' : meta.runtime === 'network' ? 'Network' : 'Interactive'}</Pill><Button size="sm" variant="toolbar" onClick={() => setFullscreen(true)}>Fullscreen</Button></div>
       </header>

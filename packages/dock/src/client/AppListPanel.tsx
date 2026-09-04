@@ -17,6 +17,7 @@ import { applySortOrder, cycleSortMode, readOrder, readSortMode, SortableRows, S
 const APPS_SORT_KEY = 'openloop.dock.apps-sort.v1'
 const APPS_ORDER_KEY = 'openloop.dock.apps-order.v1'
 import { icons } from './icons.tsx'
+import { projectSnapshot } from './SnapshotLayer.tsx'
 import { DependencyMissing, getBaseClient } from './base-bridge.tsx'
 import { getPanelsClient, getMcpAppsClient, getArtifactClient } from './openloop-clients.ts'
 import { dragResize } from './drag-resize.ts'
@@ -26,6 +27,12 @@ let appListScopeCache: ReturnType<NonNullable<ReturnType<typeof getBaseClient>>[
 function getScope() {
   if (appListScopeCache === undefined) appListScopeCache = getBaseClient()?.createOpenLoopSettingsScope()
   return appListScopeCache
+}
+
+/** 快照 v1：registry 组件投影为快照悬浮窗（与 pin 同数据源；按钮受 pinnable 门控，null 兜底） */
+function snapshotComponent(c: AppComponentDescriptor): void {
+  const source = buildTileSourceForComponent(c)
+  if (source !== null) projectSnapshot(source, c.title)
 }
 
 /** col 缩略/拖宽常量（0.8.2 恢复旧侧栏能力：缩略 48px 图标条；拖到 <120px 松手自动缩略） */
@@ -535,15 +542,31 @@ export function AppDetail({ app, pinnedIds, onPin, onSelectComponent, onManaged 
                   </div>
                   <span className="d2-rowdesc">{c.desc}</span>
                   {c.pinnable ? (
-                    <button
-                      type="button"
-                      className="d2-ghost-btn d2-pin-btn"
-                      title={pinned ? '已在看板' : '固定到看板'}
-                      onClick={e => { e.stopPropagation(); onPin(app, c) }}
-                    >
-                      {pinned ? <icons.check size={13} /> : <icons.pin size={13} />}
-                      {pinned ? '已固定' : '固定'}
-                    </button>
+                    <>
+                      {/* 快照 v1：pin 左侧的「投影为快照」；已 pin 的行只剩这一个按钮（用户拍板） */}
+                      <button
+                        type="button"
+                        className="d2-ghost-btn d2-pin-btn"
+                        title="投影为快照（冻结当前内容，悬浮只读回看）"
+                        onClick={e => { e.stopPropagation(); snapshotComponent(c) }}
+                      >
+                        <icons.snap size={13} />
+                        快照
+                      </button>
+                      {pinned ? (
+                        <span className="d2-pin-locked" title="已固定到看板">已固定</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="d2-ghost-btn d2-pin-btn"
+                          title="固定到看板"
+                          onClick={e => { e.stopPropagation(); onPin(app, c) }}
+                        >
+                          <icons.pin size={13} />
+                          固定
+                        </button>
+                      )}
+                    </>
                   ) : (
                     <span className="d2-pin-locked" title="该组件的 entry 无可渲染面板——让 Agent 经 app_backend 重新注册，entry 内联完整 PanelDefinition（entry: { panel: {...} }），文件路径无效">待生成</span>
                   )}
@@ -598,9 +621,15 @@ function ComponentPreview({ app, comp, pinned, onPin, tone, onSelectComponent }:
         </div>
         <span className="d2-mode-badge d2-badge kind">预览</span>
         {comp.pinnable ? (
-          <button type="button" className={`d2-pin-primary${pinned ? ' pinned' : ''}`} onClick={onPin}>
-            {pinned ? '✓ 已固定到看板' : '固定到看板'}
-          </button>
+          <>
+            <button type="button" className="d2-ghost-btn d2-pin-btn" title="投影为快照（冻结当前内容，悬浮只读回看）" onClick={() => snapshotComponent(comp)}>
+              <icons.snap size={13} />
+              快照
+            </button>
+            <button type="button" className={`d2-pin-primary${pinned ? ' pinned' : ''}`} onClick={onPin}>
+              {pinned ? '✓ 已固定到看板' : '固定到看板'}
+            </button>
+          </>
         ) : (
           <span className="d2-pin-locked">待生成</span>
         )}

@@ -248,8 +248,8 @@ window.__ModuleLoader__.load({
 			const colWidth = calcGridColWidth(positionParams);
 			let x = Math.round((left - containerPadding[0]) / (colWidth + margin[0]));
 			let y = Math.round((top - containerPadding[1]) / (rowHeight + margin[1]));
-			x = clamp$1(x, 0, cols - w);
-			y = clamp$1(y, 0, maxRows - h);
+			x = clamp$2(x, 0, cols - w);
+			y = clamp$2(y, 0, maxRows - h);
 			return {
 				x,
 				y
@@ -271,7 +271,7 @@ window.__ModuleLoader__.load({
 				h: Math.max(1, Math.round((height + margin[1]) / (rowHeight + margin[1])))
 			};
 		}
-		function clamp$1(num, lowerBound, upperBound) {
+		function clamp$2(num, lowerBound, upperBound) {
 			return Math.max(Math.min(num, upperBound), lowerBound);
 		}
 		function collides(l1, l2) {
@@ -450,31 +450,31 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region ../../node_modules/.pnpm/react-grid-layout@2.2.4_react-dom@18.3.1_react@18.3.1__react@18.3.1/node_modules/react-grid-layout/dist/chunk-KDANGDDL.mjs
-		function clamp(value, min, max) {
+		function clamp$1(value, min, max) {
 			return Math.max(min, Math.min(max, value));
 		}
 		var defaultConstraints = [{
 			name: "gridBounds",
 			constrainPosition(item, x, y, { cols, maxRows }) {
 				return {
-					x: clamp(x, 0, Math.max(0, cols - item.w)),
-					y: clamp(y, 0, Math.max(0, maxRows - item.h))
+					x: clamp$1(x, 0, Math.max(0, cols - item.w)),
+					y: clamp$1(y, 0, Math.max(0, maxRows - item.h))
 				};
 			},
 			constrainSize(item, w, h, handle, { cols, maxRows }) {
 				const maxW = handle === "w" || handle === "nw" || handle === "sw" ? item.x + item.w : cols - item.x;
 				const maxH = handle === "n" || handle === "nw" || handle === "ne" ? item.y + item.h : maxRows - item.y;
 				return {
-					w: clamp(w, 1, Math.max(1, maxW)),
-					h: clamp(h, 1, Math.max(1, maxH))
+					w: clamp$1(w, 1, Math.max(1, maxW)),
+					h: clamp$1(h, 1, Math.max(1, maxH))
 				};
 			}
 		}, {
 			name: "minMaxSize",
 			constrainSize(item, w, h) {
 				return {
-					w: clamp(w, item.minW ?? 1, item.maxW ?? Infinity),
-					h: clamp(h, item.minH ?? 1, item.maxH ?? Infinity)
+					w: clamp$1(w, item.minW ?? 1, item.maxW ?? Infinity),
+					h: clamp$1(h, item.minH ?? 1, item.maxH ?? Infinity)
 				};
 			}
 		}];
@@ -3612,10 +3612,10 @@ window.__ModuleLoader__.load({
 					const { offsetParent } = node;
 					if (offsetParent) {
 						const bottomBoundary = offsetParent.clientHeight - calcGridItemWHPx(h, rowHeight, margin[1]);
-						top = clamp$1(top, 0, bottomBoundary);
+						top = clamp$2(top, 0, bottomBoundary);
 						const colWidth2 = calcGridColWidth(positionParams);
 						const rightBoundary = containerWidth - calcGridItemWHPx(w, colWidth2, margin[0]);
-						left = clamp$1(left, 0, rightBoundary);
+						left = clamp$2(left, 0, rightBoundary);
 					}
 				}
 				const newPosition = {
@@ -4555,10 +4555,10 @@ window.__ModuleLoader__.load({
 		* 门面不可用时 store 退化为纯 localStorage（降级不炸页，DOCK_V2_FRONTEND_IMPL §7 M3）。
 		*/
 		const STORAGE_KEY = "openloop.dock.board.v1";
-		let seq = 0;
+		let seq$1 = 0;
 		const newTileId = () => {
-			seq += 1;
-			return `tile-${Date.now().toString(36)}-${seq.toString(36)}`;
+			seq$1 += 1;
+			return `tile-${Date.now().toString(36)}-${seq$1.toString(36)}`;
 		};
 		let boardSeq = 0;
 		const newBoardId = () => {
@@ -4952,6 +4952,10 @@ window.__ModuleLoader__.load({
 			pin: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
 				...p,
 				d: ["M9 4h6l1 7 3 3H5l3-3 1-7z", "M12 14v7"]
+			}),
+			snap: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
+				...p,
+				d: ["M11 4h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z", "M6.5 9.5H6a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h6.5a2 2 0 0 0 2-2v-.5"]
 			}),
 			search: (p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(I, {
 				...p,
@@ -9771,6 +9775,547 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
+		//#region src/client/SnapshotLayer.tsx
+		/**
+		* 快照悬浮窗层（2026-09-04 快照特性 v1；交互原型 designs/snapshot-proto 四决策用户已批）：
+		* - 快照 = 冻结 TileSource（panel meta 含 resolved 数据 / artifact meta 含 html），
+		*   内容按冻结 meta 渲染——故意不经 resolveArtifactMeta 取 registry 最新（与 tile 不同）
+		* - 纯回看：panel 渲染带 relReadonly（不派发联动事件）；窗口壳只有 拖拽/拉伸/提前/关闭
+		* - 新窗右上角堆叠，旧窗向左下级联露边；点击提前——未拖过的窗随堆栈重排位，
+		*   拖过的窗位置不变仅 z 提升（标准窗口管理器行为）
+		* - 会话级状态，不持久化（刷新即消，与 pin 的持久布局语义分工）
+		*
+		* 入口：__openloopDockService.openSnapshot（panels/artifact 卡片）+
+		* 本包直接 import projectSnapshot（APP 资源列表行/预览）。
+		*/
+		const STACK_TOP = 96;
+		const STACK_RIGHT = 16;
+		const CASCADE_X = -18;
+		const CASCADE_Y = 16;
+		const DEFAULT_W = 480;
+		const DEFAULT_H = 340;
+		const MIN_W = 300;
+		const MIN_H = 200;
+		/** DockHost 2147483050 之上、DockToggle 2147483100 之下 */
+		const LAYER_Z = 2147483060;
+		let state = {
+			wins: [],
+			freshId: null,
+			bumpedId: null
+		};
+		let seq = 0;
+		let bumpTimer;
+		const listeners = /* @__PURE__ */ new Set();
+		function emit(next) {
+			state = next;
+			for (const l of listeners) l();
+		}
+		function subscribe(listener) {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		}
+		/** 投影一个快照（冻结 source；标题取卡片/组件名） */
+		function projectSnapshot(source, title) {
+			seq += 1;
+			const now = /* @__PURE__ */ new Date();
+			const takenAt = [
+				now.getHours(),
+				now.getMinutes(),
+				now.getSeconds()
+			].map((n) => String(n).padStart(2, "0")).join(":");
+			const id = `snap-${seq}`;
+			const win = {
+				id,
+				source,
+				title,
+				takenAt,
+				pos: null,
+				size: {
+					w: DEFAULT_W,
+					h: DEFAULT_H
+				}
+			};
+			emit({
+				wins: [...state.wins, win],
+				freshId: id,
+				bumpedId: null
+			});
+			setTimeout(() => {
+				if (state.freshId === id) emit({
+					...state,
+					freshId: null
+				});
+			}, 400);
+		}
+		function closeSnapshot(id) {
+			emit({
+				...state,
+				wins: state.wins.filter((w) => w.id !== id)
+			});
+		}
+		/** 点击提前：数组末尾 = 最前；animate=true 时给「重新浮动」反馈（拖拽起手不调动画） */
+		function bringToFront(id, animate) {
+			const idx = state.wins.findIndex((w) => w.id === id);
+			if (idx < 0 || idx === state.wins.length - 1) return;
+			const wins = state.wins.slice();
+			const [target] = wins.splice(idx, 1);
+			if (target === void 0) return;
+			wins.push(target);
+			emit({
+				...state,
+				wins,
+				bumpedId: animate ? id : state.bumpedId
+			});
+			if (animate) {
+				if (bumpTimer !== void 0) clearTimeout(bumpTimer);
+				bumpTimer = setTimeout(() => {
+					if (state.bumpedId === id) emit({
+						...state,
+						bumpedId: null
+					});
+				}, 350);
+			}
+		}
+		function setWinRect(id, rect) {
+			emit({
+				...state,
+				wins: state.wins.map((w) => w.id === id ? {
+					...w,
+					pos: {
+						x: rect.x,
+						y: rect.y
+					},
+					size: {
+						w: rect.w,
+						h: rect.h
+					}
+				} : w)
+			});
+		}
+		const SNAP_CSS = `
+@keyframes openloop-snap-in { from { opacity: 0; transform: translate(26px,-18px) scale(.92); } to { opacity: 1; transform: none; } }
+@keyframes openloop-snap-pop { 0% { transform: translateY(0); } 35% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+`;
+		function SnapshotLayer() {
+			const snap = (0, react.useSyncExternalStore)(subscribe, () => state);
+			(0, react.useEffect)(() => {
+				const el = document.createElement("style");
+				el.setAttribute("data-openloop-snapshot", "");
+				el.textContent = SNAP_CSS;
+				document.head.appendChild(el);
+				return () => {
+					el.remove();
+				};
+			}, []);
+			if (snap.wins.length === 0) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					position: "fixed",
+					inset: 0,
+					pointerEvents: "none",
+					zIndex: LAYER_Z
+				},
+				"data-openloop-snapshot-layer": true,
+				children: snap.wins.map((w, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SnapshotWindow, {
+					win: w,
+					fromFront: snap.wins.length - 1 - i,
+					fresh: w.id === snap.freshId,
+					bumped: w.id === snap.bumpedId
+				}, w.id))
+			});
+		}
+		function stackRect(fromFront, size) {
+			const vw = window.innerWidth;
+			const maxSteps = Math.max(0, Math.floor((vw - size.w - STACK_RIGHT - 8) / 18));
+			const steps = Math.min(fromFront, maxSteps);
+			return {
+				x: vw - STACK_RIGHT - size.w + steps * CASCADE_X,
+				y: STACK_TOP + fromFront * CASCADE_Y,
+				w: size.w,
+				h: size.h
+			};
+		}
+		function clamp(v, min, max) {
+			return Math.min(max, Math.max(min, v));
+		}
+		function moveRect(start, dx, dy) {
+			const vw = window.innerWidth;
+			const vh = window.innerHeight;
+			return {
+				x: clamp(start.x + dx, -start.w + 90, vw - 90),
+				y: clamp(start.y + dy, 0, vh - 42),
+				w: start.w,
+				h: start.h
+			};
+		}
+		function resizeRect(start, dir, dx, dy) {
+			const vw = window.innerWidth;
+			const vh = window.innerHeight;
+			let left = start.x;
+			let right = start.x + start.w;
+			let top = start.y;
+			let bottom = start.y + start.h;
+			if (dir.includes("w")) left = clamp(start.x + dx, -start.w + 90, right - MIN_W);
+			if (dir.includes("e")) right = clamp(right + dx, left + MIN_W, vw - 8);
+			if (dir.includes("n")) top = clamp(start.y + dy, 0, bottom - MIN_H);
+			if (dir.includes("s")) bottom = clamp(bottom + dy, top + MIN_H, vh - 8);
+			return {
+				x: left,
+				y: top,
+				w: right - left,
+				h: bottom - top
+			};
+		}
+		const RESIZE_HANDLES = [
+			{
+				d: "nw",
+				style: {
+					left: 0,
+					top: 0,
+					width: 16,
+					height: 16,
+					cursor: "nwse-resize"
+				}
+			},
+			{
+				d: "n",
+				style: {
+					left: 14,
+					right: 14,
+					top: 0,
+					height: 8,
+					cursor: "ns-resize"
+				}
+			},
+			{
+				d: "ne",
+				style: {
+					right: 0,
+					top: 0,
+					width: 16,
+					height: 16,
+					cursor: "nesw-resize"
+				}
+			},
+			{
+				d: "w",
+				style: {
+					left: 0,
+					top: 14,
+					bottom: 14,
+					width: 8,
+					cursor: "ew-resize"
+				}
+			},
+			{
+				d: "e",
+				style: {
+					right: 0,
+					top: 14,
+					bottom: 14,
+					width: 8,
+					cursor: "ew-resize"
+				}
+			},
+			{
+				d: "sw",
+				style: {
+					left: 0,
+					bottom: 0,
+					width: 16,
+					height: 16,
+					cursor: "nesw-resize"
+				}
+			},
+			{
+				d: "s",
+				style: {
+					left: 14,
+					right: 14,
+					bottom: 0,
+					height: 8,
+					cursor: "ns-resize"
+				}
+			},
+			{
+				d: "se",
+				style: {
+					right: 0,
+					bottom: 0,
+					width: 16,
+					height: 16,
+					cursor: "nwse-resize"
+				}
+			}
+		];
+		const SNAP_PURPLE = "#7a5af8";
+		function SnapshotWindow({ win, fromFront, fresh, bumped }) {
+			const [interacting, setInteracting] = (0, react.useState)(false);
+			const cancelRef = (0, react.useRef)(() => {});
+			(0, react.useEffect)(() => () => cancelRef.current(), []);
+			const rect = win.pos !== null ? {
+				x: win.pos.x,
+				y: win.pos.y,
+				w: win.size.w,
+				h: win.size.h
+			} : stackRect(fromFront, win.size);
+			/** 拖拽/8向拉伸：pointer capture + window 级监听（univer 同款手写，零依赖）。
+			*  起手只提前不播动画——拖拽本身就是反馈。 */
+			const beginSession = (event, mode) => {
+				if (event.button !== 0) return;
+				event.preventDefault();
+				event.stopPropagation();
+				bringToFront(win.id, false);
+				cancelRef.current();
+				const view = event.currentTarget.ownerDocument.defaultView;
+				if (view === null) return;
+				const pointerId = event.pointerId;
+				const origin = {
+					x: event.clientX,
+					y: event.clientY
+				};
+				const start = rect;
+				const el = event.currentTarget;
+				setInteracting(true);
+				try {
+					el.setPointerCapture(pointerId);
+				} catch {}
+				const move = (next) => {
+					if (next.pointerId !== pointerId) return;
+					const dx = next.clientX - origin.x;
+					const dy = next.clientY - origin.y;
+					setWinRect(win.id, mode === "move" ? moveRect(start, dx, dy) : resizeRect(start, mode, dx, dy));
+				};
+				const cleanup = () => {
+					view.removeEventListener("pointermove", move);
+					view.removeEventListener("pointerup", finish);
+					view.removeEventListener("pointercancel", finish);
+					cancelRef.current = () => {};
+					try {
+						el.releasePointerCapture(pointerId);
+					} catch {}
+				};
+				const finish = (next) => {
+					if (next.pointerId !== pointerId) return;
+					cleanup();
+					setInteracting(false);
+				};
+				cancelRef.current = cleanup;
+				view.addEventListener("pointermove", move);
+				view.addEventListener("pointerup", finish);
+				view.addEventListener("pointercancel", finish);
+			};
+			const rid = sourceIdOf(win.source);
+			const anim = fresh ? { animation: "openloop-snap-in .28s cubic-bezier(.2,.9,.3,1.2)" } : bumped ? { animation: "openloop-snap-pop .3s ease-out" } : {};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("section", {
+				style: {
+					position: "fixed",
+					left: rect.x,
+					top: rect.y,
+					width: rect.w,
+					height: rect.h,
+					display: "flex",
+					flexDirection: "column",
+					pointerEvents: "auto",
+					borderRadius: 14,
+					overflow: "hidden",
+					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+					background: "var(--dsw-alias-bg-layer-1, #fff)",
+					boxShadow: "0 2px 6px rgba(0,0,0,.1), 0 18px 48px rgba(0,0,0,.28)",
+					...anim
+				},
+				"data-openloop-snapshot-window": win.id,
+				onPointerDown: () => bringToFront(win.id, true),
+				"aria-label": `快照 · ${win.title}`,
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+						style: {
+							flex: "0 0 38px",
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							padding: "0 8px 0 11px",
+							cursor: "grab",
+							userSelect: "none",
+							touchAction: "none",
+							background: `linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-bg-layer-2, #f6f6f7) 88%, ${SNAP_PURPLE}), var(--dsw-alias-bg-layer-2, #f6f6f7))`,
+							borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
+						},
+						onPointerDown: (e) => {
+							if (e.target.closest("[data-snap-control]") !== null) return;
+							beginSession(e, "move");
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								style: {
+									flexShrink: 0,
+									display: "inline-flex",
+									alignItems: "center",
+									gap: 4,
+									fontSize: 9,
+									fontWeight: 600,
+									padding: "1.5px 7px",
+									borderRadius: 999,
+									color: SNAP_PURPLE,
+									background: `color-mix(in srgb, ${SNAP_PURPLE} 13%, transparent)`,
+									border: `1px solid color-mix(in srgb, ${SNAP_PURPLE} 32%, transparent)`,
+									whiteSpace: "nowrap"
+								},
+								children: [
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.snap, {
+										size: 9,
+										sw: 1.8
+									}),
+									"快照 ",
+									win.takenAt
+								]
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontSize: 11.5,
+									fontWeight: 600,
+									whiteSpace: "nowrap",
+									overflow: "hidden",
+									textOverflow: "ellipsis"
+								},
+								children: win.title
+							}),
+							rid !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									flexShrink: 0,
+									fontSize: 9,
+									fontFamily: "ui-monospace, \"SF Mono\", Menlo, monospace",
+									color: "var(--dsw-alias-label-caption, #888)",
+									background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
+									padding: "1.5px 6px",
+									borderRadius: 5,
+									whiteSpace: "nowrap"
+								},
+								children: rid
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									marginLeft: "auto",
+									flexShrink: 0
+								},
+								children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									"data-snap-control": "",
+									title: "关闭快照",
+									onClick: () => closeSnapshot(win.id),
+									style: {
+										width: 22,
+										height: 22,
+										borderRadius: 6,
+										border: 0,
+										background: "none",
+										cursor: "pointer",
+										display: "inline-flex",
+										alignItems: "center",
+										justifyContent: "center",
+										color: "var(--dsw-alias-label-tertiary, #888)"
+									},
+									children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.x, { size: 12 })
+								})
+							})
+						]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							flex: 1,
+							minHeight: 0,
+							overflow: "auto",
+							position: "relative"
+						},
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SnapshotContent, { win })
+					}),
+					interacting ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+						position: "absolute",
+						inset: 0,
+						zIndex: 18
+					} }) : null,
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("footer", {
+						style: {
+							flex: "0 0 24px",
+							display: "flex",
+							alignItems: "center",
+							gap: 6,
+							padding: "0 10px",
+							fontSize: 9,
+							color: "var(--dsw-alias-label-caption, #888)",
+							borderTop: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+							background: "var(--dsw-alias-bg-layer-2, #f6f6f7)"
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									color: SNAP_PURPLE,
+									fontWeight: 600
+								},
+								children: "只读回看"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "·" }),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", { children: "内容冻结于投影时刻，pin 到看板才会持久保留" })
+						]
+					}),
+					RESIZE_HANDLES.map((h) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						style: {
+							position: "absolute",
+							zIndex: 20,
+							touchAction: "none",
+							...h.style
+						},
+						onPointerDown: (e) => beginSession(e, h.d)
+					}, h.d))
+				]
+			});
+		}
+		function SnapshotContent({ win }) {
+			const { source } = win;
+			if (source.kind === "panel") {
+				const panels = getPanelsClient();
+				if (panels === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+					what: "快照面板",
+					dep: "@openloop/dsh-panels"
+				});
+				const PanelSurface = panels.PanelSurface;
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PanelSurface, {
+					meta: source.meta,
+					relReadonly: true
+				});
+			}
+			if (source.kind === "mcp-app") {
+				const mcpApps = getMcpAppsClient();
+				if (mcpApps === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+					what: "快照 MCP App",
+					dep: "@openloop/dsh-mcp"
+				});
+				const McpAppResourceView = mcpApps.McpAppResourceView;
+				const meta = source.meta;
+				return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(McpAppResourceView, {
+					serverId: meta.serverId,
+					toolName: meta.toolName,
+					resourceUri: meta.resourceUri,
+					title: win.title,
+					frameId: `snap-${win.id}`
+				});
+			}
+			const artifact = getArtifactClient();
+			if (artifact === void 0) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(DependencyMissing, {
+				what: "快照 Artifact",
+				dep: "@openloop/dsh-html-artifact"
+			});
+			const ArtifactFrame = artifact.ArtifactFrame;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(ArtifactFrame, {
+				meta: source.meta,
+				token: `snap-${win.id}`,
+				fullscreen: false,
+				scope: getScope$1()
+			});
+		}
+		//#endregion
 		//#region src/client/AppListPanel.tsx
 		/**
 		* APP tab 三列结构（0.8.0 三列重构，2026-08-30；原型 designs/dock-app-redesign 已批准）：
@@ -9788,6 +10333,11 @@ window.__ModuleLoader__.load({
 		function getScope() {
 			if (appListScopeCache === void 0) appListScopeCache = getBaseClient()?.createOpenLoopSettingsScope();
 			return appListScopeCache;
+		}
+		/** 快照 v1：registry 组件投影为快照悬浮窗（与 pin 同数据源；按钮受 pinnable 门控，null 兜底） */
+		function snapshotComponent(c) {
+			const source = buildTileSourceForComponent(c);
+			if (source !== null) projectSnapshot(source, c.title);
 		}
 		/** col 缩略/拖宽常量（0.8.2 恢复旧侧栏能力：缩略 48px 图标条；拖到 <120px 松手自动缩略） */
 		const COL_COLLAPSED_WIDTH = 48;
@@ -10467,16 +11017,29 @@ window.__ModuleLoader__.load({
 											className: "d2-rowdesc",
 											children: c.desc
 										}),
-										c.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										c.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 											type: "button",
 											className: "d2-ghost-btn d2-pin-btn",
-											title: pinned ? "已在看板" : "固定到看板",
+											title: "投影为快照（冻结当前内容，悬浮只读回看）",
+											onClick: (e) => {
+												e.stopPropagation();
+												snapshotComponent(c);
+											},
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.snap, { size: 13 }), "快照"]
+										}), pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											className: "d2-pin-locked",
+											title: "已固定到看板",
+											children: "已固定"
+										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+											type: "button",
+											className: "d2-ghost-btn d2-pin-btn",
+											title: "固定到看板",
 											onClick: (e) => {
 												e.stopPropagation();
 												onPin(app, c);
 											},
-											children: [pinned ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.check, { size: 13 }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), pinned ? "已固定" : "固定"]
-										}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.pin, { size: 13 }), "固定"]
+										})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 											className: "d2-pin-locked",
 											title: "该组件的 entry 无可渲染面板——让 Agent 经 app_backend 重新注册，entry 内联完整 PanelDefinition（entry: { panel: {...} }），文件路径无效",
 											children: "待生成"
@@ -10553,12 +11116,18 @@ window.__ModuleLoader__.load({
 							className: "d2-mode-badge d2-badge kind",
 							children: "预览"
 						}),
-						comp.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						comp.pinnable ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+							type: "button",
+							className: "d2-ghost-btn d2-pin-btn",
+							title: "投影为快照（冻结当前内容，悬浮只读回看）",
+							onClick: () => snapshotComponent(comp),
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(icons.snap, { size: 13 }), "快照"]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							className: `d2-pin-primary${pinned ? " pinned" : ""}`,
 							onClick: onPin,
 							children: pinned ? "✓ 已固定到看板" : "固定到看板"
-						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+						})] }) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							className: "d2-pin-locked",
 							children: "待生成"
 						})
@@ -11277,8 +11846,7 @@ window.__ModuleLoader__.load({
 				onMouseLeave: () => setHover(false),
 				style: {
 					position: "fixed",
-					top: "50%",
-					transform: "translateY(-50%)",
+					top: 36,
 					right,
 					zIndex: 2147483100,
 					minWidth: 34,
@@ -11689,6 +12257,7 @@ window.__ModuleLoader__.load({
 						})]
 					})
 				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)(SnapshotLayer, {}),
 				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					className: "d2-toast",
 					children: toast
@@ -11715,6 +12284,9 @@ window.__ModuleLoader__.load({
 						meta
 					}, title, origin);
 					window.__openloopDockOpen?.();
+				},
+				openSnapshot(source, title) {
+					projectSnapshot(source, title);
 				},
 				toggle() {
 					window.__openloopDockToggle?.();

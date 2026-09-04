@@ -29,6 +29,8 @@ export const icons = {
   board: (p: IconProps): ReactNode => <I {...p} d={['M3 3h7v7H3z', 'M14 3h7v7h-7z', 'M3 14h7v7H3z', 'M14 14h7v7h-7z']} />,
   apps: (p: IconProps): ReactNode => <I {...p} d={['M12 2l9 5-9 5-9-5 9-5z', 'M3 12l9 5 9-5', 'M3 17l9 5 9-5']} />,
   pin: (p: IconProps): ReactNode => <I {...p} d={['M9 4h6l1 7 3 3H5l3-3 1-7z', 'M12 14v7']} />,
+  // 图层堆叠：投影为快照（前窗 + 后窗露边）
+  snap: (p: IconProps): ReactNode => <I {...p} d={['M11 4h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z', 'M6.5 9.5H6a2 2 0 0 0-2 2V18a2 2 0 0 0 2 2h6.5a2 2 0 0 0 2-2v-.5']} />,
   search: (p: IconProps): ReactNode => <I {...p} d={['M11 19a8 8 0 100-16 8 8 0 000 16z', 'M21 21l-4.35-4.35']} />,
   chevronR: (p: IconProps): ReactNode => <I {...p} d={['M9 18l6-6-6-6']} />,
   chevronL: (p: IconProps): ReactNode => <I {...p} d={['M15 18l-6-6 6-6']} />,

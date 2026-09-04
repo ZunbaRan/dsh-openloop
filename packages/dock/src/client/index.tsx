@@ -24,8 +24,9 @@ import { getPanelsClient } from './openloop-clients.ts'
 import { buildRelConsumesIndex } from './rel-views.tsx'
 import { syncBackend, revalidateBackend, type BackendMode } from './backend-sync.ts'
 import { V2_CSS } from './v2-styles.ts'
-import { dockStore, type DockTile } from './store.ts'
+import { dockStore, type DockTile, type DockTileSource } from './store.ts'
 import { icons } from './icons.tsx'
+import { SnapshotLayer, projectSnapshot } from './SnapshotLayer.tsx'
 
 export const name = 'openloop-dock'
 // dock 不依赖宿主 cordis 服务（自主渲染 + provide service）——空 inject
@@ -36,6 +37,8 @@ export interface DockClientService {
   pinPanel(meta: unknown, title: string, origin?: DockTile['origin']): void
   /** 固定一个 html artifact */
   pinArtifact(meta: unknown, title: string, origin?: DockTile['origin']): void
+  /** 投影为快照悬浮窗（冻结 source，会话级不持久化；source 形态 { kind, meta }） */
+  openSnapshot(source: unknown, title: string): void
   /** 打开/收起 dock */
   toggle(): void
   /** dock 是否打开 */
@@ -55,10 +58,9 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'fixed',
-        // top 50% 垂直居中（0.8.3 用户反馈：top:12 与 header 按钮排重叠；
-        // 垂直居中独立于一切 header/底部控件，且是面板展开把手的惯例位置）
-        top: '50%',
-        transform: 'translateY(-50%)',
+        // 0.9.17 用户拍板：从垂直居中挪回右上角 header 区——分割线以上、
+        // 与 Session log 胶囊中心对齐（20 实测偏高 → 30 → 36 微调）
+        top: 36,
         right,
         zIndex: 2147483100,
         minWidth: 34,
@@ -381,6 +383,7 @@ function DockShell(): ReactNode {
           </div>
         </div>
       </DockHost>
+      <SnapshotLayer />
       {toast !== null ? <div className="d2-toast">{toast}</div> : null}
       {backendMode === 'degraded' ? (
         <div className="d2-banner" role="status">
@@ -401,6 +404,10 @@ export function apply(ctx: Context): void {
     pinArtifact(meta, title, origin) {
       dockStore.pin({ kind: 'artifact', meta }, title, origin)
       ;(window as unknown as { __openloopDockOpen?: () => void }).__openloopDockOpen?.()
+    },
+    openSnapshot(source, title) {
+      // 快照不强制展开 dock——悬浮窗独立于看板（与 pin 的持久布局语义分工）
+      projectSnapshot(source as DockTileSource, title)
     },
     toggle() {
       ;(window as unknown as { __openloopDockToggle?: () => void }).__openloopDockToggle?.()

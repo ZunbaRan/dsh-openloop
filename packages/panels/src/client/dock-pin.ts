@@ -5,6 +5,8 @@
 export interface DockServiceLike {
   pinPanel(meta: unknown, title: string, origin?: unknown): void
   pinArtifact(meta: unknown, title: string, origin?: unknown): void
+  /** 投影为快照悬浮窗（冻结 source，会话级；dock 0.9.6+，旧版 dock 无此方法——调用方需 ?. 兜底） */
+  openSnapshot?(source: unknown, title: string): void
 }
 
 // 2026-08-24：cordis client 侧动态 inject 回调真机未触发——改读 dock 挂在
