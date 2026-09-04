@@ -1819,7 +1819,7 @@ var PbWatchdog = class {
 var require_package = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	module.exports = {
 		"name": "@openloop/dsh-html-artifact",
-		"version": "0.5.3",
+		"version": "0.5.4",
 		"description": "Replayable static or scripted fullscreen HTML artifacts for DeepSeek Harness.",
 		"private": true,
 		"type": "module",

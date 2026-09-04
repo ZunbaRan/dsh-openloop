@@ -1,7 +1,7 @@
 {
   "name": "@openloop/dsh-visual-declarative",
   "version": "0.2.5",
-  "description": "Native bounded-JSON Flow, Timeline, and Comparison visualizations for DeepSeek Harness.",
+  "description": "[RETIRED 2026-09-04] Superseded by the panel tool (@openloop/dsh-panels, preset kinds flow/timeline/comparison). Not packed or installed anymore; source kept for reference only.",
   "private": true,
   "type": "module",
   "main": "lib/index.js",

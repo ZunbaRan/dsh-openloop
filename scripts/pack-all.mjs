@@ -9,7 +9,6 @@ await mkdir(dist, { recursive: true })
 const packages = [
   ['packages', 'base'],
   ['packages', 'dock'],
-  ['packages', 'declarative'],
   ['packages', 'widget'],
   ['packages', 'artifact'],
   ['packages', 'panels'],

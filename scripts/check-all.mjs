@@ -10,12 +10,8 @@ async function run(args) {
   })
 }
 
-// The existing declarative package's host tsconfig intentionally omits DOM
-// types, but its host test graph imports the browser-only theme module. Keep
-// that package's source untouched and validate the actual graph with the DOM
-// lib it already uses for its client config.
+// declarative 已退役（2026-09-04 用户拍板：标记废弃 + 不再打包安装，dsh 已卸载）——
+// 不再进 check 管线（源码保留作历史参考，其 host tsconfig 本就缺 DOM lib，
+// 退役前也是靠排除 + 单独 tsc 保底；现保底一并取消）。死亡路标使命已结束，
+// 路由目录收敛为三工具。
 await run(['--filter', './packages/*', '--filter', './fixtures/*', '--filter', '!./packages/declarative', '--workspace-concurrency=1', 'check'])
-await run(['--filter', '@openloop/dsh-visual-declarative', 'exec', 'tsc', '-p', 'tsconfig.json', '--lib', 'es2022,dom,dom.iterable'])
-await run(['--filter', '@openloop/dsh-visual-declarative', 'exec', 'tsc', '-p', 'tsconfig.client.json'])
-await run(['--filter', '@openloop/dsh-visual-declarative', 'test'])
-await run(['--filter', '@openloop/dsh-visual-declarative', 'build'])
