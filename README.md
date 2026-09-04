@@ -19,7 +19,7 @@ OpenLoop 插件家族 —— 把 [DeepSeek Harness](https://www.npmjs.com/packag
 | `@openloop/dsh-base` | 0.4.7 | 底座：design token、设置页、runtime 资产、fetch 代理 |
 | `@openloop/dsh-panels` | 0.5.6 | 26 预设组件 + panelFile + **Python codegen**（Agent 写代码生成 UI）+ 数据驱动模式 |
 | `@openloop/dsh-html-artifact` | 0.5.4 | 三档沙箱 runtime（static / scripts / network）+ fetch bridge + 预置库（pico / chartjs / react18） |
-| `@openloop/dsh-dock` | 0.9.21 | OCIX Workbench 复刻：react-grid-layout 引擎、嵌入式面板、与 better-sidebar 共存 |
+| `@openloop/dsh-dock` | 0.9.23 | OCIX Workbench 复刻：react-grid-layout 引擎、嵌入式面板、与 better-sidebar 共存 |
 | `@openloop/dsh-app` | 0.5.10 | 本地应用后端：PocketBase 子进程生命周期 + 受控 facade + `app_backend` 工具 |
 | `@openloop/dsh-mcp` | 0.2.9 | MCP bundle 安装入口（多作用域 mcp.json + 设置页） |
 | `@openloop/dsh-mcp-runtime` | 0.3.3 | 每 server 一条共享连接的 runtime + admin 路由 + App 资源网关（authority token 签发） |
