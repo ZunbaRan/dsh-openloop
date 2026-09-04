@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>快照悬浮窗原型 · Snapshot Floating Windows</title>
+<style>
+  :root {
+    --dsw-alias-bg-layer-1: #ffffff;
+    --dsw-alias-bg-layer-2: #f6f6f7;
+    --dsw-alias-border-l1: rgba(127,127,127,.12);
+    --dsw-alias-border-l2: rgba(127,127,127,.18);
+    --dsw-alias-label-primary: rgba(0,0,0,.88);
+    --dsw-alias-label-secondary: rgba(0,0,0,.6);
+    --dsw-alias-label-tertiary: rgba(0,0,0,.45);
+    --dsw-alias-label-caption: #888;
+    --dsw-alias-interactive-bg-hover: rgba(127,127,127,.12);
+    --dsw-alias-interactive-bg-active: rgba(127,127,127,.2);
+    --dsw-alias-state-business-primary: #4176e6;
+    --dsw-alias-state-success-primary: #22c55e;
+    --dsw-alias-state-warn-primary: #f59e0b;
+    --dsw-alias-state-error-primary: #d4453a;
+    --page-bg: #ececef;
+    --accent: #4176e6;
+    --snap: #7a5af8;
+  }
+  [data-theme="dark"] {
+    --dsw-alias-bg-layer-1: #232326;
+    --dsw-alias-bg-layer-2: #2a2a2e;
+    --dsw-alias-border-l1: rgba(255,255,255,.09);
+    --dsw-alias-border-l2: rgba(255,255,255,.14);
+    --dsw-alias-label-primary: rgba(255,255,255,.92);
+    --dsw-alias-label-secondary: rgba(255,255,255,.62);
+    --dsw-alias-label-tertiary: rgba(255,255,255,.45);
+    --dsw-alias-label-caption: #8e8e93;
+    --dsw-alias-interactive-bg-hover: rgba(255,255,255,.08);
+    --dsw-alias-interactive-bg-active: rgba(255,255,255,.14);
+    --page-bg: #17171a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Noto Sans SC", sans-serif;
+    background: var(--page-bg); color: var(--dsw-alias-label-primary);
+    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  .topbar { flex: 0 0 46px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
+  .topbar .title { font-size: 13px; font-weight: 600; }
+  .topbar .sub { font-size: 11px; color: var(--dsw-alias-label-caption); }
+  .topbar .spacer { flex: 1; }
+  .pc-btn { font-size: 11px; padding: 4px 11px; border-radius: 7px; cursor: pointer; font-family: inherit; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l1); }
+  .pc-btn:hover { color: var(--dsw-alias-label-primary); }
+
+  .layout { flex: 1; display: flex; min-height: 0; }
+  .nav { width: 210px; flex-shrink: 0; border-right: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); padding: 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .nav .nav-label { font-size: 10px; font-weight: 600; letter-spacing: .07em; color: var(--dsw-alias-label-caption); padding: 2px 8px 8px; }
+  .nav-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 9px; cursor: pointer; border: 1px solid transparent; }
+  .nav-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .nav-item.on { background: color-mix(in srgb, var(--snap) 9%, transparent); border-color: color-mix(in srgb, var(--snap) 30%, transparent); }
+  .nav-item .t { font-size: 12px; font-weight: 600; }
+  .nav-item .d { font-size: 10px; color: var(--dsw-alias-label-caption); line-height: 1.5; }
+
+  .stage { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+  .scene { flex: 1; min-height: 0; overflow: hidden; position: relative; display: flex; }
+  .anno-bar { flex: 0 0 auto; border-top: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); padding: 8px 14px; display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .anno-bar .a { font-size: 10.5px; line-height: 1.55; color: var(--dsw-alias-label-secondary); display: flex; gap: 6px; }
+  .anno-bar .a .k { flex-shrink: 0; font-weight: 700; color: var(--snap); }
+
+  .panel-card { border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); overflow: hidden; display: flex; flex-direction: column; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-2); }
+  .panel-head .t { font-size: 12px; font-weight: 600; }
+  .panel-head .rid { font-size: 9.5px; font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--dsw-alias-label-caption); }
+  .d2-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .d2-dot.ok { background: var(--dsw-alias-state-success-primary); }
+
+  /* ---- 卡片右上角操作按钮组（新增：投影按钮在 pin 左侧） ---- */
+  .card-ops { margin-left: auto; display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .icon-btn { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; border: 0; background: none; cursor: pointer; color: var(--dsw-alias-label-tertiary); padding: 0; }
+  .icon-btn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+  .icon-btn svg { width: 13px; height: 13px; }
+  .icon-btn.snap-btn:hover { color: var(--snap); background: color-mix(in srgb, var(--snap) 12%, transparent); }
+  .icon-btn.pinned { color: var(--accent); }
+  .icon-btn:disabled { opacity: .4; cursor: default; }
+
+  /* 线索列表 */
+  .lead-table { width: 100%; border-collapse: collapse; }
+  .lead-table th { font-size: 10px; font-weight: 600; letter-spacing: .05em; color: var(--dsw-alias-label-caption); text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); white-space: nowrap; }
+  .lead-table td { font-size: 11.5px; padding: 8px 12px; border-bottom: 1px solid var(--dsw-alias-border-l1); color: var(--dsw-alias-label-primary); }
+  .lead-table tbody tr { cursor: pointer; transition: background .1s; }
+  .lead-table tbody tr:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .lead-table tbody tr.sel { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+  .lead-table .amt { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .lead-table .co { max-width: 128px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lead-table .row-link { color: var(--accent); font-size: 10px; white-space: nowrap; opacity: 0; transition: opacity .1s; }
+  .lead-table tbody tr:hover .row-link { opacity: 1; }
+  .lead-table.readonly tbody tr { cursor: default; }
+  .lead-table.readonly tbody tr:hover { background: none; }
+  .stage-pill { display: inline-flex; padding: 1px 8px; border-radius: 999px; font-size: 10px; font-weight: 500; white-space: nowrap; }
+  .stage-pill.s1 { color: #8e8e93; background: var(--dsw-alias-interactive-bg-hover); }
+  .stage-pill.s2 { color: var(--dsw-alias-state-business-primary); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 11%, transparent); }
+  .stage-pill.s3 { color: var(--dsw-alias-state-warn-primary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 11%, transparent); }
+  .stage-pill.s4 { color: var(--dsw-alias-state-success-primary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 11%, transparent); }
+
+  /* 详情 */
+  .detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--dsw-alias-border-l1); }
+  .detail-cell { background: var(--dsw-alias-bg-layer-1); padding: 9px 12px; min-width: 0; }
+  .detail-cell .k { font-size: 9.5px; color: var(--dsw-alias-label-caption); margin-bottom: 3px; }
+  .detail-cell .v { font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .detail-cell .v.money { font-size: 15px; font-weight: 700; color: var(--dsw-alias-state-success-primary); font-variant-numeric: tabular-nums; }
+  .pipeline { display: flex; align-items: center; gap: 4px; padding: 10px 12px; border-top: 1px solid var(--dsw-alias-border-l1); }
+  .pipe-step { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .pipe-step .bar { height: 4px; border-radius: 2px; background: var(--dsw-alias-interactive-bg-hover); }
+  .pipe-step.done .bar { background: var(--dsw-alias-state-success-primary); }
+  .pipe-step.now .bar { background: var(--accent); }
+  .pipe-step .lb { font-size: 9px; color: var(--dsw-alias-label-caption); text-align: center; white-space: nowrap; }
+  .pipe-step.now .lb { color: var(--accent); font-weight: 600; }
+  .detail-actions { display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--dsw-alias-border-l1); }
+  .mini-btn { font-size: 10.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--dsw-alias-border-l2); background: none; color: var(--dsw-alias-label-secondary); cursor: pointer; font-family: inherit; white-space: nowrap; }
+  .mini-btn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+  .mini-btn.primary { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+  .kpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--dsw-alias-border-l1); }
+  .kpi-cell { background: var(--dsw-alias-bg-layer-1); padding: 12px; }
+  .kpi-cell .k { font-size: 9.5px; color: var(--dsw-alias-label-caption); }
+  .kpi-cell .v { font-size: 17px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .kpi-cell .d { font-size: 9.5px; margin-top: 2px; }
+  .kpi-cell .up { color: var(--dsw-alias-state-success-primary); }
+  .kpi-cell .down { color: var(--dsw-alias-state-error-primary); }
+
+  /* 场景1：对话流 */
+  .chat-scroll { flex: 1; overflow-y: auto; padding: 20px 24px 30px; display: flex; flex-direction: column; gap: 14px; }
+  .msg { max-width: 780px; }
+  .msg.user { align-self: flex-end; }
+  .msg .bubble { padding: 9px 13px; border-radius: 12px; font-size: 12.5px; line-height: 1.7; }
+  .msg.user .bubble { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .msg.agent .bubble { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-secondary); }
+  .msg .who { font-size: 9.5px; color: var(--dsw-alias-label-caption); margin-bottom: 4px; }
+  .msg.user .who { text-align: right; }
+  .stream-card { max-width: 780px; }
+  .stream-card .linked-slot { margin-top: 10px; border-top: 1px dashed var(--dsw-alias-border-l2); padding-top: 10px; animation: slot-in .3s ease-out; }
+  @keyframes slot-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .linked-banner { display: flex; align-items: center; gap: 7px; padding: 6px 12px; font-size: 10.5px; color: var(--dsw-alias-label-secondary); background: color-mix(in srgb, var(--accent) 7%, transparent); border-bottom: 1px solid var(--dsw-alias-border-l1); }
+  .linked-banner .hl { color: var(--accent); font-weight: 600; }
+
+  /* 场景2：资源列表 */
+  .reg-cols { flex: 1; display: flex; min-height: 0; min-width: 0; }
+  .reg-col1 { width: 300px; flex-shrink: 0; border-right: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); display: flex; flex-direction: column; min-height: 0; }
+  .reg-head { padding: 10px 12px 8px; font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption); display: flex; justify-content: space-between; }
+  .reg-rows { flex: 1; overflow-y: auto; padding: 2px 8px 10px; display: flex; flex-direction: column; gap: 3px; min-height: 0; }
+  .reg-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 9px; border: 0; background: none; text-align: left; font-family: inherit; }
+  .reg-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+  .reg-row .r-name { font-size: 12px; font-weight: 500; color: var(--dsw-alias-label-primary); }
+  .reg-row .r-kind { font-size: 9px; padding: 1px 6px; border-radius: 5px; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-interactive-bg-hover); }
+  .reg-row .r-ops { margin-left: auto; display: flex; gap: 3px; opacity: 0; transition: opacity .12s; }
+  .reg-row:hover .r-ops { opacity: 1; }
+  .reg-row .pin-state { margin-left: auto; font-size: 9.5px; color: var(--accent); display: inline-flex; align-items: center; gap: 4px; }
+  .reg-detail { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+  .sec-label { font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--dsw-alias-label-caption); display: flex; align-items: center; gap: 8px; }
+
+  /* ================= 快照悬浮窗层 ================= */
+  .snap-root { position: fixed; inset: 0; z-index: 1200; pointer-events: none; }
+  .snap-win {
+    pointer-events: auto; position: fixed; display: flex; flex-direction: column;
+    min-width: 300px; min-height: 200px; overflow: hidden;
+    background: var(--dsw-alias-bg-layer-1);
+    border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.1), 0 18px 48px rgba(0,0,0,.28);
+  }
+  /* 入场动画只挂新建窗口（React 重排会重放基础类上的 CSS 动画，故拆成修饰类） */
+  .snap-win.snap-fresh { animation: snap-in .28s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes snap-in { from { opacity: 0; transform: translate(26px,-18px) scale(.92); } to { opacity: 1; transform: none; } }
+  /* 点击提前的「重新浮动」反馈：轻微上浮回落 */
+  .snap-win.snap-pop { animation: snap-pop .3s ease-out; }
+  @keyframes snap-pop { 0% { transform: translateY(0); } 35% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+  .snap-win.interacting::after { content: ""; position: absolute; inset: 0; z-index: 18; background: transparent; }
+  .snap-head {
+    flex: 0 0 38px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 11px;
+    cursor: grab; user-select: none; touch-action: none;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--dsw-alias-bg-layer-2) 88%, var(--snap)), var(--dsw-alias-bg-layer-2));
+    border-bottom: 1px solid var(--dsw-alias-border-l1);
+  }
+  .snap-head:active { cursor: grabbing; }
+  .snap-head .t { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .snap-badge {
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px;
+    font-size: 9px; font-weight: 600; padding: 1.5px 7px; border-radius: 999px;
+    color: var(--snap); background: color-mix(in srgb, var(--snap) 13%, transparent);
+    border: 1px solid color-mix(in srgb, var(--snap) 32%, transparent); white-space: nowrap;
+  }
+  .snap-param {
+    flex-shrink: 0; font-size: 9px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--dsw-alias-label-caption); background: var(--dsw-alias-interactive-bg-hover);
+    padding: 1.5px 6px; border-radius: 5px; white-space: nowrap;
+  }
+  .snap-body { flex: 1; min-height: 0; overflow: auto; }
+  .snap-body .panel-card { border: 0; border-radius: 0; }
+  .snap-body .panel-card .panel-head { display: none; }
+  .snap-foot {
+    flex: 0 0 24px; display: flex; align-items: center; gap: 6px; padding: 0 10px;
+    font-size: 9px; color: var(--dsw-alias-label-caption);
+    border-top: 1px solid var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-2);
+  }
+  .snap-foot .ro { color: var(--snap); font-weight: 600; }
+  .snap-win .icon-btn:hover.snap-close { color: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent); }
+
+  /* 8 向拉伸手柄 */
+  .snap-rh { position: absolute; z-index: 20; touch-action: none; }
+  .snap-rh.rh-n, .snap-rh.rh-s { left: 14px; right: 14px; height: 8px; cursor: ns-resize; }
+  .snap-rh.rh-n { top: 0; } .snap-rh.rh-s { bottom: 0; }
+  .snap-rh.rh-w, .snap-rh.rh-e { top: 14px; bottom: 14px; width: 8px; cursor: ew-resize; }
+  .snap-rh.rh-w { left: 0; } .snap-rh.rh-e { right: 0; }
+  .snap-rh.rh-nw, .snap-rh.rh-ne, .snap-rh.rh-sw, .snap-rh.rh-se { width: 16px; height: 16px; }
+  .snap-rh.rh-nw { left: 0; top: 0; cursor: nwse-resize; }
+  .snap-rh.rh-ne { right: 0; top: 0; cursor: nesw-resize; }
+  .snap-rh.rh-sw { left: 0; bottom: 0; cursor: nesw-resize; }
+  .snap-rh.rh-se { right: 0; bottom: 0; cursor: nwse-resize; }
+  .snap-rh.rh-se::after { content: ""; position: absolute; right: 4px; bottom: 4px; width: 7px; height: 7px; border-right: 1.5px solid var(--dsw-alias-label-caption); border-bottom: 1.5px solid var(--dsw-alias-label-caption); border-radius: 0 0 2px; opacity: .6; }
+
+  /* 只读提示 toast */
+  .snap-toast {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+    z-index: 1400; pointer-events: none;
+    font-size: 11px; padding: 7px 14px; border-radius: 9px;
+    color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1);
+    border: 1px solid var(--dsw-alias-border-l2); box-shadow: 0 8px 28px rgba(0,0,0,.25);
+    animation: toast-in .25s ease-out; display: flex; align-items: center; gap: 7px;
+  }
+  .snap-toast .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--snap); }
+  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="data.jsx"></script>
+<script type="text/babel" src="snapshot-layer.jsx"></script>
+<script type="text/babel" src="scene-chat.jsx"></script>
+<script type="text/babel" src="scene-registry.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
