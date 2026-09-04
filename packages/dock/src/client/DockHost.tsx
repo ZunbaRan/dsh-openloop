@@ -48,6 +48,8 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
   const [handleHover, setHandleHover] = useState(false)
   const widthRef = useRef(width)
   widthRef.current = width
+  const openRef = useRef(open)
+  openRef.current = open
 
   // host 挂载 + 保活（body 被清空时重挂——better-sidebar 同款防御）
   useEffect(() => {
@@ -65,9 +67,15 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     }
   }, [])
 
-  // 空间探测：500ms poll（CSS 变量驱动的 push 无法被 MutationObserver 捕获）
+  // 空间探测 + 挤压变量自愈：500ms poll（CSS 变量驱动的 push 无法被 MutationObserver 捕获）。
+  // 自愈（2026-09-04，0.1.2 内核实测）：旧实例残留 var 卡死 / #root 晚于插件挂载导致
+  // [open,width] effect 永久 bail——每 tick 重取 #root 并强制对齐 var，任何异常 500ms 内收敛。
   useEffect(() => {
-    const update = () => setRightEdge(probeDockRightEdge())
+    const update = () => {
+      setRightEdge(probeDockRightEdge())
+      const root = document.getElementById('root')
+      if (root) root.style.setProperty(DOCK_WIDTH_VAR, openRef.current ? `${widthRef.current}px` : '0px')
+    }
     update()
     const timer = setInterval(update, 500)
     window.addEventListener('resize', update)
@@ -77,9 +85,10 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     }
   }, [])
 
-  // 挤压：bsb 同款 margin-right + width calc（DOCK_DESIGN §1.1）。规则内同时引用 bsb
-  // 变量——本 <style> 运行时注入、在 bsb 样式之后，同优先级后加载胜出，因此 bsb 的开合
-  // 经由这条规则继续生效；bsb 不存在时其变量回落 0。
+  // 挤压：margin-right + width calc（DOCK_DESIGN §1.1）。
+  // ⚠️ 2026-09-04（0.1.2-rc.1 内核实测）：frame 已原生以 padding-right 承担 bsb 占位
+  // （读 --dsh-sidebar-width）——margin 再含 bsb 项会双重计数（聊天区被减两次 bsb 宽、
+  // 中间留出 bsb 等宽空白）。故 margin 只管 dock 自己；bsb 占位交给 frame 原生规则。
   // 注意：不能用 padding-right——AppFrame 是固定轨道 grid，padding 只缩内容盒而
   // frame 不收缩（2026-08-24 CDP 实测：padding 360 时 frame 右缘纹丝不动，margin+width 正常）。
   useEffect(() => {
@@ -87,8 +96,8 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     styleEl.setAttribute('data-openloop-dock-style', '')
     styleEl.textContent = [
       `#root {`,
-      `  margin-right: calc(var(${BSB_WIDTH_VAR}, 0px) + var(${DOCK_WIDTH_VAR}, 0px));`,
-      `  width: calc(100% - var(${BSB_WIDTH_VAR}, 0px) - var(${DOCK_WIDTH_VAR}, 0px));`,
+      `  margin-right: var(${DOCK_WIDTH_VAR}, 0px);`,
+      `  width: calc(100% - var(${DOCK_WIDTH_VAR}, 0px));`,
       `  transition: margin-right .22s ease, width .22s ease;`,
       `}`,
     ].join('\n')

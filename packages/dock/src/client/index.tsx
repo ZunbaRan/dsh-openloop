@@ -58,9 +58,9 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'fixed',
-        // 0.9.17 用户拍板：从垂直居中挪回右上角 header 区——分割线以上、
-        // 与 Session log 胶囊中心对齐（20 实测偏高 → 30 → 36 微调）
-        top: 36,
+        // 0.9.22 用户拍板：top:60——明确落在 bsb toggle 簇（top:3~31）之下，
+        // 与 better-sidebar 共存不扎堆（0.9.17 的 36 与 bsb 簇视觉粘连）
+        top: 60,
         right,
         zIndex: 2147483100,
         minWidth: 34,

@@ -54,3 +54,10 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 1. **`useEffect` 依赖里放对象/数组字面量 → 无限循环**：`useLinkHighlight(tiles)` / `useStreamLink(payload)` 内部 effect 依赖 `tiles`/`payload`，而 `TileGrid` 每次渲染传入新字面量 → effect 反复跑、反复 postMessage/setState → React Maximum update depth exceeded 白屏。**修复：依赖用稳定原始值（`tiles.map(t=>t.id).join(',')`、`payload==null`），数组本体改用 ref 读**。教训：给「宿主每渲染都新建字面量」的消费方写 hook，依赖只能是原始值。
 2. **面板预览代码 1:1 搬进 dock 必崩**：panels 的 iframe 预览作用域只有 presets，`TileGrid`/`tileUrl`/widgetRuntime 全不存在；且 panels 契约包对 widget 是 external——bundle 里 `widgetContract_1.default` 是 undefined，`.default.safeParse` 直接 TypeError。**修复：作用域用 `LINK_SCOPE`（契约 + TileGrid + tileUrl），iframe html 预校验字符串字面量、契约 parse 加防御**（undefined 走兜底不抛）。教训：跨包搬运行时代码必须核对目标作用域 + external 依赖在目标 bundle 的真实形态。
 3. **Panels 类实例在 render 期间新建 → 每次渲染全量卸载重建**：`TileGrid` 原来每次渲染都 `new Panels(document.createElement('div'))` + `setDocument`，即使 tiles 没变也全部 dispose→重建，点击后 DOM 闪烁。**修复：`useRef` 持久化 Panels 实例，未初始化时同步建一次（无闪烁窗口），之后 `setTiles` 增量更新；dispose 走 effect cleanup 防 StrictMode 双重挂载泄漏**。
+
+## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
+
+1. **bsb 占位被双重计数**：0.1.1 时代 app 不认识 `--dsh-sidebar-width`，dock 的挤压规则 `#root { margin-right: bsb+dock }` 代办 bsb 占位；**0.1.2 的 frame 已原生以 `padding-right: bsb宽度` 承担**（实测 `0px 448px 0px 0px` 随 bsb 开合变化）——两道规则同读一个变量，bsb 宽被减两遍，聊天区 \(1280-448\times2-56=328\)px + 中间 448 空白。**修复（0.9.23）：margin 只管 dock 自己，bsb 交给 frame 原生 padding**。教训：**内核升级后必须重验「共存插件的占位由谁承担」——我们代办的布局职责可能被原生接管**。
+2. **诊断这类「神秘空白」的对账法**：`elementFromPoint(空白中心)` 认元素 → 逐层量父链 `getBoundingClientRect` 宽度 → `getComputedStyle` 的 margin/padding/gridCols 做算术对账（\(1280-448\times2-56=328\) 一算即中）。勿先验假设是自家变量卡死——本次先改了 var 自愈（0.9.22，保留无害）才发现真因在 frame padding。
+3. **0.1.2 新布局事实**：`pI_x6G_frame` = `56px minmax(0,1fr) 0px` 三列网格（sidebar/center/details）+ absolute overlayLayer；会话列有 `--dsh-conversation-column-width`（ResizeObserver 实测）+ 宽度拖拽手柄；web URL 带一次性 token（curl 直取会消耗，验证走 agent-browser）。
+4. **第三方插件升级窗口期**：内核 rc 发布当天，dshmarket/better-sidebar 这类活跃插件通常几小时内出适配版；升级内核后 boot 硬失败先 `npm view <pkg> time` 看有没有 rc 后的新版，没有再考虑移除。

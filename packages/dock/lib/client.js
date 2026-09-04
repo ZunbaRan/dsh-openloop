@@ -75,6 +75,8 @@ window.__ModuleLoader__.load({
 			const [handleHover, setHandleHover] = (0, react.useState)(false);
 			const widthRef = (0, react.useRef)(width);
 			widthRef.current = width;
+			const openRef = (0, react.useRef)(open);
+			openRef.current = open;
 			(0, react.useEffect)(() => {
 				const el = document.createElement("div");
 				el.setAttribute("data-openloop-dock", "");
@@ -90,7 +92,11 @@ window.__ModuleLoader__.load({
 				};
 			}, []);
 			(0, react.useEffect)(() => {
-				const update = () => setRightEdge(probeDockRightEdge());
+				const update = () => {
+					setRightEdge(probeDockRightEdge());
+					const root = document.getElementById("root");
+					if (root) root.style.setProperty(DOCK_WIDTH_VAR, openRef.current ? `${widthRef.current}px` : "0px");
+				};
 				update();
 				const timer = setInterval(update, 500);
 				window.addEventListener("resize", update);
@@ -104,8 +110,8 @@ window.__ModuleLoader__.load({
 				styleEl.setAttribute("data-openloop-dock-style", "");
 				styleEl.textContent = [
 					`#root {`,
-					`  margin-right: calc(var(${BSB_WIDTH_VAR}, 0px) + var(${DOCK_WIDTH_VAR}, 0px));`,
-					`  width: calc(100% - var(${BSB_WIDTH_VAR}, 0px) - var(${DOCK_WIDTH_VAR}, 0px));`,
+					`  margin-right: var(${DOCK_WIDTH_VAR}, 0px);`,
+					`  width: calc(100% - var(${DOCK_WIDTH_VAR}, 0px));`,
 					`  transition: margin-right .22s ease, width .22s ease;`,
 					`}`
 				].join("\n");
@@ -11846,7 +11852,7 @@ window.__ModuleLoader__.load({
 				onMouseLeave: () => setHover(false),
 				style: {
 					position: "fixed",
-					top: 36,
+					top: 60,
 					right,
 					zIndex: 2147483100,
 					minWidth: 34,
