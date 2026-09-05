@@ -1057,12 +1057,20 @@ window.__ModuleLoader__.load({
 				hoveredId !== null && hoveredId !== lockedId ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
 					surface: surfaceRef.current,
 					nodeId: hoveredId,
-					borderStyle: "outline"
+					borderStyle: "outline",
+					tooltip: (() => {
+						const n = nodeById.get(hoveredId);
+						return n !== void 0 ? `${n.type} #${hoveredId}` : `#${hoveredId}`;
+					})()
 				}) : null,
 				lockedId !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
 					surface: surfaceRef.current,
 					nodeId: lockedId,
-					borderStyle: "solid"
+					borderStyle: "solid",
+					tooltip: (() => {
+						const n = nodeById.get(lockedId);
+						return n !== void 0 ? `${n.type} #${lockedId}` : `#${lockedId}`;
+					})()
 				}) : null,
 				draftRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
 					...normalizeRect(draftRect),
@@ -1086,24 +1094,49 @@ window.__ModuleLoader__.load({
 				})
 			] });
 		}
-		function HighlightRect({ surface, nodeId, borderStyle }) {
+		function HighlightRect({ surface, nodeId, borderStyle, tooltip }) {
 			if (surface === null) return null;
 			const el = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"]`);
 			if (el === null) return null;
 			const box = surface.getBoundingClientRect();
 			const r = el.getBoundingClientRect();
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
 				position: "absolute",
 				left: r.left - box.left - 3,
 				top: r.top - box.top - 3,
 				width: r.width + 6,
 				height: r.height + 6,
-				border: borderStyle === "outline" ? `2px dashed ${ACCENT$1}` : `2px solid ${ACCENT$1}`,
-				borderRadius: 8,
+				border: borderStyle === "outline" ? `1.5px solid ${ACCENT$1}` : `2px solid ${ACCENT$1}`,
+				borderRadius: 6,
 				pointerEvents: "none",
 				zIndex: 30,
+				background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
 				boxShadow: borderStyle === "solid" ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : "none"
-			} });
+			} }), tooltip !== void 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					position: "absolute",
+					left: r.left - box.left - 3,
+					top: Math.max(2, r.top - box.top - 22),
+					zIndex: 31,
+					fontSize: 10,
+					fontFamily: "ui-monospace, Menlo, monospace",
+					lineHeight: 1,
+					padding: "3px 7px",
+					borderRadius: 4,
+					pointerEvents: "none",
+					whiteSpace: "nowrap",
+					color: "#fff",
+					background: "var(--dsw-alias-state-business-primary, #4176e6)",
+					boxShadow: "0 2px 6px rgba(0,0,0,.2)"
+				},
+				children: [
+					tooltip,
+					" · ",
+					Math.round(r.width),
+					"×",
+					Math.round(r.height)
+				]
+			}) : null] });
 		}
 		function PinBadge({ surface, nodeId, anns, onEdit, onDelete }) {
 			const [hover, setHover] = (0, react.useState)(false);
@@ -1654,10 +1687,22 @@ window.__ModuleLoader__.load({
 		function removeAnnotation(canvasId, id) {
 			writeAll(canvasId, readAll(canvasId).filter((a) => a.id !== id));
 		}
-		/** 进 composer 的草稿格式：引用头 + 评注（纯文本胶囊风格） */
+		/**
+		* 进 composer 的草稿格式（S6 结构化重做，2026-09-06 用户拍板）：
+		* 标注是给 Agent 消费的结构化上下文（Qoder「注释即 API 文档」），不是给人看的标签。
+		* 每个 node target 带：document 路径（nodes[i]）+ 节点类型 + id + 【完整 DSL 源码片段】
+		* ——Agent 拿到后能精确定位 canvas 工具的 document 里改哪一段。
+		*/
 		function formatAnnotationDraft(snapshot, targets, note) {
-			const lines = targets.map((t) => t.kind === "node" ? `▸ ${t.id} ${t.label}` : `▸ 文本 "${t.excerpt}"`);
-			return `[画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}]\n${lines.join("\n")}\n${note}`;
+			const nodes = snapshot.canvas.nodes ?? [];
+			const blocks = [];
+			for (const t of targets) if (t.kind === "node") {
+				const idx = nodes.findIndex((n) => n.id === t.id);
+				const node = idx >= 0 ? nodes[idx] : void 0;
+				if (node !== void 0) blocks.push(`<target type="${node.type}" id="${node.id}" path="nodes[${idx}]">\n${JSON.stringify(node, null, 2)}\n</target>`);
+				else blocks.push(`<target id="${t.id}" note="not found in current revision">${t.label}</target>`);
+			} else blocks.push(`<target type="text">"${t.excerpt}"</target>`);
+			return `画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}\n${blocks.join("\n")}\n${note}`;
 		}
 		//#endregion
 		//#region src/client/CanvasWorkbench.tsx

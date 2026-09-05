@@ -140,10 +140,16 @@ export function CanvasPinLayer({ snapshot, containerRef, callbacks }: {
 
   return (
     <>
-      {/* hover 高亮 */}
-      {hoveredId !== null && hoveredId !== lockedId ? <HighlightRect surface={surfaceRef.current} nodeId={hoveredId} borderStyle="outline" /> : null}
+      {/* hover 高亮 + DevTools 风格元素信息 tooltip（type #id · 宽×高） */}
+      {hoveredId !== null && hoveredId !== lockedId ? (
+        <HighlightRect surface={surfaceRef.current} nodeId={hoveredId} borderStyle="outline"
+          tooltip={(() => { const n = nodeById.get(hoveredId); return n !== undefined ? `${n.type} #${hoveredId}` : `#${hoveredId}` })()} />
+      ) : null}
       {/* 锁定/框选高亮（targets 由 callbacks 传给面板，pin 层只画当前锁定的） */}
-      {lockedId !== null ? <HighlightRect surface={surfaceRef.current} nodeId={lockedId} borderStyle="solid" /> : null}
+      {lockedId !== null ? (
+        <HighlightRect surface={surfaceRef.current} nodeId={lockedId} borderStyle="solid"
+          tooltip={(() => { const n = nodeById.get(lockedId); return n !== undefined ? `${n.type} #${lockedId}` : `#${lockedId}` })()} />
+      ) : null}
       {/* 框选拖拽虚线框 */}
       {draftRect !== null ? <div style={{ ...normalizeRect(draftRect), position: 'absolute', border: `1.5px dashed ${ACCENT}`, background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)', borderRadius: 4, pointerEvents: 'none', zIndex: 30 }} /> : null}
       {/* 元素 pin（①角标 + hover 详情卡） */}
@@ -156,14 +162,34 @@ export function CanvasPinLayer({ snapshot, containerRef, callbacks }: {
   )
 }
 
-function HighlightRect({ surface, nodeId, borderStyle }: { surface: HTMLElement | null; nodeId: string; borderStyle: 'outline' | 'solid' }): ReactNode {
+function HighlightRect({ surface, nodeId, borderStyle, tooltip }: { surface: HTMLElement | null; nodeId: string; borderStyle: 'outline' | 'solid'; tooltip?: string }): ReactNode {
   if (surface === null) return null
   const el = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(nodeId)}"]`)
   if (el === null) return null
   const box = surface.getBoundingClientRect()
   const r = el.getBoundingClientRect()
   return (
-    <div style={{ position: 'absolute', left: r.left - box.left - 3, top: r.top - box.top - 3, width: r.width + 6, height: r.height + 6, border: borderStyle === 'outline' ? `2px dashed ${ACCENT}` : `2px solid ${ACCENT}`, borderRadius: 8, pointerEvents: 'none', zIndex: 30, boxShadow: borderStyle === 'solid' ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : 'none' }} />
+    <>
+      {/* DevTools 式底色高亮 + 边框 */}
+      <div style={{
+        position: 'absolute', left: r.left - box.left - 3, top: r.top - box.top - 3, width: r.width + 6, height: r.height + 6,
+        border: borderStyle === 'outline' ? `1.5px solid ${ACCENT}` : `2px solid ${ACCENT}`, borderRadius: 6, pointerEvents: 'none', zIndex: 30,
+        background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)',
+        boxShadow: borderStyle === 'solid' ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : 'none',
+      }} />
+      {/* 元素信息 tooltip（DevTools 检查器风格：type #id · 宽×高） */}
+      {tooltip !== undefined ? (
+        <div style={{
+          position: 'absolute', left: r.left - box.left - 3, top: Math.max(2, r.top - box.top - 22), zIndex: 31,
+          fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: 1,
+          padding: '3px 7px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
+          color: '#fff', background: 'var(--dsw-alias-state-business-primary, #4176e6)',
+          boxShadow: '0 2px 6px rgba(0,0,0,.2)',
+        }}>
+          {tooltip} · {Math.round(r.width)}×{Math.round(r.height)}
+        </div>
+      ) : null}
+    </>
   )
 }
 

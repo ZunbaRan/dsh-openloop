@@ -62,8 +62,34 @@ export function removeAnnotation(canvasId: string, id: string): void {
   writeAll(canvasId, readAll(canvasId).filter(a => a.id !== id))
 }
 
-/** 进 composer 的草稿格式：引用头 + 评注（纯文本胶囊风格） */
-export function formatAnnotationDraft(snapshot: { canvasId: string; revision: number; canvas: { title: string } }, targets: readonly AnnotationTarget[], note: string): string {
-  const lines = targets.map(t => t.kind === 'node' ? `▸ ${t.id} ${t.label}` : `▸ 文本 "${t.excerpt}"`)
-  return `[画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}]\n${lines.join('\n')}\n${note}`
+/**
+ * 进 composer 的草稿格式（S6 结构化重做，2026-09-06 用户拍板）：
+ * 标注是给 Agent 消费的结构化上下文（Qoder「注释即 API 文档」），不是给人看的标签。
+ * 每个 node target 带：document 路径（nodes[i]）+ 节点类型 + id + 【完整 DSL 源码片段】
+ * ——Agent 拿到后能精确定位 canvas 工具的 document 里改哪一段。
+ */
+export function formatAnnotationDraft(
+  snapshot: { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[] } },
+  targets: readonly AnnotationTarget[],
+  note: string,
+): string {
+  const nodes = snapshot.canvas.nodes ?? []
+  const blocks: string[] = []
+  for (const t of targets) {
+    if (t.kind === 'node') {
+      const idx = nodes.findIndex(n => n.id === t.id)
+      const node = idx >= 0 ? nodes[idx] : undefined
+      if (node !== undefined) {
+        blocks.push(`<target type="${node.type}" id="${node.id}" path="nodes[${idx}]">\n${JSON.stringify(node, null, 2)}\n</target>`)
+      } else {
+        // 节点不在当前快照（快照迭代后被删）——降级为 id 引用
+        blocks.push(`<target id="${t.id}" note="not found in current revision">${t.label}</target>`)
+      }
+    } else {
+      blocks.push(`<target type="text">"${t.excerpt}"</target>`)
+    }
+  }
+  // 头部不带方括号（真机教训：Lexical composer 的 markdown 插件会把 `[...]`
+  // 误识别为 link 语法，导致头部丢失、评注顺序错乱）
+  return `画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}\n${blocks.join('\n')}\n${note}`
 }
