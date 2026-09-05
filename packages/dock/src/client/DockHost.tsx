@@ -89,6 +89,9 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
   // ⚠️ 2026-09-04（0.1.2-rc.1 内核实测）：frame 已原生以 padding-right 承担 bsb 占位
   // （读 --dsh-sidebar-width）——margin 再含 bsb 项会双重计数（聊天区被减两次 bsb 宽、
   // 中间留出 bsb 等宽空白）。故 margin 只管 dock 自己；bsb 占位交给 frame 原生规则。
+  // 2026-09-05（canvas dock 集成）：规则加 --openloop-canvas-width 变量项做「挤压总管」
+  // ——canvas dock（qoder-canvas 包的独立第二推出面板）只设变量不写规则，
+  // 缺省 fallback 0px 向后兼容（无 canvas 插件时规则退化为只含 board）。
   // 注意：不能用 padding-right——AppFrame 是固定轨道 grid，padding 只缩内容盒而
   // frame 不收缩（2026-08-24 CDP 实测：padding 360 时 frame 右缘纹丝不动，margin+width 正常）。
   useEffect(() => {
@@ -96,8 +99,8 @@ export function DockHost({ open, width, onWidthChange, children }: DockHostProps
     styleEl.setAttribute('data-openloop-dock-style', '')
     styleEl.textContent = [
       `#root {`,
-      `  margin-right: var(${DOCK_WIDTH_VAR}, 0px);`,
-      `  width: calc(100% - var(${DOCK_WIDTH_VAR}, 0px));`,
+      `  margin-right: calc(var(${DOCK_WIDTH_VAR}, 0px) + var(--openloop-canvas-width, 0px));`,
+      `  width: calc(100% - var(${DOCK_WIDTH_VAR}, 0px) - var(--openloop-canvas-width, 0px));`,
       `  transition: margin-right .22s ease, width .22s ease;`,
       `}`,
     ].join('\n')

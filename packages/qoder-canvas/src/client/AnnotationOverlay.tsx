@@ -209,7 +209,7 @@ export function AnnotationOverlay({ snapshot, containerRef }: { snapshot: Canvas
   if (!active) {
     return (
       <button type="button" onClick={() => setActive(true)} title="标注画布：点选/框选元素或选中文本，写评注注入输入框"
-        style={{ position: 'absolute', top: 6, right: 8, zIndex: 40, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, padding: '2px 9px', borderRadius: 6, cursor: 'pointer', color: 'var(--dsw-alias-label-secondary, inherit)', background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
+        style={{ position: 'absolute', top: 6, right: 76, zIndex: 40, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10.5, padding: '2px 9px', borderRadius: 6, cursor: 'pointer', color: 'var(--dsw-alias-label-secondary, inherit)', background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', border: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
         标注
       </button>

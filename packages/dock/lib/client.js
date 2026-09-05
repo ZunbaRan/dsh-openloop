@@ -110,8 +110,8 @@ window.__ModuleLoader__.load({
 				styleEl.setAttribute("data-openloop-dock-style", "");
 				styleEl.textContent = [
 					`#root {`,
-					`  margin-right: var(${DOCK_WIDTH_VAR}, 0px);`,
-					`  width: calc(100% - var(${DOCK_WIDTH_VAR}, 0px));`,
+					`  margin-right: calc(var(${DOCK_WIDTH_VAR}, 0px) + var(--openloop-canvas-width, 0px));`,
+					`  width: calc(100% - var(${DOCK_WIDTH_VAR}, 0px) - var(--openloop-canvas-width, 0px));`,
 					`  transition: margin-right .22s ease, width .22s ease;`,
 					`}`
 				].join("\n");

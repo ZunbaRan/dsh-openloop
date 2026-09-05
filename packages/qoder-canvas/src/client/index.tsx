@@ -4,19 +4,33 @@
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
+import { createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
 import { CanvasCard } from './CanvasCard.tsx'
+import { CanvasWorkbench } from './CanvasWorkbench.tsx'
 
 export const name = 'openloop-qoder-canvas'
 export const inject = ['slots']
 
 export { CanvasCard, canvasMetaFrom } from './CanvasCard.tsx'
-// M2 预留：标注回流桥（M0 选型已定，见 composer-bridge.ts 文件头）
 export { injectComposerDraft } from './composer-bridge.ts'
 
 export function apply(ctx: ClientContext): void {
-  // key = 服务端 tool 名 'canvas'（index.ts），逐字一致
+  // ① toolview 入口卡片（快照/回放/打开入口）
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register(
     { name: 'tool.call.toolview', key: 'canvas' },
     CanvasCard,
   ))
+  // ② canvas dock：推出面板 + toggle + 工作台（自建 host + createRoot，dock 同款模式）
+  ctx.effect(() => {
+    const host = document.createElement('div')
+    host.setAttribute('data-openloop-canvas-root', '')
+    document.body.appendChild(host)
+    let root: Root | undefined
+    try {
+      root = createRoot(host)
+      root.render(createElement(CanvasWorkbench))
+    } catch { /* 渲染失败静默——不影响宿主页面 */ }
+    return () => { void root?.unmount(); host.remove() }
+  }, 'openloop-canvas: workbench mount')
 }

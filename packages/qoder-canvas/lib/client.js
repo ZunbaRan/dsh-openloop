@@ -5,7 +5,9 @@ window.__ModuleLoader__.load({
 		var exports = module.exports;
 		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 		let react = require("react");
+		let react_dom_client = require("react-dom/client");
 		let react_jsx_runtime = require("react/jsx-runtime");
+		let react_dom = require("react-dom");
 		//#region src/client/markdown.tsx
 		function renderInline(text, keyPrefix) {
 			const out = [];
@@ -1000,7 +1002,7 @@ window.__ModuleLoader__.load({
 				style: {
 					position: "absolute",
 					top: 6,
-					right: 8,
+					right: 76,
 					zIndex: 40,
 					display: "inline-flex",
 					alignItems: "center",
@@ -1666,6 +1668,30 @@ window.__ModuleLoader__.load({
 				style: { position: "relative" },
 				ref: surfaceRef,
 				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+						type: "button",
+						onClick: () => window.__openloopCanvasOpen?.(snapshot.canvasId),
+						title: "在画布工作台打开（右侧推出栏：标注/迭代）",
+						style: {
+							position: "absolute",
+							top: 6,
+							right: 8,
+							zIndex: 20,
+							display: "inline-flex",
+							alignItems: "center",
+							gap: 4,
+							fontSize: 10.5,
+							padding: "2px 9px",
+							borderRadius: 6,
+							cursor: "pointer",
+							color: "var(--dsw-alias-state-business-primary, #4176e6)",
+							background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
+							border: "1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 28%, transparent)",
+							fontFamily: "inherit",
+							whiteSpace: "nowrap"
+						},
+						children: "⇱ 工作台"
+					}),
 					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasSurface, {
 						snapshot,
 						onAction
@@ -1695,6 +1721,385 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
+		//#region src/client/CanvasDockHost.tsx
+		/**
+		* CanvasDockHost：canvas dock 的推出面板（复刻 dock DockHost 已验证机制）。
+		*
+		* 与 board 的关系（QODER_CANVAS_SIDEBAR §2）：
+		* - canvas dock 是与 board 平级的独立第二推出面板（内容 | canvas dock | board | bsb）
+		* - 右缘定位：right = bsbWidth + boardWidth（读 --dsh-sidebar-width +
+		*   --openloop-dock-width 两个变量，500ms 探测）
+		* - 挤压：设 --openloop-canvas-width 变量；margin 总管规则在 dock 的 DockHost
+		*   （calc(dock + canvas)，缺省 0 向后兼容）——本组件【不写】挤压规则
+		* - 推出动画/左缘拖宽/bsb 同款嵌入式（无阴影无描边）——全部复刻 DockHost
+		*/
+		const CANVAS_WIDTH_VAR = "--openloop-canvas-width";
+		const BSB_WIDTH_VAR = "--dsh-sidebar-width";
+		const BOARD_WIDTH_VAR = "--openloop-dock-width";
+		const TRANSITION = "width .22s ease";
+		function clampCanvasWidth(w) {
+			const max = Math.max(320, (typeof window === "undefined" ? 1200 : window.innerWidth) - 200);
+			return Math.min(Math.max(320, w), max);
+		}
+		/** canvas dock 右缘 = bsbWidth + boardWidth（最靠内容的面板） */
+		function probeCanvasRightEdge() {
+			if (typeof window === "undefined") return 0;
+			const cs = getComputedStyle(document.documentElement);
+			const read = (v) => {
+				const n = parseFloat(cs.getPropertyValue(v)) || 0;
+				return n > 0 && n < window.innerWidth * .8 ? n : 0;
+			};
+			return window.innerWidth - read(BSB_WIDTH_VAR) - read(BOARD_WIDTH_VAR);
+		}
+		function CanvasDockHost({ open, width, onWidthChange, children }) {
+			const [host, setHost] = (0, react.useState)(null);
+			const [rightEdge, setRightEdge] = (0, react.useState)(() => probeCanvasRightEdge());
+			const [resizing, setResizing] = (0, react.useState)(false);
+			const [handleHover, setHandleHover] = (0, react.useState)(false);
+			const widthRef = (0, react.useRef)(width);
+			widthRef.current = width;
+			(0, react.useEffect)(() => {
+				const el = document.createElement("div");
+				el.setAttribute("data-openloop-canvas-dock", "");
+				document.body.appendChild(el);
+				setHost(el);
+				const observer = new MutationObserver(() => {
+					if (!document.body.contains(el)) document.body.appendChild(el);
+				});
+				observer.observe(document.body, { childList: true });
+				return () => {
+					observer.disconnect();
+					el.remove();
+				};
+			}, []);
+			(0, react.useEffect)(() => {
+				const update = () => setRightEdge(probeCanvasRightEdge());
+				update();
+				const timer = setInterval(update, 500);
+				window.addEventListener("resize", update);
+				return () => {
+					clearInterval(timer);
+					window.removeEventListener("resize", update);
+				};
+			}, []);
+			(0, react.useEffect)(() => {
+				const root = document.getElementById("root");
+				if (!root) return;
+				root.style.setProperty(CANVAS_WIDTH_VAR, open ? `${width}px` : "0px");
+				return () => {
+					root.style.removeProperty(CANVAS_WIDTH_VAR);
+				};
+			}, [open, width]);
+			const startResize = (event) => {
+				if (!open) return;
+				event.preventDefault();
+				const startX = event.clientX;
+				const startW = widthRef.current;
+				setResizing(true);
+				const move = (e) => {
+					onWidthChange?.(clampCanvasWidth(Math.round(startW + (startX - e.clientX))));
+				};
+				const up = () => {
+					setResizing(false);
+					removeEventListener("pointermove", move);
+					removeEventListener("pointerup", up);
+				};
+				addEventListener("pointermove", move);
+				addEventListener("pointerup", up);
+			};
+			if (!host) return null;
+			const outer = {
+				position: "fixed",
+				top: 0,
+				bottom: 0,
+				right: typeof window === "undefined" ? 0 : Math.max(0, window.innerWidth - rightEdge),
+				width: open ? width : 0,
+				transition: resizing ? "none" : TRANSITION,
+				overflow: "hidden",
+				zIndex: 2147483045,
+				background: "var(--dsw-alias-bg-layer-1, #fff)",
+				boxSizing: "border-box"
+			};
+			return (0, react_dom.createPortal)(/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: outer,
+				"data-openloop-canvas-panel": "",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						position: "absolute",
+						top: 0,
+						bottom: 0,
+						right: 0,
+						width,
+						height: "100%",
+						display: "flex",
+						flexDirection: "column",
+						background: "var(--dsw-alias-bg-layer-1, #fff)",
+						boxSizing: "border-box"
+					},
+					children: [children, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						onPointerDown: startResize,
+						onPointerEnter: () => setHandleHover(true),
+						onPointerLeave: () => setHandleHover(false),
+						style: {
+							position: "absolute",
+							left: 0,
+							top: 0,
+							bottom: 0,
+							width: 10,
+							cursor: open ? "col-resize" : "default",
+							pointerEvents: open ? "auto" : "none",
+							zIndex: 10
+						},
+						title: "拖动调整宽度",
+						children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+							width: resizing || handleHover ? 6 : 4,
+							height: "100%",
+							background: resizing || handleHover ? "var(--dsw-alias-state-business-primary, #4176e6)" : "var(--dsw-alias-border-l2, rgba(127,127,127,.3))",
+							transition: "background .15s ease, width .15s ease"
+						} })
+					})]
+				})
+			}), host);
+		}
+		/** canvas toggle（board toggle 左侧；right = bsbWidth + boardWidth + 46） */
+		function CanvasToggle({ open, onToggle }) {
+			const [hover, setHover] = (0, react.useState)(false);
+			const [right, setRight] = (0, react.useState)(46);
+			(0, react.useEffect)(() => {
+				const update = () => {
+					const edge = probeCanvasRightEdge();
+					setRight(Math.max(46, window.innerWidth - edge + 46));
+				};
+				update();
+				const timer = setInterval(update, 500);
+				window.addEventListener("resize", update);
+				return () => {
+					clearInterval(timer);
+					window.removeEventListener("resize", update);
+				};
+			}, []);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+				type: "button",
+				onClick: onToggle,
+				title: open ? "收起画布工作台" : "展开画布工作台",
+				onMouseEnter: () => setHover(true),
+				onMouseLeave: () => setHover(false),
+				style: {
+					position: "fixed",
+					top: 38,
+					right,
+					zIndex: 2147483045,
+					width: 28,
+					height: 28,
+					padding: 0,
+					borderRadius: "50%",
+					border: "none",
+					background: hover ? "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))" : "transparent",
+					cursor: "pointer",
+					lineHeight: 1,
+					opacity: hover || open ? 1 : .55,
+					transition: "opacity .15s ease, background .15s ease",
+					display: "flex",
+					alignItems: "center",
+					justifyContent: "center",
+					color: open ? "var(--dsw-alias-state-business-primary, #4176e6)" : "var(--dsw-alias-label-secondary, inherit)"
+				},
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+					width: "15",
+					height: "15",
+					viewBox: "0 0 24 24",
+					fill: "none",
+					stroke: "currentColor",
+					strokeWidth: "1.9",
+					strokeLinecap: "round",
+					strokeLinejoin: "round",
+					"aria-hidden": "true",
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+						x: "3",
+						y: "3",
+						width: "18",
+						height: "18",
+						rx: "2.5"
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 9h18M9 9v12" })]
+				})
+			});
+		}
+		//#endregion
+		//#region src/client/CanvasWorkbench.tsx
+		/**
+		* CanvasWorkbench：canvas dock 的工作台容器（S1 骨架）。
+		*
+		* S1 范围：推出面板 + toggle + 工作台骨架（画布占位 + 「从对话流打开」事件桥）。
+		* S3 范围（后续）：元素 pin 标注 + 评论面板。
+		*/
+		const WIDTH_KEY = "openloop.canvas.width.v1";
+		const OPEN_KEY = "openloop.canvas.open.v1";
+		function readWidth() {
+			try {
+				const v = Number(localStorage.getItem(WIDTH_KEY));
+				return Number.isFinite(v) && v > 0 ? clampCanvasWidth(v) : 560;
+			} catch {
+				return 560;
+			}
+		}
+		function readOpen() {
+			try {
+				return localStorage.getItem(OPEN_KEY) === "1";
+			} catch {
+				return false;
+			}
+		}
+		function CanvasWorkbench() {
+			const [open, setOpen] = (0, react.useState)(readOpen);
+			const [width, setWidth] = (0, react.useState)(readWidth);
+			const [activeCanvasId, setActiveCanvasId] = (0, react.useState)(null);
+			const persistOpen = (v) => {
+				setOpen(v);
+				try {
+					localStorage.setItem(OPEN_KEY, v ? "1" : "0");
+				} catch {}
+			};
+			const persistWidth = (w) => {
+				setWidth(w);
+				try {
+					localStorage.setItem(WIDTH_KEY, String(w));
+				} catch {}
+			};
+			(0, react.useEffect)(() => {
+				window.__openloopCanvasOpen = (canvasId) => {
+					setActiveCanvasId(canvasId);
+					persistOpen(true);
+				};
+				return () => {
+					delete window.__openloopCanvasOpen;
+				};
+			}, []);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasToggle, {
+				open,
+				onToggle: () => persistOpen(!open)
+			}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasDockHost, {
+				open,
+				width,
+				onWidthChange: persistWidth,
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						display: "flex",
+						flexDirection: "column",
+						height: "100%",
+						minWidth: 0
+					},
+					"data-openloop-canvas-workbench": true,
+					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("header", {
+						style: {
+							display: "flex",
+							alignItems: "center",
+							gap: 8,
+							padding: "10px 14px",
+							borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))"
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontSize: 13,
+									fontWeight: 650,
+									flex: 1,
+									minWidth: 0,
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap"
+								},
+								children: "画布工作台"
+							}),
+							activeCanvasId !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									fontSize: 10,
+									fontFamily: "ui-monospace, Menlo, monospace",
+									color: "var(--dsw-alias-label-caption, #888)"
+								},
+								children: activeCanvasId
+							}) : null,
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: () => persistOpen(false),
+								title: "收起（画布保留）",
+								style: {
+									fontSize: 11,
+									padding: "3px 9px",
+									borderRadius: 6,
+									border: 0,
+									cursor: "pointer",
+									background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
+									color: "var(--dsw-alias-label-secondary, inherit)",
+									fontFamily: "inherit"
+								},
+								children: "收起"
+							})
+						]
+					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							flex: 1,
+							minHeight: 0,
+							overflow: "auto",
+							padding: 16
+						},
+						children: activeCanvasId === null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								flexDirection: "column",
+								alignItems: "center",
+								gap: 10,
+								padding: "48px 20px",
+								color: "var(--dsw-alias-label-caption, #888)"
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+								width: "40",
+								height: "40",
+								viewBox: "0 0 24 24",
+								fill: "none",
+								stroke: "currentColor",
+								strokeWidth: "1.4",
+								strokeLinecap: "round",
+								strokeLinejoin: "round",
+								opacity: "0.5",
+								"aria-hidden": "true",
+								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+									x: "3",
+									y: "3",
+									width: "18",
+									height: "18",
+									rx: "2.5"
+								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 9h18M9 9v12" })]
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+								style: {
+									fontSize: 12,
+									lineHeight: 1.7,
+									textAlign: "center"
+								},
+								children: [
+									"还没有打开的画布",
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+									/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+										style: { fontSize: 11 },
+										children: "让 Agent 用 canvas 工具画一个，或在对话流的画布卡片上点「⇱ 工作台」"
+									})
+								]
+							})]
+						}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								fontSize: 12,
+								color: "var(--dsw-alias-label-caption, #888)"
+							},
+							children: [
+								"画布 ",
+								activeCanvasId,
+								" 的真身渲染（S3 接入 CanvasSurface + 标注）"
+							]
+						})
+					})]
+				})
+			})] });
+		}
+		//#endregion
 		//#region src/client/index.tsx
 		const name = "openloop-qoder-canvas";
 		const inject = ["slots"];
@@ -1703,6 +2108,20 @@ window.__ModuleLoader__.load({
 				name: "tool.call.toolview",
 				key: "canvas"
 			}, CanvasCard));
+			ctx.effect(() => {
+				const host = document.createElement("div");
+				host.setAttribute("data-openloop-canvas-root", "");
+				document.body.appendChild(host);
+				let root;
+				try {
+					root = (0, react_dom_client.createRoot)(host);
+					root.render((0, react.createElement)(CanvasWorkbench));
+				} catch {}
+				return () => {
+					root?.unmount();
+					host.remove();
+				};
+			}, "openloop-canvas: workbench mount");
 		}
 		//#endregion
 		exports.CanvasCard = CanvasCard;
