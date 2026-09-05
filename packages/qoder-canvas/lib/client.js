@@ -716,27 +716,25 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/AnnotationOverlay.tsx
 		/**
-		* AnnotationOverlay v2（M2.5，用户 2026-09-05 拍板的交互重做）：
-		* 「浏览器检查器选择器 + CodeBuddy 注释」模型：
+		* AnnotationOverlay v3（M2.5 二轮修复，用户 2026-09-05 七条反馈）：
 		*
-		* 1. 标注模式：节点 hover → outline 高亮 + 角标 badge（检查器感）；
-		*    点选 → 高亮固定 + 选中元素右上悬浮「💬 评论」按钮
-		* 2. 文本：画布内文本选中（浏览器原生 selection）→ 选区末端悬浮「评论」按钮
-		* 3. 框选：拖框圈节点 → 松手【直接弹出评注输入框】（用户拍板，少一步点击）
-		* 4. 评注输入框（悬浮可取消）→ 保存 → 草稿注入 composer（引用头+评注）
-		*    + 注释持久化到画布（元素角标 ①，hover 弹出详情卡可编辑/删除）
+		* 架构核心变更：干掉「全蒙层」——初版用 inset:0 透明 div 盖在画布上，
+		* 导致元素 hover/点选永远命中蒙层、几何法只能选到最大容器、文本选择全灭。
+		* v3 改为三模式按钮各自的光标/交互模型：
 		*
-		* 事件模型（v0.2.1 教训保留）：蒙层 pointer-events:auto + cursor:crosshair；
-		* 点选/框选/悬停命中全部走【纯几何法】（遍历节点 rect），不依赖 elementsFromPoint。
+		* - 点选模式：画布容器 cursor:crosshair + 容器级 pointermove（几何法找
+		*   节点 hover）+ 容器级 click 命中——**无蒙层**，节点直接可被 hover/点选
+		* - 框选模式：容器级 pointerdown/move/up 拖拽出虚线框（无蒙层但用户
+		*   按住拖动=框选，平时不挡交互）；框选过程中相交节点实时高亮；
+		*   松手 → 弹评注框（targets 保留高亮）+ 弹层可拖动（snapshot 窗同款
+		*   pointer capture 拖拽手感）
+		* - 文本模式：容器 cursor:text + userSelect:text（浏览器原生选择
+		*   正常工作，无蒙层遮挡）→ mouseup 时 selection 完成 → 弹评注框
+		*
+		* 取消语义（用户拍板 3）：取消只关评注框，targets 与高亮保留（可再点评论）。
+		* 快捷短语删除（用户拍板 2）。
 		*/
 		const ACCENT = "var(--dsw-alias-state-business-primary, #4176e6)";
-		const QUICK_PHRASES = [
-			"太小了",
-			"信息过时",
-			"这里错了",
-			"删掉这块"
-		];
-		/** node id → 人类可读描述（类型 + 标题/首行） */
 		function nodeLabelOf(node) {
 			const p = node.props;
 			return typeof p.title === "string" && p.title.length > 0 ? p.title : typeof p.label === "string" && p.label.length > 0 ? p.label : typeof p.text === "string" && p.text.length > 0 ? p.text.length > 24 ? `${p.text.slice(0, 24)}…` : p.text : node.type;
@@ -749,7 +747,6 @@ window.__ModuleLoader__.load({
 				h: Math.abs(r.h)
 			};
 		}
-		/** 几何命中：surface 内找包含坐标点的最小面积 node */
 		function hitNode(surface, clientX, clientY) {
 			let best = null;
 			for (const el of surface.querySelectorAll("[data-canvas-node]")) {
@@ -770,8 +767,8 @@ window.__ModuleLoader__.load({
 		}
 		function AnnotationOverlay({ snapshot, containerRef }) {
 			const [active, setActive] = (0, react.useState)(false);
+			const [mode, setMode] = (0, react.useState)("pick");
 			const [hoveredId, setHoveredId] = (0, react.useState)(null);
-			const [lockedId, setLockedId] = (0, react.useState)(null);
 			const [targets, setTargets] = (0, react.useState)([]);
 			const [draftRect, setDraftRect] = (0, react.useState)(null);
 			const [note, setNote] = (0, react.useState)("");
@@ -788,10 +785,29 @@ window.__ModuleLoader__.load({
 					setToast((cur) => cur === msg ? null : cur);
 				}, 2200);
 			};
-			/** 文本选择监听（仅画布内）：selection 完成 → targets = 文本节选 + 浮评论按钮 */
+			/** 容器光标：按模式切换（挂到 CanvasCard 的 relative div 上） */
 			(0, react.useEffect)(() => {
-				if (!active) return;
-				const onSel = () => {
+				const surface = surfaceRef.current;
+				if (surface === null || !active) return;
+				const prev = {
+					cursor: surface.style.cursor,
+					userSelect: surface.style.userSelect
+				};
+				surface.style.cursor = mode === "text" ? "text" : "crosshair";
+				surface.style.userSelect = mode === "text" ? "text" : "none";
+				return () => {
+					surface.style.cursor = prev.cursor;
+					surface.style.userSelect = prev.userSelect;
+				};
+			}, [
+				active,
+				mode,
+				surfaceRef
+			]);
+			/** 文本模式：selection 完成 → targets + 弹评注框 */
+			(0, react.useEffect)(() => {
+				if (!active || mode !== "text") return;
+				const onUp = () => {
 					const sel = window.getSelection();
 					if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return;
 					const range = sel.getRangeAt(0);
@@ -804,7 +820,7 @@ window.__ModuleLoader__.load({
 					const last = rects[rects.length - 1];
 					if (last === void 0) return;
 					const box = surfaceRef.current.getBoundingClientRect();
-					setTargets([{
+					setTargets((prev) => [...prev, {
 						kind: "text",
 						excerpt: text.length > 60 ? `${text.slice(0, 60)}…` : text
 					}]);
@@ -815,13 +831,140 @@ window.__ModuleLoader__.load({
 						h: 0
 					});
 				};
-				document.addEventListener("mouseup", onSel);
-				return () => document.removeEventListener("mouseup", onSel);
-			}, [active, surfaceRef]);
-			/** 收集 targets（单节点锁定/框选/文本已各自写入 setTargets）后弹评注框 */
-			const openNoteBox = (anchor) => {
-				setNoteBox(anchor);
-			};
+				document.addEventListener("mouseup", onUp);
+				return () => document.removeEventListener("mouseup", onUp);
+			}, [
+				active,
+				mode,
+				surfaceRef
+			]);
+			/** 容器级指针事件（无蒙层；active 时挂 DOM 监听器到容器 div 上——
+			*  用户反馈 5 的根因修复：事件在容器直接捕获，节点可被 hover/点选，
+			*  不再被任何覆盖层拦截） */
+			(0, react.useEffect)(() => {
+				if (!active) return;
+				const surface = surfaceRef.current;
+				if (surface === null) return;
+				const onPointerMove = (e) => {
+					if (dragStart.current !== null) {
+						const box = surface.getBoundingClientRect();
+						setDraftRect({
+							x: dragStart.current.x,
+							y: dragStart.current.y,
+							w: e.clientX - box.left - dragStart.current.x,
+							h: e.clientY - box.top - dragStart.current.y
+						});
+						setHoveredId(null);
+						return;
+					}
+					if (mode === "pick") {
+						const hit = hitNode(surface, e.clientX, e.clientY);
+						setHoveredId(hit?.id ?? null);
+					}
+				};
+				const onPointerDown = (e) => {
+					if (e.button !== 0) return;
+					if (mode === "pick") {
+						const hit = hitNode(surface, e.clientX, e.clientY);
+						if (hit !== null) {
+							const node = nodeById.get(hit.id);
+							if (node !== void 0) {
+								setTargets((prev) => [...prev, {
+									kind: "node",
+									id: hit.id,
+									label: nodeLabelOf(node)
+								}]);
+								const box = surface.getBoundingClientRect();
+								setNoteBox({
+									x: hit.rect.right - box.left,
+									y: hit.rect.top - box.top,
+									w: 320,
+									h: 0
+								});
+							}
+						}
+						return;
+					}
+					if (mode === "box") {
+						const box = surface.getBoundingClientRect();
+						dragStart.current = {
+							x: e.clientX - box.left,
+							y: e.clientY - box.top
+						};
+						setDraftRect({
+							x: e.clientX - box.left,
+							y: e.clientY - box.top,
+							w: 0,
+							h: 0
+						});
+					}
+				};
+				const onPointerUp = (e) => {
+					const rect = draftRect;
+					dragStart.current = null;
+					setDraftRect(null);
+					if (rect === null || mode !== "box") return;
+					const n = normalizeRect(rect);
+					const box = surface.getBoundingClientRect();
+					if (n.w < 10 && n.h < 10) {
+						const hit = hitNode(surface, e.clientX, e.clientY);
+						if (hit !== null) {
+							const node = nodeById.get(hit.id);
+							if (node !== void 0) {
+								setTargets((prev) => [...prev, {
+									kind: "node",
+									id: hit.id,
+									label: nodeLabelOf(node)
+								}]);
+								setNoteBox({
+									x: hit.rect.right - box.left,
+									y: hit.rect.top - box.top,
+									w: 320,
+									h: 0
+								});
+							}
+						}
+						return;
+					}
+					const hits = [];
+					for (const el of surface.querySelectorAll("[data-canvas-node]")) {
+						const r = el.getBoundingClientRect();
+						const nx = r.left - box.left, ny = r.top - box.top;
+						if (nx < n.x + n.w && nx + r.width > n.x && ny < n.y + n.h && ny + r.height > n.y) {
+							const id = el.getAttribute("data-canvas-node");
+							const node = id !== null ? nodeById.get(id) : void 0;
+							if (node !== void 0 && id !== null) hits.push({
+								kind: "node",
+								id,
+								label: nodeLabelOf(node)
+							});
+						}
+					}
+					if (hits.length > 0) {
+						setTargets((prev) => [...prev, ...hits]);
+						setNoteBox({
+							x: n.x + n.w,
+							y: n.y,
+							w: 320,
+							h: 0
+						});
+					}
+				};
+				surface.addEventListener("pointermove", onPointerMove);
+				surface.addEventListener("pointerdown", onPointerDown);
+				surface.addEventListener("pointerup", onPointerUp);
+				return () => {
+					surface.removeEventListener("pointermove", onPointerMove);
+					surface.removeEventListener("pointerdown", onPointerDown);
+					surface.removeEventListener("pointerup", onPointerUp);
+				};
+			}, [
+				active,
+				mode,
+				surfaceRef,
+				nodeById,
+				draftRect
+			]);
 			const saveAnnotation = () => {
 				const trimmed = note.trim();
 				if (trimmed.length === 0 || targets.length === 0) return;
@@ -845,12 +988,10 @@ window.__ModuleLoader__.load({
 					navigator.clipboard?.writeText(text);
 				} catch {}
 				setTargets([]);
-				setLockedId(null);
 				setNote("");
 				setNoteBox(null);
 				setActive(false);
 			};
-			/** 评注详情卡：hover 元素角标弹出 */
 			const annForNode = (nodeId) => annotations.filter((a) => a.targets.some((t) => t.kind === "node" && t.id === nodeId));
 			if (!active) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
@@ -886,6 +1027,11 @@ window.__ModuleLoader__.load({
 					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M12 20h9" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" })]
 				}), "标注"]
 			});
+			const MODE_LABEL = {
+				pick: "点选",
+				box: "框选",
+				text: "选文本"
+			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
@@ -895,35 +1041,47 @@ window.__ModuleLoader__.load({
 						zIndex: 40,
 						display: "flex",
 						alignItems: "center",
-						gap: 6,
-						padding: "5px 8px",
+						gap: 5,
+						padding: "4px 5px",
 						borderRadius: 8,
 						background: "var(--dsw-alias-bg-layer-1, #fff)",
 						border: `1px solid ${ACCENT}`,
 						boxShadow: "0 4px 16px rgba(0,0,0,.14)"
 					},
 					children: [
+						[
+							"pick",
+							"box",
+							"text"
+						].map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							onClick: () => setMode(m),
+							style: {
+								fontSize: 10.5,
+								padding: "2px 9px",
+								borderRadius: 6,
+								cursor: "pointer",
+								fontFamily: "inherit",
+								border: mode === m ? `1px solid ${ACCENT}` : "1px solid transparent",
+								background: mode === m ? "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, transparent)" : "none",
+								color: mode === m ? ACCENT : "var(--dsw-alias-label-secondary, inherit)",
+								fontWeight: mode === m ? 600 : 400
+							},
+							children: MODE_LABEL[m]
+						}, m)),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 							style: {
 								fontSize: 10,
-								color: ACCENT,
-								fontWeight: 600
+								color: "var(--dsw-alias-label-caption, #888)",
+								padding: "0 2px"
 							},
-							children: "标注模式"
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							style: {
-								fontSize: 10,
-								color: "var(--dsw-alias-label-caption, #888)"
-							},
-							children: "点选 / 框选 / 选文本"
+							children: targets.length > 0 ? `${targets.length} 项已选` : ""
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							onClick: () => {
 								setActive(false);
 								setTargets([]);
-								setLockedId(null);
 								setNoteBox(null);
 							},
 							style: {
@@ -935,287 +1093,66 @@ window.__ModuleLoader__.load({
 								background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
 								fontFamily: "inherit"
 							},
-							children: "取消"
+							children: "退出"
 						})
 					]
 				}),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						position: "absolute",
-						inset: 0,
-						zIndex: 30,
-						background: "rgba(0,0,0,.04)",
-						cursor: "crosshair",
-						pointerEvents: "auto",
-						userSelect: "none"
-					},
-					onPointerMove: (e) => {
-						const start = dragStart.current;
-						const box = surfaceRef.current?.getBoundingClientRect();
-						if (start !== null && box !== void 0) {
-							setDraftRect({
-								x: start.x,
-								y: start.y,
-								w: e.clientX - box.left - start.x,
-								h: e.clientY - box.top - start.y
-							});
-							setHoveredId(null);
-							return;
+				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+					position: "absolute",
+					inset: 0,
+					zIndex: 30,
+					pointerEvents: "none"
+				} }),
+				mode === "pick" && hoveredId !== null && !targets.some((t) => t.kind === "node" && t.id === hoveredId) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
+					surface: surfaceRef.current,
+					nodeId: hoveredId,
+					borderStyle: "outline"
+				}) : null,
+				targets.filter((t) => t.kind === "node").map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
+					surface: surfaceRef.current,
+					nodeId: t.id,
+					borderStyle: "solid"
+				}, t.id)),
+				draftRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+					...normalizeRect(draftRect),
+					position: "absolute",
+					border: `1.5px dashed ${ACCENT}`,
+					background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
+					borderRadius: 4,
+					pointerEvents: "none",
+					zIndex: 30
+				} }) : null,
+				snapshot.canvas.nodes.map((n) => {
+					const anns = annForNode(n.id);
+					if (anns.length === 0) return null;
+					return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationBadge, {
+						surface: surfaceRef.current,
+						nodeId: n.id,
+						anns,
+						onEdit: (a) => setEditAnn(a),
+						onDelete: (a) => {
+							removeAnnotation(snapshot.canvasId, a.id);
+							setAnnotations(listAnnotations(snapshot.canvasId));
 						}
-						const surface = surfaceRef.current;
-						if (surface === null) return;
-						const hit = hitNode(surface, e.clientX, e.clientY);
-						setHoveredId(hit?.id ?? null);
-					},
-					onPointerDown: (e) => {
-						if (e.button !== 0) return;
-						const box = surfaceRef.current?.getBoundingClientRect();
-						if (box === void 0) return;
-						dragStart.current = {
-							x: e.clientX - box.left,
-							y: e.clientY - box.top
-						};
-						setDraftRect({
-							x: e.clientX - box.left,
-							y: e.clientY - box.top,
-							w: 0,
-							h: 0
-						});
-					},
-					onPointerUp: () => {
-						const rect = draftRect;
-						dragStart.current = null;
-						setDraftRect(null);
-						if (rect === null) return;
-						const n = normalizeRect(rect);
-						if (n.w < 10 && n.h < 10) {
-							const surface = surfaceRef.current;
-							if (surface === null) return;
-							const box = surface.getBoundingClientRect();
-							const hit = hitNode(surface, box.left + n.x, box.top + n.y);
-							if (hit !== null) {
-								const node = nodeById.get(hit.id);
-								if (node !== void 0) {
-									setLockedId(hit.id);
-									setTargets([{
-										kind: "node",
-										id: hit.id,
-										label: nodeLabelOf(node)
-									}]);
-									const box = surface.getBoundingClientRect();
-									openNoteBox({
-										x: hit.rect.right - box.left,
-										y: hit.rect.top - box.top,
-										w: 320,
-										h: 0
-									});
-								}
-							}
-							return;
-						}
-						const surface = surfaceRef.current;
-						if (surface === null) return;
-						const box = surface.getBoundingClientRect();
-						const hits = [];
-						for (const el of surface.querySelectorAll("[data-canvas-node]")) {
-							const r = el.getBoundingClientRect();
-							const nx = r.left - box.left, ny = r.top - box.top;
-							if (nx < n.x + n.w && nx + r.width > n.x && ny < n.y + n.h && ny + r.height > n.y) {
-								const id = el.getAttribute("data-canvas-node");
-								const node = id !== null ? nodeById.get(id) : void 0;
-								if (node !== void 0 && id !== null) hits.push({
-									kind: "node",
-									id,
-									label: nodeLabelOf(node)
-								});
-							}
-						}
-						if (hits.length > 0) {
-							setTargets(hits);
-							setLockedId(null);
-							openNoteBox({
-								x: n.x + n.w,
-								y: n.y,
-								w: 320,
-								h: 0
-							});
-						}
-					},
-					children: [
-						draftRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-							...normalizeRect(draftRect),
-							position: "absolute",
-							border: `1.5px dashed ${ACCENT}`,
-							background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
-							borderRadius: 4,
-							pointerEvents: "none"
-						} }) : null,
-						hoveredId !== null && hoveredId !== lockedId && !targets.some((t) => t.kind === "node" && t.id === hoveredId) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
-							surface: surfaceRef.current,
-							nodeId: hoveredId,
-							borderStyle: "outline"
-						}) : null,
-						targets.filter((t) => t.kind === "node").map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
-							surface: surfaceRef.current,
-							nodeId: t.id,
-							borderStyle: "solid"
-						}, t.id)),
-						snapshot.canvas.nodes.map((n) => {
-							const anns = annForNode(n.id);
-							if (anns.length === 0) return null;
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationBadge, {
-								surface: surfaceRef.current,
-								nodeId: n.id,
-								anns,
-								onEdit: (a) => setEditAnn(a),
-								onDelete: (a) => {
-									removeAnnotation(snapshot.canvasId, a.id);
-									setAnnotations(listAnnotations(snapshot.canvasId));
-								}
-							}, n.id);
-						})
-					]
+					}, n.id);
 				}),
-				noteBox !== null && targets.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						position: "absolute",
-						left: Math.max(8, Math.min(noteBox.x - 320, (surfaceRef.current?.getBoundingClientRect().width ?? 400) - 340)),
-						top: noteBox.y,
-						zIndex: 50,
-						width: 320,
-						display: "flex",
-						flexDirection: "column",
-						gap: 7,
-						padding: "10px 12px",
-						borderRadius: 10,
-						background: "var(--dsw-alias-bg-layer-1, #fff)",
-						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-						boxShadow: "0 8px 28px rgba(0,0,0,.2)"
+				noteBox !== null && targets.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NoteBoxPopover, {
+					anchor: noteBox,
+					surface: surfaceRef.current,
+					targets,
+					note,
+					setNote,
+					onRemoveTarget: (i) => setTargets((prev) => prev.filter((_, j) => j !== i)),
+					onCancel: () => {
+						setNoteBox(null);
+						setNote("");
 					},
-					children: [
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: {
-								display: "flex",
-								flexWrap: "wrap",
-								gap: 5
-							},
-							children: targets.map((t, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-								style: {
-									display: "inline-flex",
-									alignItems: "center",
-									gap: 4,
-									fontSize: 10,
-									padding: "1.5px 7px",
-									borderRadius: 5,
-									background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
-									color: ACCENT,
-									maxWidth: "100%",
-									overflow: "hidden",
-									textOverflow: "ellipsis",
-									whiteSpace: "nowrap"
-								},
-								children: [t.kind === "node" ? `${t.id} ${t.label}` : `文本 "${t.excerpt}"`, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => setTargets((prev) => prev.filter((_, j) => j !== i)),
-									style: {
-										border: 0,
-										background: "none",
-										cursor: "pointer",
-										padding: 0,
-										color: "inherit",
-										fontSize: 11,
-										lineHeight: 1
-									},
-									children: "×"
-								})]
-							}, i))
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-							style: {
-								display: "flex",
-								gap: 5,
-								flexWrap: "wrap"
-							},
-							children: QUICK_PHRASES.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => setNote((cur) => cur.length > 0 ? `${cur}；${p}` : p),
-								style: {
-									fontSize: 10,
-									padding: "2px 8px",
-									borderRadius: 5,
-									border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-									background: "none",
-									cursor: "pointer",
-									color: "var(--dsw-alias-label-secondary, inherit)",
-									fontFamily: "inherit"
-								},
-								children: p
-							}, p))
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-							value: note,
-							onChange: (e) => setNote(e.target.value),
-							placeholder: "添加评论…（保存后注入输入框草稿）",
-							rows: 3,
-							autoFocus: true,
-							style: {
-								fontSize: 11.5,
-								padding: "6px 8px",
-								borderRadius: 7,
-								border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-								background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
-								color: "inherit",
-								resize: "vertical",
-								fontFamily: "inherit"
-							}
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-							style: {
-								display: "flex",
-								gap: 6,
-								justifyContent: "flex-end"
-							},
-							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => {
-									setNoteBox(null);
-									setTargets([]);
-									setLockedId(null);
-									setNote("");
-								},
-								style: {
-									fontSize: 10.5,
-									padding: "3px 10px",
-									borderRadius: 6,
-									border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-									background: "none",
-									cursor: "pointer",
-									fontFamily: "inherit"
-								},
-								children: "取消"
-							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: saveAnnotation,
-								disabled: note.trim().length === 0,
-								style: {
-									fontSize: 10.5,
-									padding: "3px 12px",
-									borderRadius: 6,
-									border: 0,
-									cursor: note.trim().length > 0 ? "pointer" : "not-allowed",
-									fontFamily: "inherit",
-									color: "#fff",
-									background: note.trim().length > 0 ? ACCENT : "var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2))"
-								},
-								children: "保存"
-							})]
-						})
-					]
+					onSave: saveAnnotation
 				}) : null,
 				editAnn !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationEditPopover, {
 					ann: editAnn,
-					onSave: (note) => {
-						updateAnnotationNote(snapshot.canvasId, editAnn.id, note);
+					onSave: (n) => {
+						updateAnnotationNote(snapshot.canvasId, editAnn.id, n);
 						setAnnotations(listAnnotations(snapshot.canvasId));
 						setEditAnn(null);
 					},
@@ -1240,7 +1177,7 @@ window.__ModuleLoader__.load({
 				}) : null
 			] });
 		}
-		/** 节点高亮框（hover outline / 锁定 solid） */
+		/** 节点高亮框 */
 		function HighlightRect({ surface, nodeId, borderStyle }) {
 			if (surface === null) return null;
 			const el = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"]`);
@@ -1256,10 +1193,11 @@ window.__ModuleLoader__.load({
 				border: borderStyle === "outline" ? `2px dashed ${ACCENT}` : `2px solid ${ACCENT}`,
 				borderRadius: 8,
 				pointerEvents: "none",
+				zIndex: 30,
 				boxShadow: borderStyle === "solid" ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : "none"
 			} });
 		}
-		/** 已保存注释角标（①；hover 详情卡） */
+		/** 注释角标（①；hover 详情卡） */
 		function AnnotationBadge({ surface, nodeId, anns, onEdit, onDelete }) {
 			const [hover, setHover] = (0, react.useState)(false);
 			if (surface === null) return null;
@@ -1357,6 +1295,224 @@ window.__ModuleLoader__.load({
 						]
 					}, a.id))
 				}) : null]
+			});
+		}
+		/** 评注输入框（可拖动：snapshot 窗同款 pointer capture 手感；无快捷短语） */
+		function NoteBoxPopover({ anchor, surface, targets, note, setNote, onRemoveTarget, onCancel, onSave }) {
+			const [pos, setPos] = (0, react.useState)(() => {
+				const surfaceW = surface?.getBoundingClientRect().width ?? 400;
+				return {
+					x: Math.max(8, Math.min(anchor.x - 320, surfaceW - 340)),
+					y: anchor.y
+				};
+			});
+			const dragRef = (0, react.useRef)(null);
+			const beginDrag = (e) => {
+				if (e.button !== 0) return;
+				e.preventDefault();
+				dragRef.current = {
+					sx: e.clientX,
+					sy: e.clientY,
+					ox: pos.x,
+					oy: pos.y
+				};
+				const el = e.currentTarget;
+				try {
+					el.setPointerCapture(e.pointerId);
+				} catch {}
+				const move = (ev) => {
+					const d = dragRef.current;
+					if (d === null) return;
+					setPos({
+						x: Math.max(8, d.ox + ev.clientX - d.sx),
+						y: Math.max(8, d.oy + ev.clientY - d.sy)
+					});
+				};
+				const up = () => {
+					dragRef.current = null;
+					el.ownerDocument.defaultView?.removeEventListener("pointermove", move);
+					el.ownerDocument.defaultView?.removeEventListener("pointerup", up);
+				};
+				const view = el.ownerDocument.defaultView;
+				if (view !== null) {
+					view.addEventListener("pointermove", move);
+					view.addEventListener("pointerup", up);
+				}
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					position: "absolute",
+					left: pos.x,
+					top: pos.y,
+					zIndex: 50,
+					width: 320,
+					display: "flex",
+					flexDirection: "column",
+					gap: 7,
+					padding: "10px 12px",
+					borderRadius: 10,
+					background: "var(--dsw-alias-bg-layer-1, #fff)",
+					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+					boxShadow: "0 8px 28px rgba(0,0,0,.2)"
+				},
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						onPointerDown: beginDrag,
+						style: {
+							display: "flex",
+							alignItems: "center",
+							gap: 6,
+							cursor: "grab",
+							userSelect: "none",
+							margin: "-4px -6px 0",
+							padding: "4px 6px",
+							borderRadius: "8px 8px 0 0"
+						},
+						onPointerEnter: void 0,
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+							width: "12",
+							height: "12",
+							viewBox: "0 0 24 24",
+							fill: "none",
+							stroke: "var(--dsw-alias-label-caption, #888)",
+							strokeWidth: "2",
+							strokeLinecap: "round",
+							"aria-hidden": "true",
+							children: [
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									cx: "9",
+									cy: "5",
+									r: "1"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									cx: "9",
+									cy: "12",
+									r: "1"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									cx: "9",
+									cy: "19",
+									r: "1"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									cx: "15",
+									cy: "5",
+									r: "1"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									cx: "15",
+									cy: "12",
+									r: "1"
+								}),
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+									cx: "15",
+									cy: "19",
+									r: "1"
+								})
+							]
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								fontSize: 10,
+								color: "var(--dsw-alias-label-caption, #888)"
+							},
+							children: [
+								"添加评论（",
+								targets.length,
+								" 项）"
+							]
+						})]
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							display: "flex",
+							flexWrap: "wrap",
+							gap: 5
+						},
+						children: targets.map((t, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							style: {
+								display: "inline-flex",
+								alignItems: "center",
+								gap: 4,
+								fontSize: 10,
+								padding: "1.5px 7px",
+								borderRadius: 5,
+								background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
+								color: ACCENT,
+								maxWidth: "100%",
+								overflow: "hidden",
+								textOverflow: "ellipsis",
+								whiteSpace: "nowrap"
+							},
+							children: [t.kind === "node" ? `${t.id} ${t.label}` : `文本 "${t.excerpt}"`, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: () => onRemoveTarget(i),
+								style: {
+									border: 0,
+									background: "none",
+									cursor: "pointer",
+									padding: 0,
+									color: "inherit",
+									fontSize: 11,
+									lineHeight: 1
+								},
+								children: "×"
+							})]
+						}, i))
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+						value: note,
+						onChange: (e) => setNote(e.target.value),
+						placeholder: "添加评论…（保存后注入输入框草稿）",
+						rows: 3,
+						autoFocus: true,
+						style: {
+							fontSize: 11.5,
+							padding: "6px 8px",
+							borderRadius: 7,
+							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+							background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
+							color: "inherit",
+							resize: "vertical",
+							fontFamily: "inherit"
+						}
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							display: "flex",
+							gap: 6,
+							justifyContent: "flex-end"
+						},
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							onClick: onCancel,
+							style: {
+								fontSize: 10.5,
+								padding: "3px 10px",
+								borderRadius: 6,
+								border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+								background: "none",
+								cursor: "pointer",
+								fontFamily: "inherit"
+							},
+							children: "取消"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							onClick: onSave,
+							disabled: note.trim().length === 0,
+							style: {
+								fontSize: 10.5,
+								padding: "3px 12px",
+								borderRadius: 6,
+								border: 0,
+								cursor: note.trim().length > 0 ? "pointer" : "not-allowed",
+								fontFamily: "inherit",
+								color: "#fff",
+								background: note.trim().length > 0 ? ACCENT : "var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2))"
+							},
+							children: "保存"
+						})]
+					})
+				]
 			});
 		}
 		/** 注释编辑弹层 */
