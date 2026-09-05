@@ -70,12 +70,12 @@
 
 ### 任务
 
-- [ ] **T2.1 composer-bridge**（M0 产物转正）：`src/client/composer-bridge.ts`——定位 + 注入 + 失败降级（剪贴板提示）
-- [ ] **T2.2 AnnotationOverlay**：标注模式开关（画布头部按钮）→ 元素 hover 高亮 + 点选 / 矩形拖圈（node rect 与选框相交判定）→ 评注输入弹层（快捷短语：太小了/信息过时/这里错了/删掉）
-- [ ] **T2.3 编排注入**：targets 解析（node id → title，从 meta 内嵌快照）→ 紧凑草稿格式（`[画布标注 · title cv_xxx@rN · 选中: n1 xxx, n2 yyy]
+- [x] **T2.1 composer-bridge**（M0 产物转正）：`src/client/composer-bridge.ts`——定位 + 注入 + 失败降级（剪贴板提示）
+- [x] **T2.2 AnnotationOverlay**：标注模式开关（画布头部按钮）→ 元素 hover 高亮 + 点选 / 矩形拖圈（node rect 与选框相交判定）→ 评注输入弹层（快捷短语：太小了/信息过时/这里错了/删掉）
+- [x] **T2.3 编排注入**：targets 解析（node id → title，从 meta 内嵌快照）→ 紧凑草稿格式（`[画布标注 · title cv_xxx@rN · 选中: n1 xxx, n2 yyy]
 评注内容`）→ composer 注入
-- [ ] **T2.4 action 节点**：点击 → intent + context 编排为草稿（context 过白名单审计）→ 注入
-- [ ] **T2.5 审计端点**（`src/annotate.ts`）：`ctx.effect` 包裹 + 运行时 `ctx.inject(['webServer'])`（不入静态 inject）+ Origin/Referer 同源校验 + body schema 硬校验 + 60/min 速率限制 + `annotations.log` 追加写；端点失败不影响注入（尽力而为）
+- [x] **T2.4 action 节点**：点击 → intent + context 编排为草稿（context 过白名单审计）→ 注入
+- [x] **T2.5 审计端点**（`src/annotate.ts`）：`ctx.effect` 包裹 + 运行时 `ctx.inject(['webServer'])`（不入静态 inject）+ Origin/Referer 同源校验 + body schema 硬校验 + 60/min 速率限制 + `annotations.log` 追加写；端点失败不影响注入（尽力而为）
 - [ ] **T2.6 端到端调试**：标注→草稿→发送→Agent 响应修订画布的完整循环实测（含 streaming 中标注的时序）
 
 ### 验收（真机）
