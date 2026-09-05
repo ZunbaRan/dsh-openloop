@@ -1,0 +1,3 @@
+- insert:
+    - id: openloop-qoder-canvas
+      name: '@openloop/dsh-qoder-canvas'

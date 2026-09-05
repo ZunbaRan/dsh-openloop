@@ -12,6 +12,7 @@ const packages = [
   ['packages', 'widget'],
   ['packages', 'artifact'],
   ['packages', 'panels'],
+  ['packages', 'qoder-canvas'],
   ['packages', 'app'],
   ['packages', 'mcp-runtime'],
   ['packages', 'mcp-tools'],

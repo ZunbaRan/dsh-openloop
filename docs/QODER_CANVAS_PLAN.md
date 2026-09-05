@@ -33,26 +33,26 @@
 
 ### 任务
 
-- [ ] **T1.1 包骨架**：`packages/qoder-canvas/` 脚手架（package.json 含 `dsh.bundle.patch`、cordis.patch.yml、tsdown.config.ts host ESM + client CJS 双构建、tsconfig×2、vitest）——参照 `packages/artifact` 逐文件抄结构
-- [ ] **T1.2 DSL schema + 校验**（`src/dsl.ts`）：
+- [x] **T1.1 包骨架**：`packages/qoder-canvas/` 脚手架（package.json 含 `dsh.bundle.patch`、cordis.patch.yml、tsdown.config.ts host ESM + client CJS 双构建、tsconfig×2、vitest）——参照 `packages/artifact` 逐文件抄结构
+- [x] **T1.2 DSL schema + 校验**（`src/dsl.ts`）：
   - 10 节点类型 props schema（手写 fail-closed 校验，错误消息面向 Agent 可自修正，参照 panels `validatePanel` 风格）
   - 全部安全上限落地（nodes≤32、document≤256KB、series≤200×8、rows≤100、title≤120、href 白名单、context≤4KB 扁平对象）
   - `NODE_REGISTRY` 开放注册结构（节点集扩展性的地基，v0.1 注册仪表盘 10 节点）
-- [ ] **T1.3 storage**（`src/storage.ts`）：
+- [x] **T1.3 storage**（`src/storage.ts`）：
   - `ctx.fs.resolve` + cwd 回退链；落点 `<DSH_HOME>/profiles/<profile>/data/qoder-canvas/<workspaceKey>/cv_<id>/<rev>.json`
   - `writeText` 带 sandboxPolicy 第 5 参（漏传=静默写失败，IMPL_NOTES §3.3）
   - 不可变快照（每 rev 新文件）+ canvasId 生成（`cv_`+8 位 base32）+ workspace 隔离 + 跨 workspace 报「不存在」
-- [ ] **T1.4 canvas 工具**（`src/index.ts`）：
+- [x] **T1.4 canvas 工具**（`src/index.ts`）：
   - `defineTool`：参数 = document（必填）/ canvasId（续编）/ load（唤回续编）/ list（清单）
   - execute：校验 → 存储快照 → presentationMeta **内嵌全量快照**
   - load/list 语义按设计文档 §4.2（load=以旧画布为起点的续编，走全流程；list=纯文本清单无 meta）
-- [ ] **T1.5 client 渲染**（`src/client/`）：
+- [x] **T1.5 client 渲染**（`src/client/`）：
   - `CanvasCard.tsx`：toolview 注册（key `qoder-canvas`）+ `canvasMetaFrom(block.meta)` 容错解析
   - `CanvasSurface.tsx` + `nodes.tsx`：10 节点渲染（纯内联 style 消费 `--dsw-alias-*`，参照 RelFloatWindow 模式）；chart 用内联 SVG 手绘（不引库，对齐 show_widget 惯例）
   - `markdown` 节点极简 renderer（标题/列表/加粗/代码 span，零 HTML 解析）
   - `theme.ts`：明暗两套 token 实测
-- [ ] **T1.6 单测**：`dsl.spec.ts`（schema 合法/非法/上限/白名单矩阵）+ `storage.spec.ts`（fs seam 注入模拟，snapshot 不可变性/隔离）
-- [ ] **T1.7 check 接线**：`check-all.mjs`/`pack-all.mjs` 加包；`pnpm check` 全绿
+- [x] **T1.6 单测**：`dsl.spec.ts`（schema 合法/非法/上限/白名单矩阵）+ `storage.spec.ts`（fs seam 注入模拟，snapshot 不可变性/隔离）
+- [x] **T1.7 check 接线**：`check-all.mjs`/`pack-all.mjs` 加包；`pnpm check` 全绿
 
 ### 验收（真机）
 

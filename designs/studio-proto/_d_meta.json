@@ -1,0 +1,83 @@
+{
+  "type": "design",
+  "project": "studio-proto",
+  "description": "Studio 内容创作工作室 · OpenLoop 系统原型：验证「对话建系统」全链路（Agent 生成→数据绑定→relations 联动→看板组装→自观察回环），并做 panels-预设 / panels-自由 / artifact 三形态设计实验。排除收入记账与发布分析。设计语汇取自真实代码：dock v2-styles（--dsw-alias-*）+ panels linear 主题（--openloop-*，presets.generated.ts）+ artifact 语义 token。",
+  "designSystems": [],
+  "primaryDesignSystem": null,
+  "assets": {
+    "index": {
+      "versions": [
+        {
+          "path": "index.html",
+          "createdAt": "2026-09-05T08:20:41.616Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "data.jsx": {
+      "versions": [
+        {
+          "path": "data.jsx",
+          "createdAt": "2026-09-05T08:20:41.672Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "scene-chat.jsx": {
+      "versions": [
+        {
+          "path": "scene-chat.jsx",
+          "createdAt": "2026-09-05T08:20:41.723Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "scene-board.jsx": {
+      "versions": [
+        {
+          "path": "scene-board.jsx",
+          "createdAt": "2026-09-05T08:20:41.783Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "scene-registry.jsx": {
+      "versions": [
+        {
+          "path": "scene-registry.jsx",
+          "createdAt": "2026-09-05T08:20:41.841Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "scene-forms.jsx": {
+      "versions": [
+        {
+          "path": "scene-forms.jsx",
+          "createdAt": "2026-09-05T08:20:41.900Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "scene-topology.jsx": {
+      "versions": [
+        {
+          "path": "scene-topology.jsx",
+          "createdAt": "2026-09-05T08:20:41.957Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "app.jsx": {
+      "versions": [
+        {
+          "path": "app.jsx",
+          "createdAt": "2026-09-05T08:20:42.012Z",
+          "status": "needs-review"
+        }
+      ]
+    }
+  },
+  "createdAt": "2026-09-05T08:20:41.619Z",
+  "updatedAt": "2026-09-05T08:20:42.013Z"
+}
