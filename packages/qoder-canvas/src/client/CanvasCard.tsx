@@ -64,8 +64,8 @@ function CanvasCardInner({ snapshot }: { snapshot: CanvasSnapshot }): ReactNode 
 
   return (
     <div style={{ position: 'relative' }} ref={surfaceRef}>
-      {/* ⇱ 工作台打开（canvas dock 展开并定位该画布） */}
-      <button type="button" onClick={() => window.__openloopCanvasOpen?.(snapshot.canvasId)} title="在画布工作台打开（右侧推出栏：标注/迭代）"
+      {/* ⇱ 工作台打开（canvas dock 展开并定位该画布；传快照供工作台即时渲染） */}
+      <button type="button" onClick={() => window.__openloopCanvasOpen?.(snapshot.canvasId, snapshot)} title="在画布工作台打开（右侧推出栏：标注/迭代）"
         style={{ position: 'absolute', top: 6, right: 8, zIndex: 20, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, padding: '2px 9px', borderRadius: 6, cursor: 'pointer', color: 'var(--dsw-alias-state-business-primary, #4176e6)', background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 28%, transparent)', fontFamily: 'inherit', whiteSpace: 'nowrap' }}>
         ⇱ 工作台
       </button>

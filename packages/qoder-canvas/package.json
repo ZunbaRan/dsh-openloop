@@ -1,6 +1,6 @@
 {
   "name": "@openloop/dsh-qoder-canvas",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Agent-native canvas panels with annotation feedback loop for DeepSeek Harness (inspired by Qoder Canvas).",
   "private": true,
   "type": "module",

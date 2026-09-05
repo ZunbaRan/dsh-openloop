@@ -623,6 +623,44 @@ function setupAnnotateAudit(ctx, opts) {
 	});
 }
 //#endregion
+//#region src/read.ts
+function setupCanvasReadEndpoint(ctx, opts) {
+	const injectFn = ctx.inject;
+	if (typeof injectFn !== "function") return;
+	ctx.effect(() => {
+		let disposed = false;
+		injectFn.call(ctx, ["webServer"], (ws) => {
+			if (disposed || ws === void 0 || typeof ws.get !== "function") return;
+			ws.get("/qoder-canvas/canvas/:id", async (req) => {
+				const origin = req.request.origin ?? "";
+				const referer = req.request.referer ?? "";
+				if (!(origin === opts.origin() || origin.length === 0 && (referer.startsWith(opts.origin()) || referer.length === 0))) return {
+					status: 403,
+					body: { error: "forbidden origin" }
+				};
+				const id = req.params.id;
+				if (typeof id !== "string" || !/^cv_[a-z0-9]{8}$/.test(id)) return {
+					status: 400,
+					body: { error: "malformed canvas id" }
+				};
+				const wsKey = req.params.workspaceKey;
+				const snapshot = await opts.storageFor(typeof wsKey === "string" && wsKey.length > 0 ? wsKey : "_no-cwd").latest(id);
+				if (snapshot === null) return {
+					status: 404,
+					body: { error: "canvas not found" }
+				};
+				return {
+					status: 200,
+					body: snapshot
+				};
+			});
+		});
+		return () => {
+			disposed = true;
+		};
+	});
+}
+//#endregion
 //#region src/index.ts
 const name = "openloop-qoder-canvas";
 const inject = ["tools", "fs"];
@@ -637,6 +675,9 @@ function argsOf(args) {
 		list
 	};
 }
+/** 模块级：最近一次写入的 workspaceKey（S4 端点默认 workspace 判定——
+*  工作台与写画布的会话同 cwd，读端点缺省用它定位隔离键） */
+let lastWorkspaceKey = "_no-cwd";
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx, exec) {
 	const agent = exec.agent;
@@ -644,23 +685,33 @@ function storageOf(ctx, exec) {
 	const cwd = typeof cwdRaw === "string" ? cwdRaw : void 0;
 	const policy = ctx.get?.("sandboxPolicy")?.resolve({ ...agent ? { session: agent.session } : {} });
 	const fs = ctx.fs;
+	const wsKey = workspaceKeyOf(cwd);
+	lastWorkspaceKey = wsKey;
 	return new CanvasStorage({
 		fs,
 		policy,
-		workspaceKey: workspaceKeyOf(cwd)
+		workspaceKey: wsKey
 	});
 }
 function apply(ctx) {
+	const originOf = () => {
+		const origin = globalThis.location?.origin;
+		return typeof origin === "string" && origin.length > 0 ? origin : "http://127.0.0.1:3080";
+	};
 	setupAnnotateAudit(ctx, {
-		origin: () => {
-			const origin = globalThis.location?.origin;
-			return typeof origin === "string" && origin.length > 0 ? origin : "http://127.0.0.1:3080";
-		},
+		origin: originOf,
 		writeLog: (line) => {
 			try {
 				ctx.logger?.info?.(`[annotate] ${line}`);
 			} catch {}
 		}
+	});
+	setupCanvasReadEndpoint(ctx, {
+		origin: originOf,
+		storageFor: (workspaceKey) => new CanvasStorage({
+			fs: ctx.fs,
+			workspaceKey: workspaceKey === "_no-cwd" ? lastWorkspaceKey : workspaceKey
+		})
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",

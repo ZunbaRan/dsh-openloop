@@ -9,6 +9,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { CanvasValidationError, generateCanvasId, isValidCanvasId, validateCanvasDocument, type CanvasSnapshot } from './dsl.ts'
 import { CanvasStorage, workspaceKeyOf, type FsLike } from './storage.ts'
 import { setupAnnotateAudit } from './annotate.ts'
+import { setupCanvasReadEndpoint } from './read.ts'
 
 export * from './dsl.ts'
 export * from './storage.ts'
@@ -30,6 +31,10 @@ function argsOf(args: CanvasArgs): { document: unknown; canvasId: string | undef
   return { document: args.document, canvasId, load, list }
 }
 
+/** 模块级：最近一次写入的 workspaceKey（S4 端点默认 workspace 判定——
+ *  工作台与写画布的会话同 cwd，读端点缺省用它定位隔离键） */
+let lastWorkspaceKey = '_no-cwd'
+
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx: Context, exec: { agent?: { session?: unknown } | null; signal?: unknown }): CanvasStorage {
   const agent = exec.agent
@@ -38,21 +43,29 @@ function storageOf(ctx: Context, exec: { agent?: { session?: unknown } | null; s
   const cwd = typeof cwdRaw === 'string' ? cwdRaw : undefined
   const policy = (ctx as unknown as { get?: (name: string) => { resolve(input: unknown): unknown } | undefined }).get?.('sandboxPolicy')?.resolve({ ...(agent ? { session: agent.session } : {}) })
   const fs = (ctx as unknown as { fs: FsLike }).fs
-  return new CanvasStorage({ fs, policy, workspaceKey: workspaceKeyOf(cwd) })
+  const wsKey = workspaceKeyOf(cwd)
+  lastWorkspaceKey = wsKey
+  return new CanvasStorage({ fs, policy, workspaceKey: wsKey })
 }
 
 export function apply(ctx: Context): void {
+  const originOf = (): string => {
+    const origin = (globalThis as unknown as { location?: { origin?: string } }).location?.origin
+    return typeof origin === 'string' && origin.length > 0 ? origin : 'http://127.0.0.1:3080'
+  }
   // M2 T2.5：标注审计端点（尽力而为；webServer 运行时注入，headless 静默降级）
   setupAnnotateAudit(ctx, {
-    origin: () => {
-      const origin = (globalThis as unknown as { location?: { origin?: string } }).location?.origin
-      return typeof origin === 'string' && origin.length > 0 ? origin : 'http://127.0.0.1:3080'
-    },
+    origin: originOf,
     writeLog: (line) => {
       try {
         ctx.logger?.info?.(`[annotate] ${line}`)
       } catch { /* 审计尽力而为 */ }
     },
+  })
+  // S4：画布真身拉取端点（GET /qoder-canvas/canvas/:id；缺省 workspace 用最近写入的隔离键）
+  setupCanvasReadEndpoint(ctx, {
+    origin: originOf,
+    storageFor: (workspaceKey) => new CanvasStorage({ fs: (ctx as unknown as { fs: import('./storage.ts').FsLike }).fs, workspaceKey: workspaceKey === '_no-cwd' ? lastWorkspaceKey : workspaceKey }),
   })
   ctx.tools.register(defineTool({
     name: 'canvas',
