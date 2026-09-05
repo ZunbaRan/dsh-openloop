@@ -12,12 +12,12 @@
 
 ### 任务
 
-- [ ] **T0.1 composer 定位验证**：在 3080 真机（agent-browser）确认 `[data-composer-input="true"]` 选择器稳定可达；记录 0.1.2 的 composer DOM 结构快照（contenteditable div / aria 属性 / data-phase）留档
-- [ ] **T0.2 注入方案验证**：三种手段实测对比——
+- [x] **T0.1 composer 定位验证**：在 3080 真机（agent-browser）确认 `[data-composer-input="true"]` 选择器稳定可达；记录 0.1.2 的 composer DOM 结构快照（contenteditable div / aria 属性 / data-phase）留档
+- [x] **T0.2 注入方案验证**：三种手段实测对比——
   1. 原生 InputEvent 派发（`new InputEvent('input', {bubbles:true})` 前先 `document.execCommand('insertText')`——Lexical 编辑器常用路径，composer 疑似 Lexical：DOM 里有 `data-lexical-editor="true"`）
   2. 直接 `textContent` 拼接 + input 事件派发（兜底）
   3. 检索 DSH 0.1.2 是否暴露 composer 公开 API（`window.__dsh*`、composer slot 的 context 暴露）——有则优先
-- [ ] **T0.3 webServer 运行时 inject 验证**：headless profile 下 `ctx.inject(['webServer'], ...)` 失败静默降级是否如 panels 0.1.7 事故记录那样工作
+- [x] **T0.3 webServer 运行时 inject 验证**：headless profile 下 `ctx.inject(['webServer'], ...)` 失败静默降级是否如 panels 0.1.7 事故记录那样工作
 - [ ] **产出**：`composer-bridge.ts` 技术选型注释 + 骨架代码（选型结论写死在文件头），M2 直接用
 
 ### 验收
