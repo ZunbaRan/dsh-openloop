@@ -32,7 +32,7 @@ function SceneChat() {
           <div className="who">DSH Agent</div>
           <div className="bubble">
             <div className="tool-line"><span className="tname">app_backend</span><span>create_collections → ideas / drafts / assets / calendar · 5 集合已建（幂等）</span></div>
-            <div className="tool-line"><span className="tname">app_backend</span><span>register_api → studio:ideas … studio:events · 5 个 API 资源</span></div>
+            <div className="tool-line"><span className="tname">app_backend</span><span>register_api → 10 个 API 资源（5 集合 CRUD + tags/platforms 查询 + pipeline-stats/overview 聚合 + idea-actions 动作）</span></div>
             <div className="tool-line"><span className="tname">panel</span><span>生成「想法库」data-table 预设 · 数据绑定 studio:ideas（服务端注入，面板零网络）</span></div>
             <div style={{ marginTop: 6 }}>骨架好了。想法库带状态机（候选/采中/搁置/归档），行内可以直接轻操作——点一行能看到它名下的稿件，不用等我：</div>
           </div>

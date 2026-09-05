@@ -103,8 +103,17 @@
           "status": "needs-review"
         }
       ]
+    },
+    "BUILD-PROMPT.md": {
+      "versions": [
+        {
+          "path": "BUILD-PROMPT.md",
+          "createdAt": "2026-09-05T10:13:29.900Z",
+          "status": "needs-review"
+        }
+      ]
     }
   },
   "createdAt": "2026-09-05T08:20:41.619Z",
-  "updatedAt": "2026-09-05T09:33:33.367Z"
+  "updatedAt": "2026-09-05T10:13:30.163Z"
 }

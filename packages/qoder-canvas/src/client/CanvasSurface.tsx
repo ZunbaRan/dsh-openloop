@@ -243,14 +243,13 @@ function SectionNode({ node, children }: { node: CanvasNode; children: ReactNode
   )
 }
 
-function ActionNode({ props }: { props: Record<string, unknown> }): ReactNode {
-  // M1：渲染为静态按钮（M2 接 composer-bridge 回传）
+function ActionNode({ props, onClick }: { props: Record<string, unknown>; onClick: () => void }): ReactNode {
   return (
     <button
       type="button"
-      disabled
-      title="M2 将启用：点击注入上下文草稿"
-      style={{ ...nodeBase(), cursor: 'not-allowed', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-business-primary, #4176e6)', background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 30%, transparent)' }}
+      onClick={onClick}
+      title="点击把此动作的意图与上下文注入输入框草稿"
+      style={{ ...nodeBase(), cursor: 'pointer', textAlign: 'center', fontSize: 12, fontWeight: 600, color: 'var(--dsw-alias-state-business-primary, #4176e6)', background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)', borderColor: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 30%, transparent)' }}
     >
       {String(props.label ?? 'Action')}
     </button>
@@ -266,7 +265,7 @@ function LinkNode({ props }: { props: Record<string, unknown> }): ReactNode {
   )
 }
 
-function NodeRenderer({ node }: { node: CanvasNode }): ReactNode {
+function NodeRenderer({ node, onAction }: { node: CanvasNode; onAction: ((node: CanvasNode) => void) | undefined }): ReactNode {
   const props = node.props as Record<string, unknown>
   switch (node.type) {
     case 'stat-card': return <StatCardNode props={props} />
@@ -275,7 +274,7 @@ function NodeRenderer({ node }: { node: CanvasNode }): ReactNode {
     case 'key-value': return <KeyValueNode props={props} />
     case 'markdown': return <MarkdownNode props={props} />
     case 'callout': return <CalloutNode props={props} />
-    case 'action': return <ActionNode props={props} />
+    case 'action': return <ActionNode props={props} onClick={() => onAction?.(node) } />
     case 'link': return <LinkNode props={props} />
     case 'section': return <SectionNode node={node}>{null}</SectionNode>
     case 'panel': return <div style={nodeBase()} /> // 占位：v0.1 不支持嵌套
@@ -285,7 +284,7 @@ function NodeRenderer({ node }: { node: CanvasNode }): ReactNode {
 
 // ---- 主渲染 ----
 
-export function CanvasSurface({ snapshot }: { snapshot: CanvasSnapshot }): ReactNode {
+export function CanvasSurface({ snapshot, onAction }: { snapshot: CanvasSnapshot; onAction?: (node: CanvasNode) => void }): ReactNode {
   const { canvas } = snapshot
   const sectionNodes = canvas.nodes.filter(n => n.type === 'section')
   const plainNodes = canvas.nodes.filter(n => n.type !== 'section')
@@ -296,11 +295,19 @@ export function CanvasSurface({ snapshot }: { snapshot: CanvasSnapshot }): React
         <span style={{ fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--dsw-alias-label-caption, #888)' }}>{snapshot.canvasId}@r{snapshot.revision}</span>
       </header>
       <div style={layoutStyle(canvas.layout, canvas.nodes.length)}>
-        {plainNodes.map(n => <NodeRenderer key={n.id} node={n} />)}
+        {plainNodes.map(n => (
+          <div key={n.id} data-canvas-node={n.id} style={{ display: 'contents' }}>
+            <NodeRenderer node={n} onAction={onAction} />
+          </div>
+        ))}
       </div>
       {sectionNodes.length > 0 ? (
         <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {sectionNodes.map(n => <SectionNode key={n.id} node={n}>{null}</SectionNode>)}
+          {sectionNodes.map(n => (
+            <div key={n.id} data-canvas-node={n.id}>
+              <SectionNode node={n}>{null}</SectionNode>
+            </div>
+          ))}
         </div>
       ) : null}
     </section>

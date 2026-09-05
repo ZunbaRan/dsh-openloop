@@ -109,16 +109,20 @@ const STUDIO_RESOURCES = [
   { rid: 'studio:idea-create', name: '新建想法', kind: 'panel', desc: 'form 预设族 · 校验 fail-closed', emits: 'studio:idea:created' },
   { rid: 'studio:idea-edit', name: '编辑想法', kind: 'panel', desc: 'form 预设族 · 独立编辑组件，consumes idea:edit', emits: 'studio:idea:updated' },
   { rid: 'studio:draft-edit', name: '编辑稿件', kind: 'panel', desc: 'form 预设族 · 独立编辑组件，consumes draft:edit', emits: 'studio:draft:updated' },
-  { rid: 'studio:publish-preview', name: '多平台发布预览', kind: 'artifact', desc: 'scripts 档 · 平台卡片仿真（预设表达不了）', emits: null },
-  { rid: 'studio:teleprompter', name: '提词器', kind: 'artifact', desc: 'scripts 档 · 整页大字自滚动（视频创作者刚需）', emits: null },
 ]
 
+/** API 资源（10 个）：5 集合 CRUD + 2 配置查询 + 2 聚合 + 1 动作——每个组件的数据绑定都能指到具体一个 */
 const STUDIO_APIS = [
-  { rid: 'studio:ideas', path: '/openloop/app/collections/ideas/records', method: 'GET' },
-  { rid: 'studio:drafts', path: '/openloop/app/collections/drafts/records', method: 'GET · POST' },
-  { rid: 'studio:assets', path: '/openloop/app/collections/assets/records', method: 'GET · POST' },
-  { rid: 'studio:calendar', path: '/openloop/app/collections/calendar/records', method: 'GET' },
-  { rid: 'studio:events', path: '/openloop/app/events', method: 'GET' },
+  { rid: 'studio:ideas', path: '/openloop/app/collections/ideas/records', method: 'GET · POST', desc: '?status=&tag=&heat_gte= · idea-bank / idea-detail 数据源' },
+  { rid: 'studio:drafts', path: '/openloop/app/collections/drafts/records', method: 'GET · POST', desc: '?ideaId=&stage=&date= · relations 三参数取数通道' },
+  { rid: 'studio:assets', path: '/openloop/app/collections/assets/records', method: 'GET · POST', desc: '?q=&kind= · 素材搜索栏的后端' },
+  { rid: 'studio:calendar', path: '/openloop/app/collections/calendar/records', method: 'GET · POST', desc: '?week= · POST = 改期写操作' },
+  { rid: 'studio:events', path: '/openloop/app/events', method: 'GET', desc: '只读 · 系统自写 · event-log 数据源' },
+  { rid: 'studio:tags', path: '/openloop/app/studio/tags', method: 'GET', desc: '标签聚合 · 筛选 chips 与表单 options 数据源' },
+  { rid: 'studio:platforms', path: '/openloop/app/studio/platforms', method: 'GET', desc: '平台配置 · 表单 select options 数据源' },
+  { rid: 'studio:pipeline-stats', path: '/openloop/app/studio/pipeline-stats', method: 'GET', desc: '阶段计数 + 滞留聚合 · 管线瓶颈监测数据源' },
+  { rid: 'studio:overview', path: '/openloop/app/studio/overview', method: 'GET', desc: '本周概览聚合 · metric-grid 数据源' },
+  { rid: 'studio:idea-actions', path: '/openloop/app/studio/ideas/:id/action', method: 'POST', desc: 'pick / hold / revive / archive / promote / bulk · 状态流转与批量' },
 ]
 
 // ---------------- 共享渲染件（panels 预设语法 mock） ----------------

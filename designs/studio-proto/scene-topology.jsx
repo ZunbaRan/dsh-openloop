@@ -3,7 +3,7 @@
 const TOPO_NODES = [
   { id: 'user', cls: 'user', x: 50, y: 4, cx: true, t: '👤 阿洛', d: '拖拽组装自己的工作台', status: 'ok' },
   { id: 'dsh', cls: 'hub', x: 50, y: 16, cx: true, t: 'DSH 宿主', d: 'Agent Native 产品底座', status: 'ok' },
-  { id: 'studio', cls: 'hub', x: 50, y: 34, cx: true, t: 'studio APP', d: '14 组件 · 5 API · local', status: 'ok' },
+  { id: 'studio', cls: 'hub', x: 50, y: 34, cx: true, t: 'studio APP', d: '12 组件 · 10 API · local', status: 'ok' },
   { id: 'ideas', cls: '', x: 7, y: 58, t: '想法库', d: 'studio:idea-bank · data-table', status: 'ok' },
   { id: 'pipeline', cls: '', x: 25, y: 58, t: '创作管线', d: 'studio:pipeline-flow · flow · ⚠审核滞留', status: 'warn' },
   { id: 'calendar', cls: '', x: 43, y: 58, t: '排期日历', d: 'studio:calendar · timeline', status: 'ok' },

@@ -8,6 +8,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { CanvasValidationError, generateCanvasId, isValidCanvasId, validateCanvasDocument, type CanvasSnapshot } from './dsl.ts'
 import { CanvasStorage, workspaceKeyOf, type FsLike } from './storage.ts'
+import { setupAnnotateAudit } from './annotate.ts'
 
 export * from './dsl.ts'
 export * from './storage.ts'
@@ -41,6 +42,18 @@ function storageOf(ctx: Context, exec: { agent?: { session?: unknown } | null; s
 }
 
 export function apply(ctx: Context): void {
+  // M2 T2.5：标注审计端点（尽力而为；webServer 运行时注入，headless 静默降级）
+  setupAnnotateAudit(ctx, {
+    origin: () => {
+      const origin = (globalThis as unknown as { location?: { origin?: string } }).location?.origin
+      return typeof origin === 'string' && origin.length > 0 ? origin : 'http://127.0.0.1:3080'
+    },
+    writeLog: (line) => {
+      try {
+        ctx.logger?.info?.(`[annotate] ${line}`)
+      } catch { /* 审计尽力而为 */ }
+    },
+  })
   ctx.tools.register(defineTool({
     name: 'canvas',
     description: 'Render a visual canvas panel (dashboard-style layout of stat cards, charts, tables, callouts, action buttons) in the conversation. Use for: analysis reports, deployment/QA dashboards, structured findings. Iterate the same canvas by passing canvasId from the previous result. Prefer this over raw HTML for structured data views; prefer show_widget for tiny single-metric cards.',

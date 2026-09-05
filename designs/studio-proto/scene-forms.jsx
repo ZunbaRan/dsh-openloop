@@ -114,7 +114,7 @@ function SceneForms() {
               </div>
             </div>
           </div>
-          <div className="gap-note">品牌感最强、信息架构最自由；代价是放弃预设契约与复用，且要写自有样式。</div>
+          <div className="gap-note">品牌感最强、信息架构最自由；代价是放弃预设契约与复用，且要写自有样式。<b>教训</b>：判断标准必须是「预设原理上表达不了」——多平台发布预览、提词器曾被论证进本系统，后被判定为凑需求砍掉；本系统 artifact 仅 system-map。</div>
         </div>
       </div>
 

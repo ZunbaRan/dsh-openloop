@@ -1,11 +1,14 @@
 /**
- * CanvasCard：toolview 卡片（M1）。
- * 读 block.meta（presentationMeta 内嵌的扁平快照：{ kind, version, canvasId, revision, canvas }）
- * → CanvasSurface 渲染。M2 将在此挂 AnnotationOverlay（标注回流）。
+ * CanvasCard：toolview 卡片（M1+M2）。
+ * 读 block.meta（presentationMeta 内嵌的扁平快照）→ CanvasSurface 渲染 +
+ * AnnotationOverlay（标注回流：圈选评注→composer 草稿注入）。
  */
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import { useRef, useState, type ReactNode } from 'react'
 import type { CanvasSnapshot } from '../dsl.ts'
 import { CanvasSurface } from './CanvasSurface.tsx'
+import { AnnotationOverlay, formatAnnotationDraft } from './AnnotationOverlay.tsx'
+import { injectComposerDraft } from './composer-bridge.ts'
 
 const captionStyle = { color: 'var(--dsw-alias-label-caption, #888)', fontSize: 12 } as const
 
@@ -29,10 +32,46 @@ export function CanvasCard({ block }: ToolCallViewProps) {
   if (block.isError) return <div style={captionStyle}>Canvas · failed</div>
   const meta = canvasMetaFrom(block.meta)
   if (!meta) return <div style={captionStyle}>Canvas · metadata unavailable</div>
+  return <CanvasCardInner snapshot={meta} />
+}
+
+/** 有状态内层（hooks 不能在早退之后——block 校验先走完） */
+function CanvasCardInner({ snapshot }: { snapshot: CanvasSnapshot }): ReactNode {
+  const surfaceRef = useRef<HTMLDivElement | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
+
+  const showToast = (msg: string): void => {
+    setToast(msg)
+    setTimeout(() => { setToast(cur => cur === msg ? null : cur) }, 2400)
+  }
+
+  /** action 节点回传（AnnotationOverlay 之外的第三入口）：intent+context 编排注入 */
+  const onAction = (node: { id: string; props: Readonly<Record<string, unknown>> }): void => {
+    const intent = typeof node.props.intent === 'string' ? node.props.intent : ''
+    const label = typeof node.props.label === 'string' ? node.props.label : 'action'
+    const context = node.props.context
+    const ctxText = typeof context === 'object' && context !== null
+      ? Object.entries(context as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).slice(0, 6).join(', ')
+      : ''
+    const text = formatAnnotationDraft(snapshot, {
+      targets: [{ id: node.id, label }],
+      note: `执行动作：${intent}${ctxText.length > 0 ? `（${ctxText}）` : ''}`,
+    })
+    const ok = injectComposerDraft(text)
+    showToast(ok ? `「${label}」已注入输入框草稿——可编辑后发送` : `「${label}」注入失败，已复制到剪贴板`)
+    if (!ok) { try { void navigator.clipboard?.writeText(text) } catch { /* 不可用 */ } }
+  }
+
   return (
-    <div style={{ position: 'relative' }}>
-      <CanvasSurface snapshot={meta} />
-      {/* M2: AnnotationOverlay 挂载点 */}
+    <div style={{ position: 'relative' }} ref={surfaceRef}>
+      <CanvasSurface snapshot={snapshot} onAction={onAction} />
+      <AnnotationOverlay snapshot={snapshot} containerRef={surfaceRef} />
+      {toast !== null ? (
+        <div style={{ position: 'absolute', top: -30, left: '50%', transform: 'translateX(-50%)', zIndex: 70, fontSize: 10.5, padding: '5px 12px', borderRadius: 7, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))', boxShadow: '0 4px 14px rgba(0,0,0,.14)', whiteSpace: 'nowrap' }}>
+          {toast}
+        </div>
+      ) : null}
     </div>
   )
 }
+

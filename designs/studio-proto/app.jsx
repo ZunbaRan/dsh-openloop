@@ -50,14 +50,6 @@ const SCENES = [
     ],
   },
   {
-    id: 'artifact', t: '⑧ artifact 价值场', d: '发布预览 + 提词器：预设原理上给不了的整页',
-    anno: [
-      ['kw', 'publish-preview', '多平台卡片仿真：标题输入 → 三平台卡片即时联动，一稿多投前最后一眼'],
-      ['kw', 'teleprompter', '提词器：整页大字自滚动，阅读型设备页——视频创作者刚需'],
-      ['k', 'rule', '判断标准：不是「想要好看整页」，而是「预设契约原理上表达不了」'],
-    ],
-  },
-  {
     id: 'topo', t: '⑦ 拓扑 · 系统自观察', d: 'system-map 全页 + 事件/用量元数据带',
     anno: [
       ['kw', 'artifact', 'network 档整页拓扑，节点可拖拽，openloop.fetch 取数'],
@@ -103,7 +95,7 @@ function App() {
             <b>查漏补缺</b>（设计时补进原列举的）：写操作入口 · 错误态/降级态 · 空态开场 · 素材搜索 · 来源徽标 · rid 露出 · 页面四面（⑤）· <b>编辑五模式 + form 预设族（⑤⑥）</b>
           </div>
           <div className="gap-note">
-            未覆盖（用户拍板排除）：收入记账 · 发布分析（funnel/chart 留给后续迭代）
+            未覆盖（用户拍板排除）：收入记账 · 发布分析。已砍：多平台发布预览 · 提词器（论证为凑 artifact 需求，不真实）——本系统 artifact 仅 system-map
           </div>
         </div>
 
@@ -115,7 +107,6 @@ function App() {
             {scene === 'forms' ? <SceneForms /> : null}
             {scene === 'detail' ? <SceneDetail /> : null}
             {scene === 'edit' ? <SceneEdit /> : null}
-            {scene === 'artifact' ? <SceneArtifact /> : null}
             {scene === 'topo' ? <SceneTopology /> : null}
           </div>
           <div className="anno-bar">

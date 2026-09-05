@@ -2,7 +2,7 @@
 
 const REG_APPS = [
   { id: 'openloop', name: 'openloop', kind: 'builtin', sub: '43 预设 · 自管理四件套', dot: 'ok' },
-  { id: 'studio', name: 'studio', kind: 'local', sub: '14 组件 · 5 API · 本地后端', dot: 'ok' },
+  { id: 'studio', name: 'studio', kind: 'local', sub: '12 组件 · 10 API · 本地后端', dot: 'ok' },
   { id: 'excalidraw', name: 'excalidraw', kind: 'thirdparty', sub: 'MCP Apps 2.0 · 4 工具', dot: 'ok' },
   { id: 'tldraw', name: 'tldraw', kind: 'thirdparty', sub: '不可达 · 惰性重连中', dot: 'off' },
 ]
@@ -84,34 +84,6 @@ function RegistryPreview({ rid }) {
       </div>
     )
   }
-  if (rid === 'studio:publish-preview') {
-    return (
-      <div className="pf-row">
-        <div className="pf-card">
-          <div className="pf-cover" style={{ background: '#1f3a5f' }}><span className="t">我用 DSH 搭了个工作室</span></div>
-          <div className="pf-meta"><div className="pf1">视频号 · 竖版卡片</div><div className="pf2">封面 9:16 · 标题 2 行截断</div></div>
-        </div>
-        <div className="pf-card">
-          <div className="pf-cover" style={{ background: '#4a2d52' }}><span className="t">我用 DSH 搭了个工作室</span></div>
-          <div className="pf-meta"><div className="pf1">B站 · 横版卡片</div><div className="pf2">封面 16:9 · 时长角标</div></div>
-        </div>
-        <div className="pf-card">
-          <div className="pf-cover" style={{ background: '#5f2d2d' }}><span className="t">我用 DSH 搭了个工作室</span></div>
-          <div className="pf-meta"><div className="pf1">小红书 · 笔记卡片</div><div className="pf2">封面 3:4 · 标题压图</div></div>
-        </div>
-      </div>
-    )
-  }
-  if (rid === 'studio:teleprompter') {
-    return (
-      <div className="tp-mock">
-        <span className="tp-hint">▸ 播放中 · 1.0×</span>
-        <div className="tp-line dim">开场三秒，我只问一个问题：</div>
-        <div className="tp-line mid">你的内容管线，还在五个软件之间来回搬吗？</div>
-        <div className="tp-line">这个工作室，是我用对话搭出来的。</div>
-      </div>
-    )
-  }
   // data-table 类默认
   return (
     <DataTableMock compact
@@ -182,7 +154,7 @@ function SceneRegistry() {
                   ) : null}
                 </button>
               ))}
-              <div className="reg-head" style={{ padding: '10px 4px 2px' }}><span>API APIS</span></div>
+              <div className="reg-head" style={{ padding: '10px 4px 2px' }}><span>API APIS（{STUDIO_APIS.length}）</span></div>
               {STUDIO_APIS.map((a) => (
                 <div key={a.rid} className="res-row" style={{ cursor: 'default' }}>
                   <span className="r-top">
@@ -190,8 +162,17 @@ function SceneRegistry() {
                     <span className="r-kind">{a.method}</span>
                   </span>
                   <span className="r-rid">{a.path}</span>
+                  <span className="r-rid" style={{ fontFamily: 'inherit' }}>{a.desc}</span>
                 </div>
               ))}
+              <div className="reg-head" style={{ padding: '10px 4px 2px' }}><span>SKILL 唤起规则</span></div>
+              <div className="res-row" style={{ cursor: 'default' }}>
+                <span className="r-top">
+                  <span className="r-name">studio:skill</span>
+                  <span className="r-kind">skill.md</span>
+                </span>
+                <span className="r-rid" style={{ fontFamily: 'inherit', lineHeight: 1.5 }}>选题/管线/排期/素材请求 → 唤起对应读组件；改数据 → 唤起写组件（edit/create）；「工作室怎么样」→ system-overview + event-log</span>
+              </div>
             </React.Fragment>
           ) : (
             <div className="ol-meta" style={{ padding: 14 }}>

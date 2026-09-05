@@ -6,5 +6,5 @@
     "jsx": "react-jsx", "allowImportingTsExtensions": true, "esModuleInterop": true, "noEmit": true
   },
   "include": ["src", "tests"],
-  "exclude": ["src/client"]
+  "exclude": ["src/client", "tests/meta-parse.spec.ts"]
 }

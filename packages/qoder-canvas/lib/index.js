@@ -567,6 +567,62 @@ var CanvasStorage = class {
 	}
 };
 //#endregion
+//#region src/annotate.ts
+const RATE_LIMIT_PER_MINUTE = 60;
+function setupAnnotateAudit(ctx, opts) {
+	const injectFn = ctx.inject;
+	if (typeof injectFn !== "function") return;
+	ctx.effect(() => {
+		let disposed = false;
+		injectFn.call(ctx, ["webServer"], (ws) => {
+			if (disposed || ws === void 0 || typeof ws.post !== "function") return;
+			const hits = /* @__PURE__ */ new Map();
+			const rateLimited = (key) => {
+				const now = Date.now();
+				const window = (hits.get(key) ?? []).filter((t) => now - t < 6e4);
+				if (window.length >= RATE_LIMIT_PER_MINUTE) return true;
+				window.push(now);
+				hits.set(key, window);
+				return false;
+			};
+			ws.post("/qoder-canvas/annotate", async (req) => {
+				const origin = req.request.origin ?? "";
+				const referer = req.request.referer ?? "";
+				if (!(origin === opts.origin() || origin.length === 0 && (referer.startsWith(opts.origin()) || referer.length === 0))) return {
+					status: 403,
+					body: { error: "forbidden origin" }
+				};
+				const body = req.body;
+				if (typeof body?.canvasId !== "string" || !/^cv_[a-z0-9]{8}$/.test(body.canvasId) || typeof body?.note !== "string" || body.note.length === 0 || body.note.length > 2e3 || !Array.isArray(body?.targets) || body.targets.length > 32 || !body.targets.every((t) => typeof t === "string" && t.length <= 32)) return {
+					status: 400,
+					body: { error: "invalid annotation payload" }
+				};
+				if (rateLimited(body.canvasId)) return {
+					status: 429,
+					body: { error: "rate limited" }
+				};
+				const line = JSON.stringify({
+					at: (/* @__PURE__ */ new Date()).toISOString(),
+					canvasId: body.canvasId,
+					revision: typeof body.revision === "number" ? body.revision : null,
+					targets: body.targets,
+					note: body.note
+				});
+				try {
+					opts.writeLog(line);
+				} catch {}
+				return {
+					status: 200,
+					body: { ok: true }
+				};
+			});
+		});
+		return () => {
+			disposed = true;
+		};
+	});
+}
+//#endregion
 //#region src/index.ts
 const name = "openloop-qoder-canvas";
 const inject = ["tools", "fs"];
@@ -595,6 +651,17 @@ function storageOf(ctx, exec) {
 	});
 }
 function apply(ctx) {
+	setupAnnotateAudit(ctx, {
+		origin: () => {
+			const origin = globalThis.location?.origin;
+			return typeof origin === "string" && origin.length > 0 ? origin : "http://127.0.0.1:3080";
+		},
+		writeLog: (line) => {
+			try {
+				ctx.logger?.info?.(`[annotate] ${line}`);
+			} catch {}
+		}
+	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
 		description: "Render a visual canvas panel (dashboard-style layout of stat cards, charts, tables, callouts, action buttons) in the conversation. Use for: analysis reports, deployment/QA dashboards, structured findings. Iterate the same canvas by passing canvasId from the previous result. Prefer this over raw HTML for structured data views; prefer show_widget for tiny single-metric cards.",

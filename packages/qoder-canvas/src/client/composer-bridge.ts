@@ -47,3 +47,14 @@ export function injectComposerDraft(text: string, _options?: ComposerInjectOptio
   }
   return ok
 }
+
+/** 审计上报（尽力而为：fire-and-forget，失败静默——注入不依赖端点，设计文档 §3.4） */
+export function reportAnnotation(payload: { canvasId: string; revision: number; targets: readonly string[]; note: string }): void {
+  try {
+    void fetch('/qoder-canvas/annotate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }).catch(() => undefined)
+  } catch { /* 端点不存在（headless）或网络异常——审计尽力而为 */ }
+}
