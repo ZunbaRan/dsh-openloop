@@ -43,17 +43,39 @@ export function CanvasWorkbench(): ReactNode {
   const persistWidth = (w: number): void => { setWidth(w); try { localStorage.setItem(WIDTH_KEY, String(w)) } catch { /* ignore */ } }
   const showToast = (msg: string): void => { setToast(msg); setTimeout(() => { setToast(cur => cur === msg ? null : cur) }, 2200) }
 
-  // 事件桥：对话流卡片打开（展开 + 定位 + 快照渲染保底 + 端点拉真身刷新 S4）
+  // hasEverOpened：本次页面生命周期是否已自动展开过（生成即开只触发一次；
+  // 用户手动关过或回放历史卡片都不再自动弹开，只静默同步内容）
+  const hasEverOpened = useRef(false)
+
+  // 事件桥（S5 形态修正）：
+  // - __openloopCanvasOpen（手动点「⇱ 工作台」）：总是展开并定位
+  // - __openloopCanvasUpdate（卡片挂载自动推快照）：静默同步内容；
+  //   仅在工作台空态（从没打开过画布）时自动生成即开一次
   useEffect(() => {
-    window.__openloopCanvasOpen = (canvasId: string, snap?: CanvasSnapshot) => {
+    const applySnapshot = (canvasId: string, snap: CanvasSnapshot | undefined): void => {
       if (snap !== undefined) setSnapshot(snap)
       setAnnotations(listAnnotations(canvasId))
       setTargets([])
+    }
+    window.__openloopCanvasOpen = (canvasId: string, snap?: CanvasSnapshot) => {
+      applySnapshot(canvasId, snap)
+      hasEverOpened.current = true
       persistOpen(true)
-      // S4：从端点拉最新真身（Agent 续编后工作台看到的是最新版，而非卡片快照定格）
       void refreshFromStorage(canvasId)
     }
-    return () => { delete window.__openloopCanvasOpen }
+    window.__openloopCanvasUpdate = (canvasId: string, snap: CanvasSnapshot) => {
+      applySnapshot(canvasId, snap)
+      if (!hasEverOpened.current) {
+        hasEverOpened.current = true
+        persistOpen(true)
+      }
+      void refreshFromStorage(canvasId)
+    }
+    return () => {
+      delete window.__openloopCanvasOpen
+      delete window.__openloopCanvasUpdate
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /** S4：GET 端点拉真身（端点不可用时静默保底快照；webServer 运行时注入，headless 跳过） */

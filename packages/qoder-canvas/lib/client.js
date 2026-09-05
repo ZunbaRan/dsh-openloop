@@ -629,987 +629,13 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region src/client/composer-bridge.ts
-		/** 定位 composer 元素（data-* 语义选择器，0.1.2 实证存在） */
-		function findComposer() {
-			return document.querySelector("[data-composer-input=\"true\"]");
-		}
-		/** 向 composer 追加草稿文本。返回是否成功。 */
-		function injectComposerDraft(text, _options) {
-			const el = findComposer();
-			if (el === null) return false;
-			el.focus();
-			let ok = false;
-			try {
-				ok = document.execCommand("insertText", false, text);
-			} catch {
-				ok = false;
-			}
-			if (!ok) try {
-				el.dispatchEvent(new InputEvent("beforeinput", {
-					bubbles: true,
-					cancelable: true,
-					inputType: "insertText",
-					data: text
-				}));
-				ok = true;
-			} catch {
-				ok = false;
-			}
-			return ok;
-		}
-		/** 审计上报（尽力而为：fire-and-forget，失败静默——注入不依赖端点，设计文档 §3.4） */
-		function reportAnnotation(payload) {
-			try {
-				fetch("/qoder-canvas/annotate", {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(payload)
-				}).catch(() => void 0);
-			} catch {}
-		}
-		//#endregion
-		//#region src/client/canvas-annotations.ts
-		const KEY_PREFIX = "qoder-canvas.annotations.v1.";
-		function keyOf(canvasId) {
-			return KEY_PREFIX + canvasId;
-		}
-		function readAll(canvasId) {
-			try {
-				const raw = localStorage.getItem(keyOf(canvasId));
-				if (raw === null) return [];
-				const parsed = JSON.parse(raw);
-				return Array.isArray(parsed) ? parsed.filter((a) => typeof a?.id === "string" && typeof a?.note === "string") : [];
-			} catch {
-				return [];
-			}
-		}
-		function writeAll(canvasId, items) {
-			try {
-				localStorage.setItem(keyOf(canvasId), JSON.stringify(items));
-			} catch {}
-		}
-		function listAnnotations(canvasId) {
-			return readAll(canvasId);
-		}
-		function addAnnotation(input) {
-			const annotation = {
-				...input,
-				id: `ann_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`,
-				createdAt: (/* @__PURE__ */ new Date()).toISOString()
-			};
-			writeAll(input.canvasId, [...readAll(input.canvasId), annotation]);
-			return annotation;
-		}
-		function updateAnnotationNote(canvasId, id, note) {
-			writeAll(canvasId, readAll(canvasId).map((a) => a.id === id ? {
-				...a,
-				note
-			} : a));
-		}
-		function removeAnnotation(canvasId, id) {
-			writeAll(canvasId, readAll(canvasId).filter((a) => a.id !== id));
-		}
-		/** 进 composer 的草稿格式：引用头 + 评注（纯文本胶囊风格） */
-		function formatAnnotationDraft(snapshot, targets, note) {
-			const lines = targets.map((t) => t.kind === "node" ? `▸ ${t.id} ${t.label}` : `▸ 文本 "${t.excerpt}"`);
-			return `[画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}]\n${lines.join("\n")}\n${note}`;
-		}
-		//#endregion
-		//#region src/client/AnnotationOverlay.tsx
-		/**
-		* AnnotationOverlay v3（M2.5 二轮修复，用户 2026-09-05 七条反馈）：
-		*
-		* 架构核心变更：干掉「全蒙层」——初版用 inset:0 透明 div 盖在画布上，
-		* 导致元素 hover/点选永远命中蒙层、几何法只能选到最大容器、文本选择全灭。
-		* v3 改为三模式按钮各自的光标/交互模型：
-		*
-		* - 点选模式：画布容器 cursor:crosshair + 容器级 pointermove（几何法找
-		*   节点 hover）+ 容器级 click 命中——**无蒙层**，节点直接可被 hover/点选
-		* - 框选模式：容器级 pointerdown/move/up 拖拽出虚线框（无蒙层但用户
-		*   按住拖动=框选，平时不挡交互）；框选过程中相交节点实时高亮；
-		*   松手 → 弹评注框（targets 保留高亮）+ 弹层可拖动（snapshot 窗同款
-		*   pointer capture 拖拽手感）
-		* - 文本模式：容器 cursor:text + userSelect:text（浏览器原生选择
-		*   正常工作，无蒙层遮挡）→ mouseup 时 selection 完成 → 弹评注框
-		*
-		* 取消语义（用户拍板 3）：取消只关评注框，targets 与高亮保留（可再点评论）。
-		* 快捷短语删除（用户拍板 2）。
-		*/
-		const ACCENT$2 = "var(--dsw-alias-state-business-primary, #4176e6)";
-		function nodeLabelOf$1(node) {
-			const p = node.props;
-			return typeof p.title === "string" && p.title.length > 0 ? p.title : typeof p.label === "string" && p.label.length > 0 ? p.label : typeof p.text === "string" && p.text.length > 0 ? p.text.length > 24 ? `${p.text.slice(0, 24)}…` : p.text : node.type;
-		}
-		function normalizeRect$1(r) {
-			return {
-				x: Math.min(r.x, r.x + r.w),
-				y: Math.min(r.y, r.y + r.h),
-				w: Math.abs(r.w),
-				h: Math.abs(r.h)
-			};
-		}
-		function hitNode$1(surface, clientX, clientY) {
-			let best = null;
-			for (const el of surface.querySelectorAll("[data-canvas-node]")) {
-				const r = el.getBoundingClientRect();
-				if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
-				const area = r.width * r.height;
-				const id = el.getAttribute("data-canvas-node");
-				if (id !== null && id.length > 0 && (best === null || area < best.area)) best = {
-					id,
-					area,
-					rect: r
-				};
-			}
-			return best === null ? null : {
-				id: best.id,
-				rect: best.rect
-			};
-		}
-		function AnnotationOverlay({ snapshot, containerRef }) {
-			const [active, setActive] = (0, react.useState)(false);
-			const [mode, setMode] = (0, react.useState)("pick");
-			const [hoveredId, setHoveredId] = (0, react.useState)(null);
-			const [targets, setTargets] = (0, react.useState)([]);
-			const [draftRect, setDraftRect] = (0, react.useState)(null);
-			const [note, setNote] = (0, react.useState)("");
-			const [noteBox, setNoteBox] = (0, react.useState)(null);
-			const [annotations, setAnnotations] = (0, react.useState)(() => listAnnotations(snapshot.canvasId));
-			const [editAnn, setEditAnn] = (0, react.useState)(null);
-			const [toast, setToast] = (0, react.useState)(null);
-			const dragStart = (0, react.useRef)(null);
-			const surfaceRef = containerRef;
-			const nodeById = new Map(snapshot.canvas.nodes.map((n) => [n.id, n]));
-			const showToast = (msg) => {
-				setToast(msg);
-				setTimeout(() => {
-					setToast((cur) => cur === msg ? null : cur);
-				}, 2200);
-			};
-			/** 容器光标：按模式切换（挂到 CanvasCard 的 relative div 上） */
-			(0, react.useEffect)(() => {
-				const surface = surfaceRef.current;
-				if (surface === null || !active) return;
-				const prev = {
-					cursor: surface.style.cursor,
-					userSelect: surface.style.userSelect
-				};
-				surface.style.cursor = mode === "text" ? "text" : "crosshair";
-				surface.style.userSelect = mode === "text" ? "text" : "none";
-				return () => {
-					surface.style.cursor = prev.cursor;
-					surface.style.userSelect = prev.userSelect;
-				};
-			}, [
-				active,
-				mode,
-				surfaceRef
-			]);
-			/** 文本模式：selection 完成 → targets + 弹评注框 */
-			(0, react.useEffect)(() => {
-				if (!active || mode !== "text") return;
-				const onUp = () => {
-					const sel = window.getSelection();
-					if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return;
-					const range = sel.getRangeAt(0);
-					const container = range.commonAncestorContainer;
-					const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
-					if (el === null || surfaceRef.current?.contains(el) !== true) return;
-					const text = sel.toString().trim();
-					if (text.length < 4) return;
-					const rects = range.getClientRects();
-					const last = rects[rects.length - 1];
-					if (last === void 0) return;
-					const box = surfaceRef.current.getBoundingClientRect();
-					setTargets((prev) => [...prev, {
-						kind: "text",
-						excerpt: text.length > 60 ? `${text.slice(0, 60)}…` : text
-					}]);
-					setNoteBox({
-						x: last.right - box.left,
-						y: last.bottom - box.top + 6,
-						w: 320,
-						h: 0
-					});
-				};
-				document.addEventListener("mouseup", onUp);
-				return () => document.removeEventListener("mouseup", onUp);
-			}, [
-				active,
-				mode,
-				surfaceRef
-			]);
-			/** 容器级指针事件（无蒙层；active 时挂 DOM 监听器到容器 div 上——
-			*  用户反馈 5 的根因修复：事件在容器直接捕获，节点可被 hover/点选，
-			*  不再被任何覆盖层拦截） */
-			(0, react.useEffect)(() => {
-				if (!active) return;
-				const surface = surfaceRef.current;
-				if (surface === null) return;
-				const onPointerMove = (e) => {
-					if (dragStart.current !== null) {
-						const box = surface.getBoundingClientRect();
-						setDraftRect({
-							x: dragStart.current.x,
-							y: dragStart.current.y,
-							w: e.clientX - box.left - dragStart.current.x,
-							h: e.clientY - box.top - dragStart.current.y
-						});
-						setHoveredId(null);
-						return;
-					}
-					if (mode === "pick") {
-						const hit = hitNode$1(surface, e.clientX, e.clientY);
-						setHoveredId(hit?.id ?? null);
-					}
-				};
-				const onPointerDown = (e) => {
-					if (e.button !== 0) return;
-					if (mode === "pick") {
-						const hit = hitNode$1(surface, e.clientX, e.clientY);
-						if (hit !== null) {
-							const node = nodeById.get(hit.id);
-							if (node !== void 0) {
-								setTargets((prev) => [...prev, {
-									kind: "node",
-									id: hit.id,
-									label: nodeLabelOf$1(node)
-								}]);
-								const box = surface.getBoundingClientRect();
-								setNoteBox({
-									x: hit.rect.right - box.left,
-									y: hit.rect.top - box.top,
-									w: 320,
-									h: 0
-								});
-							}
-						}
-						return;
-					}
-					if (mode === "box") {
-						const box = surface.getBoundingClientRect();
-						dragStart.current = {
-							x: e.clientX - box.left,
-							y: e.clientY - box.top
-						};
-						setDraftRect({
-							x: e.clientX - box.left,
-							y: e.clientY - box.top,
-							w: 0,
-							h: 0
-						});
-					}
-				};
-				const onPointerUp = (e) => {
-					const rect = draftRect;
-					dragStart.current = null;
-					setDraftRect(null);
-					if (rect === null || mode !== "box") return;
-					const n = normalizeRect$1(rect);
-					const box = surface.getBoundingClientRect();
-					if (n.w < 10 && n.h < 10) {
-						const hit = hitNode$1(surface, e.clientX, e.clientY);
-						if (hit !== null) {
-							const node = nodeById.get(hit.id);
-							if (node !== void 0) {
-								setTargets((prev) => [...prev, {
-									kind: "node",
-									id: hit.id,
-									label: nodeLabelOf$1(node)
-								}]);
-								setNoteBox({
-									x: hit.rect.right - box.left,
-									y: hit.rect.top - box.top,
-									w: 320,
-									h: 0
-								});
-							}
-						}
-						return;
-					}
-					const hits = [];
-					for (const el of surface.querySelectorAll("[data-canvas-node]")) {
-						const r = el.getBoundingClientRect();
-						const nx = r.left - box.left, ny = r.top - box.top;
-						if (nx < n.x + n.w && nx + r.width > n.x && ny < n.y + n.h && ny + r.height > n.y) {
-							const id = el.getAttribute("data-canvas-node");
-							const node = id !== null ? nodeById.get(id) : void 0;
-							if (node !== void 0 && id !== null) hits.push({
-								kind: "node",
-								id,
-								label: nodeLabelOf$1(node)
-							});
-						}
-					}
-					if (hits.length > 0) {
-						setTargets((prev) => [...prev, ...hits]);
-						setNoteBox({
-							x: n.x + n.w,
-							y: n.y,
-							w: 320,
-							h: 0
-						});
-					}
-				};
-				surface.addEventListener("pointermove", onPointerMove);
-				surface.addEventListener("pointerdown", onPointerDown);
-				surface.addEventListener("pointerup", onPointerUp);
-				return () => {
-					surface.removeEventListener("pointermove", onPointerMove);
-					surface.removeEventListener("pointerdown", onPointerDown);
-					surface.removeEventListener("pointerup", onPointerUp);
-				};
-			}, [
-				active,
-				mode,
-				surfaceRef,
-				nodeById,
-				draftRect
-			]);
-			const saveAnnotation = () => {
-				const trimmed = note.trim();
-				if (trimmed.length === 0 || targets.length === 0) return;
-				const text = formatAnnotationDraft(snapshot, targets, trimmed);
-				const ok = injectComposerDraft(text);
-				addAnnotation({
-					canvasId: snapshot.canvasId,
-					revision: snapshot.revision,
-					targets,
-					note: trimmed
-				});
-				setAnnotations(listAnnotations(snapshot.canvasId));
-				reportAnnotation({
-					canvasId: snapshot.canvasId,
-					revision: snapshot.revision,
-					targets: targets.map((t) => t.kind === "node" ? t.id : "text"),
-					note: trimmed
-				});
-				showToast(ok ? "注释已保存并注入输入框草稿" : "注释已保存；注入失败已复制到剪贴板");
-				if (!ok) try {
-					navigator.clipboard?.writeText(text);
-				} catch {}
-				setTargets([]);
-				setNote("");
-				setNoteBox(null);
-				setActive(false);
-			};
-			const annForNode = (nodeId) => annotations.filter((a) => a.targets.some((t) => t.kind === "node" && t.id === nodeId));
-			if (!active) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-				type: "button",
-				onClick: () => setActive(true),
-				title: "标注画布：点选/框选元素或选中文本，写评注注入输入框",
-				style: {
-					position: "absolute",
-					top: 6,
-					right: 76,
-					zIndex: 40,
-					display: "inline-flex",
-					alignItems: "center",
-					gap: 5,
-					fontSize: 10.5,
-					padding: "2px 9px",
-					borderRadius: 6,
-					cursor: "pointer",
-					color: "var(--dsw-alias-label-secondary, inherit)",
-					background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
-					border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-					fontFamily: "inherit",
-					whiteSpace: "nowrap"
-				},
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
-					width: "11",
-					height: "11",
-					viewBox: "0 0 24 24",
-					fill: "none",
-					stroke: "currentColor",
-					strokeWidth: "2",
-					strokeLinecap: "round",
-					"aria-hidden": "true",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M12 20h9" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" })]
-				}), "标注"]
-			});
-			const MODE_LABEL = {
-				pick: "点选",
-				box: "框选",
-				text: "选文本"
-			};
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: {
-						position: "absolute",
-						top: 6,
-						right: 8,
-						zIndex: 40,
-						display: "flex",
-						alignItems: "center",
-						gap: 5,
-						padding: "4px 5px",
-						borderRadius: 8,
-						background: "var(--dsw-alias-bg-layer-1, #fff)",
-						border: `1px solid ${ACCENT$2}`,
-						boxShadow: "0 4px 16px rgba(0,0,0,.14)"
-					},
-					children: [
-						[
-							"pick",
-							"box",
-							"text"
-						].map((m) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: () => setMode(m),
-							style: {
-								fontSize: 10.5,
-								padding: "2px 9px",
-								borderRadius: 6,
-								cursor: "pointer",
-								fontFamily: "inherit",
-								border: mode === m ? `1px solid ${ACCENT$2}` : "1px solid transparent",
-								background: mode === m ? "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 14%, transparent)" : "none",
-								color: mode === m ? ACCENT$2 : "var(--dsw-alias-label-secondary, inherit)",
-								fontWeight: mode === m ? 600 : 400
-							},
-							children: MODE_LABEL[m]
-						}, m)),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-							style: {
-								fontSize: 10,
-								color: "var(--dsw-alias-label-caption, #888)",
-								padding: "0 2px"
-							},
-							children: targets.length > 0 ? `${targets.length} 项已选` : ""
-						}),
-						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: () => {
-								setActive(false);
-								setTargets([]);
-								setNoteBox(null);
-							},
-							style: {
-								fontSize: 10,
-								padding: "2px 8px",
-								borderRadius: 5,
-								border: 0,
-								cursor: "pointer",
-								background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
-								fontFamily: "inherit"
-							},
-							children: "退出"
-						})
-					]
-				}),
-				/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-					position: "absolute",
-					inset: 0,
-					zIndex: 30,
-					pointerEvents: "none"
-				} }),
-				mode === "pick" && hoveredId !== null && !targets.some((t) => t.kind === "node" && t.id === hoveredId) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect$1, {
-					surface: surfaceRef.current,
-					nodeId: hoveredId,
-					borderStyle: "outline"
-				}) : null,
-				targets.filter((t) => t.kind === "node").map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect$1, {
-					surface: surfaceRef.current,
-					nodeId: t.id,
-					borderStyle: "solid"
-				}, t.id)),
-				draftRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-					...normalizeRect$1(draftRect),
-					position: "absolute",
-					border: `1.5px dashed ${ACCENT$2}`,
-					background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
-					borderRadius: 4,
-					pointerEvents: "none",
-					zIndex: 30
-				} }) : null,
-				snapshot.canvas.nodes.map((n) => {
-					const anns = annForNode(n.id);
-					if (anns.length === 0) return null;
-					return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationBadge, {
-						surface: surfaceRef.current,
-						nodeId: n.id,
-						anns,
-						onEdit: (a) => setEditAnn(a),
-						onDelete: (a) => {
-							removeAnnotation(snapshot.canvasId, a.id);
-							setAnnotations(listAnnotations(snapshot.canvasId));
-						}
-					}, n.id);
-				}),
-				noteBox !== null && targets.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NoteBoxPopover, {
-					anchor: noteBox,
-					surface: surfaceRef.current,
-					targets,
-					note,
-					setNote,
-					onRemoveTarget: (i) => setTargets((prev) => prev.filter((_, j) => j !== i)),
-					onCancel: () => {
-						setNoteBox(null);
-						setNote("");
-					},
-					onSave: saveAnnotation
-				}) : null,
-				editAnn !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationEditPopover, {
-					ann: editAnn,
-					onSave: (n) => {
-						updateAnnotationNote(snapshot.canvasId, editAnn.id, n);
-						setAnnotations(listAnnotations(snapshot.canvasId));
-						setEditAnn(null);
-					},
-					onClose: () => setEditAnn(null)
-				}) : null,
-				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: {
-						position: "absolute",
-						top: 44,
-						left: "50%",
-						transform: "translateX(-50%)",
-						zIndex: 60,
-						fontSize: 10.5,
-						padding: "5px 12px",
-						borderRadius: 7,
-						background: "var(--dsw-alias-bg-layer-1, #fff)",
-						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-						boxShadow: "0 4px 14px rgba(0,0,0,.14)",
-						whiteSpace: "nowrap"
-					},
-					children: toast
-				}) : null
-			] });
-		}
-		/** 节点高亮框 */
-		function HighlightRect$1({ surface, nodeId, borderStyle }) {
-			if (surface === null) return null;
-			const el = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"]`);
-			if (el === null) return null;
-			const box = surface.getBoundingClientRect();
-			const r = el.getBoundingClientRect();
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-				position: "absolute",
-				left: r.left - box.left - 3,
-				top: r.top - box.top - 3,
-				width: r.width + 6,
-				height: r.height + 6,
-				border: borderStyle === "outline" ? `2px dashed ${ACCENT$2}` : `2px solid ${ACCENT$2}`,
-				borderRadius: 8,
-				pointerEvents: "none",
-				zIndex: 30,
-				boxShadow: borderStyle === "solid" ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : "none"
-			} });
-		}
-		/** 注释角标（①；hover 详情卡） */
-		function AnnotationBadge({ surface, nodeId, anns, onEdit, onDelete }) {
-			const [hover, setHover] = (0, react.useState)(false);
-			if (surface === null) return null;
-			const el = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"]`);
-			if (el === null) return null;
-			const box = surface.getBoundingClientRect();
-			const r = el.getBoundingClientRect();
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: {
-					position: "absolute",
-					left: r.right - box.left - 10,
-					top: r.top - box.top - 8,
-					zIndex: 35
-				},
-				onPointerEnter: () => setHover(true),
-				onPointerLeave: () => setHover(false),
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					style: {
-						display: "inline-flex",
-						alignItems: "center",
-						justifyContent: "center",
-						minWidth: 17,
-						height: 17,
-						padding: "0 4px",
-						borderRadius: 999,
-						fontSize: 10,
-						fontWeight: 700,
-						color: "#fff",
-						background: ACCENT$2,
-						boxShadow: "0 2px 8px rgba(0,0,0,.2)",
-						cursor: "pointer"
-					},
-					children: anns.length
-				}), hover ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-					style: {
-						position: "absolute",
-						left: 0,
-						top: 20,
-						zIndex: 55,
-						width: 260,
-						display: "flex",
-						flexDirection: "column",
-						gap: 6,
-						padding: "8px 10px",
-						borderRadius: 9,
-						background: "var(--dsw-alias-bg-layer-1, #fff)",
-						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-						boxShadow: "0 8px 26px rgba(0,0,0,.2)",
-						userSelect: "text"
-					},
-					children: anns.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							display: "flex",
-							gap: 6,
-							alignItems: "flex-start",
-							fontSize: 11,
-							lineHeight: 1.5
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									flex: 1,
-									minWidth: 0
-								},
-								children: a.note
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => onEdit(a),
-								title: "编辑",
-								style: {
-									border: 0,
-									background: "none",
-									cursor: "pointer",
-									fontSize: 11,
-									color: "var(--dsw-alias-label-caption, #888)",
-									padding: 0
-								},
-								children: "✎"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => onDelete(a),
-								title: "删除",
-								style: {
-									border: 0,
-									background: "none",
-									cursor: "pointer",
-									fontSize: 11,
-									color: "var(--dsw-alias-label-caption, #888)",
-									padding: 0
-								},
-								children: "🗑"
-							})
-						]
-					}, a.id))
-				}) : null]
-			});
-		}
-		/** 评注输入框（可拖动：snapshot 窗同款 pointer capture 手感；无快捷短语） */
-		function NoteBoxPopover({ anchor, surface, targets, note, setNote, onRemoveTarget, onCancel, onSave }) {
-			const [pos, setPos] = (0, react.useState)(() => {
-				const surfaceW = surface?.getBoundingClientRect().width ?? 400;
-				return {
-					x: Math.max(8, Math.min(anchor.x - 320, surfaceW - 340)),
-					y: anchor.y
-				};
-			});
-			const dragRef = (0, react.useRef)(null);
-			const beginDrag = (e) => {
-				if (e.button !== 0) return;
-				e.preventDefault();
-				dragRef.current = {
-					sx: e.clientX,
-					sy: e.clientY,
-					ox: pos.x,
-					oy: pos.y
-				};
-				const el = e.currentTarget;
-				try {
-					el.setPointerCapture(e.pointerId);
-				} catch {}
-				const move = (ev) => {
-					const d = dragRef.current;
-					if (d === null) return;
-					setPos({
-						x: Math.max(8, d.ox + ev.clientX - d.sx),
-						y: Math.max(8, d.oy + ev.clientY - d.sy)
-					});
-				};
-				const up = () => {
-					dragRef.current = null;
-					el.ownerDocument.defaultView?.removeEventListener("pointermove", move);
-					el.ownerDocument.defaultView?.removeEventListener("pointerup", up);
-				};
-				const view = el.ownerDocument.defaultView;
-				if (view !== null) {
-					view.addEventListener("pointermove", move);
-					view.addEventListener("pointerup", up);
-				}
-			};
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: {
-					position: "absolute",
-					left: pos.x,
-					top: pos.y,
-					zIndex: 50,
-					width: 320,
-					display: "flex",
-					flexDirection: "column",
-					gap: 7,
-					padding: "10px 12px",
-					borderRadius: 10,
-					background: "var(--dsw-alias-bg-layer-1, #fff)",
-					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-					boxShadow: "0 8px 28px rgba(0,0,0,.2)"
-				},
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						onPointerDown: beginDrag,
-						style: {
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-							cursor: "grab",
-							userSelect: "none",
-							margin: "-4px -6px 0",
-							padding: "4px 6px",
-							borderRadius: "8px 8px 0 0"
-						},
-						onPointerEnter: void 0,
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
-							width: "12",
-							height: "12",
-							viewBox: "0 0 24 24",
-							fill: "none",
-							stroke: "var(--dsw-alias-label-caption, #888)",
-							strokeWidth: "2",
-							strokeLinecap: "round",
-							"aria-hidden": "true",
-							children: [
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-									cx: "9",
-									cy: "5",
-									r: "1"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-									cx: "9",
-									cy: "12",
-									r: "1"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-									cx: "9",
-									cy: "19",
-									r: "1"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-									cx: "15",
-									cy: "5",
-									r: "1"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-									cx: "15",
-									cy: "12",
-									r: "1"
-								}),
-								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
-									cx: "15",
-									cy: "19",
-									r: "1"
-								})
-							]
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							style: {
-								fontSize: 10,
-								color: "var(--dsw-alias-label-caption, #888)"
-							},
-							children: [
-								"添加评论（",
-								targets.length,
-								" 项）"
-							]
-						})]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						style: {
-							display: "flex",
-							flexWrap: "wrap",
-							gap: 5
-						},
-						children: targets.map((t, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-							style: {
-								display: "inline-flex",
-								alignItems: "center",
-								gap: 4,
-								fontSize: 10,
-								padding: "1.5px 7px",
-								borderRadius: 5,
-								background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
-								color: ACCENT$2,
-								maxWidth: "100%",
-								overflow: "hidden",
-								textOverflow: "ellipsis",
-								whiteSpace: "nowrap"
-							},
-							children: [t.kind === "node" ? `${t.id} ${t.label}` : `文本 "${t.excerpt}"`, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-								type: "button",
-								onClick: () => onRemoveTarget(i),
-								style: {
-									border: 0,
-									background: "none",
-									cursor: "pointer",
-									padding: 0,
-									color: "inherit",
-									fontSize: 11,
-									lineHeight: 1
-								},
-								children: "×"
-							})]
-						}, i))
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-						value: note,
-						onChange: (e) => setNote(e.target.value),
-						placeholder: "添加评论…（保存后注入输入框草稿）",
-						rows: 3,
-						autoFocus: true,
-						style: {
-							fontSize: 11.5,
-							padding: "6px 8px",
-							borderRadius: 7,
-							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-							background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
-							color: "inherit",
-							resize: "vertical",
-							fontFamily: "inherit"
-						}
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							display: "flex",
-							gap: 6,
-							justifyContent: "flex-end"
-						},
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: onCancel,
-							style: {
-								fontSize: 10.5,
-								padding: "3px 10px",
-								borderRadius: 6,
-								border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-								background: "none",
-								cursor: "pointer",
-								fontFamily: "inherit"
-							},
-							children: "取消"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: onSave,
-							disabled: note.trim().length === 0,
-							style: {
-								fontSize: 10.5,
-								padding: "3px 12px",
-								borderRadius: 6,
-								border: 0,
-								cursor: note.trim().length > 0 ? "pointer" : "not-allowed",
-								fontFamily: "inherit",
-								color: "#fff",
-								background: note.trim().length > 0 ? ACCENT$2 : "var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2))"
-							},
-							children: "保存"
-						})]
-					})
-				]
-			});
-		}
-		/** 注释编辑弹层 */
-		function AnnotationEditPopover({ ann, onSave, onClose }) {
-			const [note, setNote] = (0, react.useState)(ann.note);
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: {
-					position: "absolute",
-					top: 40,
-					left: "50%",
-					transform: "translateX(-50%)",
-					zIndex: 70,
-					width: 300,
-					display: "flex",
-					flexDirection: "column",
-					gap: 7,
-					padding: "10px 12px",
-					borderRadius: 10,
-					background: "var(--dsw-alias-bg-layer-1, #fff)",
-					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-					boxShadow: "0 8px 28px rgba(0,0,0,.22)"
-				},
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						style: {
-							fontSize: 10.5,
-							fontWeight: 600,
-							color: ACCENT$2
-						},
-						children: "编辑注释"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-						value: note,
-						onChange: (e) => setNote(e.target.value),
-						rows: 3,
-						autoFocus: true,
-						style: {
-							fontSize: 11.5,
-							padding: "6px 8px",
-							borderRadius: 7,
-							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-							background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
-							color: "inherit",
-							resize: "vertical",
-							fontFamily: "inherit"
-						}
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							display: "flex",
-							gap: 6,
-							justifyContent: "flex-end"
-						},
-						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: onClose,
-							style: {
-								fontSize: 10.5,
-								padding: "3px 10px",
-								borderRadius: 6,
-								border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-								background: "none",
-								cursor: "pointer",
-								fontFamily: "inherit"
-							},
-							children: "取消"
-						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-							type: "button",
-							onClick: () => onSave(note.trim()),
-							disabled: note.trim().length === 0,
-							style: {
-								fontSize: 10.5,
-								padding: "3px 12px",
-								borderRadius: 6,
-								border: 0,
-								cursor: "pointer",
-								fontFamily: "inherit",
-								color: "#fff",
-								background: ACCENT$2
-							},
-							children: "保存"
-						})]
-					})
-				]
-			});
-		}
-		//#endregion
 		//#region src/client/CanvasCard.tsx
 		const captionStyle = {
 			color: "var(--dsw-alias-label-caption, #888)",
 			fontSize: 12
 		};
 		/** 容错解析 presentationMeta 的快照（§5.3 惯例：无法解析返回 undefined 不抛错）。
-		*  ⚠️ 0.1.1 真机修复：presentationMeta 返回的就是扁平 snapshot 本体（无 .snapshot
-		*  包装层）——原实现多剥了一层导致永远解析失败、卡片渲染成 "metadata unavailable"。 */
+		*  presentationMeta 返回扁平 snapshot 本体（无包装层）。 */
 		function canvasMetaFrom(value) {
 			if (typeof value !== "object" || value === null) return void 0;
 			const s = value;
@@ -1637,87 +663,46 @@ window.__ModuleLoader__.load({
 			});
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasCardInner, { snapshot: meta });
 		}
-		/** 有状态内层（hooks 不能在早退之后——block 校验先走完） */
+		/** 入口卡片（只读预览 + 工作台入口；零标注交互） */
 		function CanvasCardInner({ snapshot }) {
-			const surfaceRef = (0, react.useRef)(null);
-			const [toast, setToast] = (0, react.useState)(null);
-			const showToast = (msg) => {
-				setToast(msg);
-				setTimeout(() => {
-					setToast((cur) => cur === msg ? null : cur);
-				}, 2400);
-			};
-			/** action 节点回传（AnnotationOverlay 之外的第三入口）：intent+context 编排注入 */
-			const onAction = (node) => {
-				const intent = typeof node.props.intent === "string" ? node.props.intent : "";
-				const label = typeof node.props.label === "string" ? node.props.label : "action";
-				const context = node.props.context;
-				const ctxText = typeof context === "object" && context !== null ? Object.entries(context).map(([k, v]) => `${k}=${String(v)}`).slice(0, 6).join(", ") : "";
-				const text = formatAnnotationDraft(snapshot, [{
-					kind: "node",
-					id: node.id,
-					label
-				}], `执行动作：${intent}${ctxText.length > 0 ? `（${ctxText}）` : ""}`);
-				const ok = injectComposerDraft(text);
-				showToast(ok ? `「${label}」已注入输入框草稿——可编辑后发送` : `「${label}」注入失败，已复制到剪贴板`);
-				if (!ok) try {
-					navigator.clipboard?.writeText(text);
-				} catch {}
+			(0, react.useEffect)(() => {
+				window.__openloopCanvasUpdate?.(snapshot.canvasId, snapshot);
+			}, [snapshot]);
+			/** action 节点在对话流的语义：点击 = 打开工作台执行（不在对话流注入） */
+			const onAction = () => {
+				window.__openloopCanvasOpen?.(snapshot.canvasId, snapshot);
 			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 				style: { position: "relative" },
-				ref: surfaceRef,
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-						type: "button",
-						onClick: () => window.__openloopCanvasOpen?.(snapshot.canvasId, snapshot),
-						title: "在画布工作台打开（右侧推出栏：标注/迭代）",
-						style: {
-							position: "absolute",
-							top: 6,
-							right: 8,
-							zIndex: 20,
-							display: "inline-flex",
-							alignItems: "center",
-							gap: 4,
-							fontSize: 10.5,
-							padding: "2px 9px",
-							borderRadius: 6,
-							cursor: "pointer",
-							color: "var(--dsw-alias-state-business-primary, #4176e6)",
-							background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
-							border: "1px solid color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 28%, transparent)",
-							fontFamily: "inherit",
-							whiteSpace: "nowrap"
-						},
-						children: "⇱ 工作台"
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasSurface, {
-						snapshot,
-						onAction
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationOverlay, {
-						snapshot,
-						containerRef: surfaceRef
-					}),
-					toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						style: {
-							position: "absolute",
-							top: -30,
-							left: "50%",
-							transform: "translateX(-50%)",
-							zIndex: 70,
-							fontSize: 10.5,
-							padding: "5px 12px",
-							borderRadius: 7,
-							background: "var(--dsw-alias-bg-layer-1, #fff)",
-							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-							boxShadow: "0 4px 14px rgba(0,0,0,.14)",
-							whiteSpace: "nowrap"
-						},
-						children: toast
-					}) : null
-				]
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+					type: "button",
+					onClick: () => window.__openloopCanvasOpen?.(snapshot.canvasId, snapshot),
+					title: "在画布工作台打开（右侧推出栏：标注/迭代）",
+					style: {
+						position: "absolute",
+						top: 6,
+						right: 8,
+						zIndex: 20,
+						display: "inline-flex",
+						alignItems: "center",
+						gap: 4,
+						fontSize: 10.5,
+						padding: "3px 10px",
+						borderRadius: 6,
+						cursor: "pointer",
+						color: "#fff",
+						background: "var(--dsw-alias-state-business-primary, #4176e6)",
+						border: "none",
+						fontFamily: "inherit",
+						fontWeight: 600,
+						whiteSpace: "nowrap",
+						boxShadow: "0 2px 8px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 35%, transparent)"
+					},
+					children: "⇱ 工作台"
+				}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasSurface, {
+					snapshot,
+					onAction
+				})]
 			});
 		}
 		//#endregion
@@ -2588,6 +1573,93 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
+		//#region src/client/composer-bridge.ts
+		/** 定位 composer 元素（data-* 语义选择器，0.1.2 实证存在） */
+		function findComposer() {
+			return document.querySelector("[data-composer-input=\"true\"]");
+		}
+		/** 向 composer 追加草稿文本。返回是否成功。 */
+		function injectComposerDraft(text, _options) {
+			const el = findComposer();
+			if (el === null) return false;
+			el.focus();
+			let ok = false;
+			try {
+				ok = document.execCommand("insertText", false, text);
+			} catch {
+				ok = false;
+			}
+			if (!ok) try {
+				el.dispatchEvent(new InputEvent("beforeinput", {
+					bubbles: true,
+					cancelable: true,
+					inputType: "insertText",
+					data: text
+				}));
+				ok = true;
+			} catch {
+				ok = false;
+			}
+			return ok;
+		}
+		/** 审计上报（尽力而为：fire-and-forget，失败静默——注入不依赖端点，设计文档 §3.4） */
+		function reportAnnotation(payload) {
+			try {
+				fetch("/qoder-canvas/annotate", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload)
+				}).catch(() => void 0);
+			} catch {}
+		}
+		//#endregion
+		//#region src/client/canvas-annotations.ts
+		const KEY_PREFIX = "qoder-canvas.annotations.v1.";
+		function keyOf(canvasId) {
+			return KEY_PREFIX + canvasId;
+		}
+		function readAll(canvasId) {
+			try {
+				const raw = localStorage.getItem(keyOf(canvasId));
+				if (raw === null) return [];
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter((a) => typeof a?.id === "string" && typeof a?.note === "string") : [];
+			} catch {
+				return [];
+			}
+		}
+		function writeAll(canvasId, items) {
+			try {
+				localStorage.setItem(keyOf(canvasId), JSON.stringify(items));
+			} catch {}
+		}
+		function listAnnotations(canvasId) {
+			return readAll(canvasId);
+		}
+		function addAnnotation(input) {
+			const annotation = {
+				...input,
+				id: `ann_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`,
+				createdAt: (/* @__PURE__ */ new Date()).toISOString()
+			};
+			writeAll(input.canvasId, [...readAll(input.canvasId), annotation]);
+			return annotation;
+		}
+		function updateAnnotationNote(canvasId, id, note) {
+			writeAll(canvasId, readAll(canvasId).map((a) => a.id === id ? {
+				...a,
+				note
+			} : a));
+		}
+		function removeAnnotation(canvasId, id) {
+			writeAll(canvasId, readAll(canvasId).filter((a) => a.id !== id));
+		}
+		/** 进 composer 的草稿格式：引用头 + 评注（纯文本胶囊风格） */
+		function formatAnnotationDraft(snapshot, targets, note) {
+			const lines = targets.map((t) => t.kind === "node" ? `▸ ${t.id} ${t.label}` : `▸ 文本 "${t.excerpt}"`);
+			return `[画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}]\n${lines.join("\n")}\n${note}`;
+		}
+		//#endregion
 		//#region src/client/CanvasWorkbench.tsx
 		/**
 		* CanvasWorkbench：canvas dock 的工作台（S3：元素 pin 标注 + 评论面板）。
@@ -2641,16 +1713,30 @@ window.__ModuleLoader__.load({
 					setToast((cur) => cur === msg ? null : cur);
 				}, 2200);
 			};
+			const hasEverOpened = (0, react.useRef)(false);
 			(0, react.useEffect)(() => {
-				window.__openloopCanvasOpen = (canvasId, snap) => {
+				const applySnapshot = (canvasId, snap) => {
 					if (snap !== void 0) setSnapshot(snap);
 					setAnnotations(listAnnotations(canvasId));
 					setTargets([]);
+				};
+				window.__openloopCanvasOpen = (canvasId, snap) => {
+					applySnapshot(canvasId, snap);
+					hasEverOpened.current = true;
 					persistOpen(true);
+					refreshFromStorage(canvasId);
+				};
+				window.__openloopCanvasUpdate = (canvasId, snap) => {
+					applySnapshot(canvasId, snap);
+					if (!hasEverOpened.current) {
+						hasEverOpened.current = true;
+						persistOpen(true);
+					}
 					refreshFromStorage(canvasId);
 				};
 				return () => {
 					delete window.__openloopCanvasOpen;
+					delete window.__openloopCanvasUpdate;
 				};
 			}, []);
 			/** S4：GET 端点拉真身（端点不可用时静默保底快照；webServer 运行时注入，headless 跳过） */
