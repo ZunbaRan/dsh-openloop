@@ -1,6 +1,6 @@
 # Studio 构建提示词（PRD → DSH）
 
-> 用法：在仓库根目录起一个 DSH web 会话，按「阶段 0 → M0 → M1…」顺序逐段粘贴。
+> 用法：起一个 DSH web 会话（任意工作目录均可，路径已写绝对路径），按「阶段 0 → M0 → M1…」顺序逐段粘贴。
 > 每阶段 agent 完工后，你先按该阶段验收清单真机检查，通过后再贴下一阶段。
 > 不要一次全贴——分段喂才能让它每步都建立在已验收的地基上。
 
@@ -9,15 +9,18 @@
 ## 阶段 0 · 读 PRD + 复述理解（先贴这段）
 
 ```
-你要在本工作区用 openloop 插件体系真实构建「studio 内容创作工作室」系统。
+你要用 openloop 插件体系真实构建「studio 内容创作工作室」系统。
 PRD 是一个高保真交互原型，先全部读完再动手：
 
-- designs/studio-proto/data.jsx —— 数据模型（ideas/drafts/assets/calendar 字段）、状态机、
-  组件清单（STUDIO_RESOURCES，12 个）、API 清单（STUDIO_APIS，10 个）、关联声明（REL_DECLS）
-- designs/studio-proto/scene-chat.jsx / scene-board.jsx / scene-registry.jsx /
+- /Users/loloru/Documents/data/project/openChamber/dsh-visual-plugins/designs/studio-proto/data.jsx
+  —— 数据模型（ideas/drafts/assets/calendar 字段）、状态机、组件清单（STUDIO_RESOURCES，12 个）、
+  API 清单（STUDIO_APIS，10 个）、关联声明（REL_DECLS）
+- 同目录下 scene-chat.jsx / scene-board.jsx / scene-registry.jsx /
   scene-detail.jsx / scene-edit.jsx / scene-topology.jsx —— 每个组件的规格与交互
-- designs/studio-proto/scene-forms.jsx —— 只需理解「三形态选型矩阵」，月历拖块是
+- 同目录下 scene-forms.jsx —— 只需理解「三形态选型矩阵」，月历拖块是
   panels-自由二期候选，本期不实现
+
+若上述路径不可达，直接向我要仓库位置——不要凭记忆猜测文件内容。
 
 设计法则（不可违背）：
 1. 读写组件分离：detail 只读；edit/create 是独立 form 组件，靠 relations 串联，

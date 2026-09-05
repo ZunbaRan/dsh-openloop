@@ -296,7 +296,9 @@ export function CanvasSurface({ snapshot, onAction }: { snapshot: CanvasSnapshot
       </header>
       <div style={layoutStyle(canvas.layout, canvas.nodes.length)}>
         {plainNodes.map(n => (
-          <div key={n.id} data-canvas-node={n.id} style={{ display: 'contents' }}>
+          // 0.2.1 修复：wrapper 不可用 display:contents（无盒模型 →
+          // getBoundingClientRect 全 0，标注框选/高亮全部失效）；普通 div 作 grid item
+          <div key={n.id} data-canvas-node={n.id} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
             <NodeRenderer node={n} onAction={onAction} />
           </div>
         ))}
@@ -304,7 +306,7 @@ export function CanvasSurface({ snapshot, onAction }: { snapshot: CanvasSnapshot
       {sectionNodes.length > 0 ? (
         <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {sectionNodes.map(n => (
-            <div key={n.id} data-canvas-node={n.id}>
+            <div key={n.id} data-canvas-node={n.id} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               <SectionNode node={n}>{null}</SectionNode>
             </div>
           ))}

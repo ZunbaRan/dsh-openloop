@@ -592,7 +592,11 @@ window.__ModuleLoader__.load({
 						style: layoutStyle(canvas.layout, canvas.nodes.length),
 						children: plainNodes.map((n) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							"data-canvas-node": n.id,
-							style: { display: "contents" },
+							style: {
+								display: "flex",
+								flexDirection: "column",
+								minWidth: 0
+							},
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NodeRenderer, {
 								node: n,
 								onAction
@@ -608,6 +612,11 @@ window.__ModuleLoader__.load({
 						},
 						children: sectionNodes.map((n) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							"data-canvas-node": n.id,
+							style: {
+								display: "flex",
+								flexDirection: "column",
+								minWidth: 0
+							},
 							children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)(SectionNode, {
 								node: n,
 								children: null
@@ -749,6 +758,10 @@ window.__ModuleLoader__.load({
 				onClick: () => setActive(true),
 				title: "标注画布：圈选元素写评注，注入输入框草稿",
 				style: {
+					position: "absolute",
+					top: 6,
+					right: 8,
+					zIndex: 40,
 					display: "inline-flex",
 					alignItems: "center",
 					gap: 5,
@@ -774,280 +787,319 @@ window.__ModuleLoader__.load({
 					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M12 20h9" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" })]
 				}), "标注"]
 			});
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-				style: { display: "contents" },
-				onClickCapture: (e) => {
-					const id = e.target.closest("[data-canvas-node]")?.getAttribute("data-canvas-node");
-					if (id === void 0 || id === null || id === "") return;
-					e.stopPropagation();
-					e.preventDefault();
-					setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-				},
-				onPointerDownCapture: (e) => {
-					if (e.button !== 0) return;
-					const box = surfaceRef.current?.getBoundingClientRect();
-					if (box === void 0) return;
-					dragStart.current = {
-						x: e.clientX - box.left,
-						y: e.clientY - box.top
-					};
-					setDragRect({
-						x: e.clientX - box.left,
-						y: e.clientY - box.top,
-						w: 0,
-						h: 0
-					});
-				},
-				onPointerMoveCapture: (e) => {
-					const start = dragStart.current;
-					const box = surfaceRef.current?.getBoundingClientRect();
-					if (start === null || box === void 0) return;
-					setDragRect({
-						x: start.x,
-						y: start.y,
-						w: e.clientX - box.left - start.x,
-						h: e.clientY - box.top - start.y
-					});
-				},
-				onPointerUpCapture: () => {
-					if (dragRect !== null) finishDrag(normalizeRect(dragRect));
-					dragStart.current = null;
-					setDragRect(null);
-				},
-				children: [
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
+			const overlayStyle = {
+				position: "absolute",
+				inset: 0,
+				zIndex: 30,
+				background: "rgba(0,0,0,.04)",
+				cursor: "crosshair",
+				pointerEvents: "auto",
+				userSelect: "none"
+			};
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: overlayStyle,
+					onPointerDown: (e) => {
+						if (e.button !== 0) return;
+						const box = surfaceRef.current?.getBoundingClientRect();
+						if (box === void 0) return;
+						dragStart.current = {
+							x: e.clientX - box.left,
+							y: e.clientY - box.top
+						};
+						setDragRect({
+							x: e.clientX - box.left,
+							y: e.clientY - box.top,
+							w: 0,
+							h: 0
+						});
+					},
+					onPointerMove: (e) => {
+						const start = dragStart.current;
+						const box = surfaceRef.current?.getBoundingClientRect();
+						if (start === null || box === void 0) return;
+						setDragRect({
+							x: start.x,
+							y: start.y,
+							w: e.clientX - box.left - start.x,
+							h: e.clientY - box.top - start.y
+						});
+					},
+					onPointerUp: () => {
+						if (dragRect !== null) finishDrag(normalizeRect(dragRect));
+						dragStart.current = null;
+						setDragRect(null);
+					},
+					onClick: (e) => {
+						let best = null;
+						for (const el of surfaceRef.current?.querySelectorAll("[data-canvas-node]") ?? []) {
+							const r = el.getBoundingClientRect();
+							if (!(e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)) continue;
+							const area = r.width * r.height;
+							if (best === null || area < best.area) {
+								const id = el.getAttribute("data-canvas-node");
+								if (id !== null && id.length > 0) best = {
+									id,
+									area
+								};
+							}
+						}
+						if (best !== null) {
+							const id = best.id;
+							setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+						}
+					},
+					children: [dragRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+						...normalizeRect(dragRect),
+						position: "absolute",
+						border: `1.5px dashed ${ACCENT}`,
+						background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
+						borderRadius: 4,
+						pointerEvents: "none"
+					} }) : null, selected.map((id) => {
+						const el = surfaceRef.current?.querySelector(`[data-canvas-node="${CSS.escape(id)}"]`);
+						if (el === null || el === void 0) return null;
+						const box = surfaceRef.current?.getBoundingClientRect();
+						if (box === void 0) return null;
+						const r = el.getBoundingClientRect();
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
 							position: "absolute",
-							top: 6,
-							right: 8,
-							zIndex: 40,
-							display: "flex",
-							alignItems: "center",
-							gap: 6,
-							padding: "5px 8px",
+							left: r.left - box.left - 3,
+							top: r.top - box.top - 3,
+							width: r.width + 6,
+							height: r.height + 6,
+							border: `2px solid ${ACCENT}`,
 							borderRadius: 8,
-							background: "var(--dsw-alias-bg-layer-1, #fff)",
-							border: `1px solid ${ACCENT}`,
-							boxShadow: "0 4px 16px rgba(0,0,0,.14)"
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									fontSize: 10,
-									color: ACCENT,
-									fontWeight: 600
-								},
-								children: "标注模式"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-								style: {
-									fontSize: 10,
-									color: "var(--dsw-alias-label-caption, #888)"
-								},
-								children: selected.length > 0 ? `已选 ${selected.length} 个` : "点选或框选节点"
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							pointerEvents: "none",
+							boxShadow: "0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)"
+						} }, id);
+					})]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						position: "absolute",
+						top: 6,
+						right: 8,
+						zIndex: 40,
+						display: "flex",
+						alignItems: "center",
+						gap: 6,
+						padding: "5px 8px",
+						borderRadius: 8,
+						background: "var(--dsw-alias-bg-layer-1, #fff)",
+						border: `1px solid ${ACCENT}`,
+						boxShadow: "0 4px 16px rgba(0,0,0,.14)"
+					},
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: {
+								fontSize: 10,
+								color: ACCENT,
+								fontWeight: 600
+							},
+							children: "标注模式"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+							style: {
+								fontSize: 10,
+								color: "var(--dsw-alias-label-caption, #888)"
+							},
+							children: selected.length > 0 ? `已选 ${selected.length} 个` : "点选或框选节点"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							onClick: () => {
+								setActive(false);
+								setSelected([]);
+							},
+							style: {
+								fontSize: 10,
+								padding: "2px 8px",
+								borderRadius: 5,
+								border: 0,
+								cursor: "pointer",
+								background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
+								fontFamily: "inherit"
+							},
+							children: "取消"
+						})
+					]
+				}),
+				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: overlayStyle,
+					children: [dragRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+						...normalizeRect(dragRect),
+						position: "absolute",
+						border: `1.5px dashed ${ACCENT}`,
+						background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
+						borderRadius: 4,
+						pointerEvents: "none"
+					} }) : null, selected.map((id) => {
+						const el = surfaceRef.current?.querySelector(`[data-canvas-node="${CSS.escape(id)}"]`);
+						if (el === null || el === void 0) return null;
+						const box = surfaceRef.current?.getBoundingClientRect();
+						if (box === void 0) return null;
+						const r = el.getBoundingClientRect();
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+							position: "absolute",
+							left: r.left - box.left - 3,
+							top: r.top - box.top - 3,
+							width: r.width + 6,
+							height: r.height + 6,
+							border: `2px solid ${ACCENT}`,
+							borderRadius: 8,
+							pointerEvents: "none",
+							boxShadow: "0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)"
+						} }, id);
+					})]
+				}),
+				selected.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						position: "absolute",
+						bottom: 10,
+						left: 10,
+						right: 10,
+						zIndex: 50,
+						display: "flex",
+						flexDirection: "column",
+						gap: 7,
+						padding: "10px 12px",
+						borderRadius: 10,
+						background: "var(--dsw-alias-bg-layer-1, #fff)",
+						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+						boxShadow: "0 8px 28px rgba(0,0,0,.18)"
+					},
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								display: "flex",
+								flexWrap: "wrap",
+								gap: 5
+							},
+							children: selected.map((id) => {
+								const n = nodeById.get(id);
+								return n === void 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									style: {
+										display: "inline-flex",
+										alignItems: "center",
+										gap: 4,
+										fontSize: 10,
+										padding: "1.5px 7px",
+										borderRadius: 5,
+										background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
+										color: ACCENT
+									},
+									children: [nodeLabelOf(n), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+										type: "button",
+										onClick: () => setSelected((prev) => prev.filter((x) => x !== id)),
+										style: {
+											border: 0,
+											background: "none",
+											cursor: "pointer",
+											padding: 0,
+											color: "inherit",
+											fontSize: 11,
+											lineHeight: 1
+										},
+										children: "×"
+									})]
+								}, id);
+							})
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+							style: {
+								display: "flex",
+								gap: 5,
+								flexWrap: "wrap"
+							},
+							children: QUICK_PHRASES.map((phrase) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
-								onClick: () => {
-									setActive(false);
-									setSelected([]);
-								},
+								onClick: () => setNote((cur) => cur.length > 0 ? `${cur}；${phrase}` : phrase),
 								style: {
 									fontSize: 10,
 									padding: "2px 8px",
 									borderRadius: 5,
-									border: 0,
+									border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+									background: "none",
 									cursor: "pointer",
-									background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
+									color: "var(--dsw-alias-label-secondary, inherit)",
 									fontFamily: "inherit"
 								},
-								children: "取消"
-							})
-						]
-					}),
-					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							position: "absolute",
-							inset: 0,
-							zIndex: 30,
-							background: "rgba(0,0,0,.04)",
-							cursor: "crosshair",
-							pointerEvents: "none"
-						},
-						children: [dragRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-							...normalizeRect(dragRect),
-							position: "absolute",
-							border: `1.5px dashed ${ACCENT}`,
-							background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
-							borderRadius: 4,
-							pointerEvents: "none"
-						} }) : null, selected.map((id) => {
-							const el = surfaceRef.current?.querySelector(`[data-canvas-node="${CSS.escape(id)}"]`);
-							if (el === null || el === void 0) return null;
-							const box = surfaceRef.current?.getBoundingClientRect();
-							if (box === void 0) return null;
-							const r = el.getBoundingClientRect();
-							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-								position: "absolute",
-								left: r.left - box.left - 3,
-								top: r.top - box.top - 3,
-								width: r.width + 6,
-								height: r.height + 6,
-								border: `2px solid ${ACCENT}`,
-								borderRadius: 8,
-								pointerEvents: "none",
-								boxShadow: "0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)"
-							} }, id);
-						})]
-					}),
-					selected.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-						style: {
-							position: "absolute",
-							bottom: 10,
-							left: 10,
-							right: 10,
-							zIndex: 50,
-							display: "flex",
-							flexDirection: "column",
-							gap: 7,
-							padding: "10px 12px",
-							borderRadius: 10,
-							background: "var(--dsw-alias-bg-layer-1, #fff)",
-							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-							boxShadow: "0 8px 28px rgba(0,0,0,.18)"
-						},
-						children: [
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+								children: phrase
+							}, phrase))
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+							value: note,
+							onChange: (e) => setNote(e.target.value),
+							placeholder: "写下修改建议…（将注入输入框为草稿，可编辑后发送）",
+							rows: 2,
+							style: {
+								fontSize: 11.5,
+								padding: "6px 8px",
+								borderRadius: 7,
+								border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+								background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
+								color: "inherit",
+								resize: "vertical",
+								fontFamily: "inherit"
+							}
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+							style: {
+								display: "flex",
+								gap: 6,
+								justifyContent: "flex-end"
+							},
+							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: () => setSelected([]),
 								style: {
-									display: "flex",
-									flexWrap: "wrap",
-									gap: 5
-								},
-								children: selected.map((id) => {
-									const n = nodeById.get(id);
-									return n === void 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-										style: {
-											display: "inline-flex",
-											alignItems: "center",
-											gap: 4,
-											fontSize: 10,
-											padding: "1.5px 7px",
-											borderRadius: 5,
-											background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
-											color: ACCENT
-										},
-										children: [nodeLabelOf(n), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											onClick: () => setSelected((prev) => prev.filter((x) => x !== id)),
-											style: {
-												border: 0,
-												background: "none",
-												cursor: "pointer",
-												padding: 0,
-												color: "inherit",
-												fontSize: 11,
-												lineHeight: 1
-											},
-											children: "×"
-										})]
-									}, id);
-								})
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-								style: {
-									display: "flex",
-									gap: 5,
-									flexWrap: "wrap"
-								},
-								children: QUICK_PHRASES.map((phrase) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => setNote((cur) => cur.length > 0 ? `${cur}；${phrase}` : phrase),
-									style: {
-										fontSize: 10,
-										padding: "2px 8px",
-										borderRadius: 5,
-										border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
-										background: "none",
-										cursor: "pointer",
-										color: "var(--dsw-alias-label-secondary, inherit)",
-										fontFamily: "inherit"
-									},
-									children: phrase
-								}, phrase))
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
-								value: note,
-								onChange: (e) => setNote(e.target.value),
-								placeholder: "写下修改建议…（将注入输入框为草稿，可编辑后发送）",
-								rows: 2,
-								style: {
-									fontSize: 11.5,
-									padding: "6px 8px",
-									borderRadius: 7,
+									fontSize: 10.5,
+									padding: "3px 10px",
+									borderRadius: 6,
 									border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-									background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
-									color: "inherit",
-									resize: "vertical",
+									background: "none",
+									cursor: "pointer",
 									fontFamily: "inherit"
-								}
-							}),
-							/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-								style: {
-									display: "flex",
-									gap: 6,
-									justifyContent: "flex-end"
 								},
-								children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: () => setSelected([]),
-									style: {
-										fontSize: 10.5,
-										padding: "3px 10px",
-										borderRadius: 6,
-										border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-										background: "none",
-										cursor: "pointer",
-										fontFamily: "inherit"
-									},
-									children: "清除选择"
-								}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-									type: "button",
-									onClick: submit,
-									disabled: note.trim().length === 0,
-									style: {
-										fontSize: 10.5,
-										padding: "3px 12px",
-										borderRadius: 6,
-										border: 0,
-										cursor: note.trim().length > 0 ? "pointer" : "not-allowed",
-										fontFamily: "inherit",
-										color: "#fff",
-										background: note.trim().length > 0 ? ACCENT : "var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2))"
-									},
-									children: "注入草稿"
-								})]
-							})
-						]
-					}) : null,
-					toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
-						style: {
-							position: "absolute",
-							top: 44,
-							left: "50%",
-							transform: "translateX(-50%)",
-							zIndex: 60,
-							fontSize: 10.5,
-							padding: "5px 12px",
-							borderRadius: 7,
-							background: "var(--dsw-alias-bg-layer-1, #fff)",
-							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-							boxShadow: "0 4px 14px rgba(0,0,0,.14)",
-							whiteSpace: "nowrap"
-						},
-						children: toast
-					}) : null
-				]
-			});
+								children: "清除选择"
+							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: submit,
+								disabled: note.trim().length === 0,
+								style: {
+									fontSize: 10.5,
+									padding: "3px 12px",
+									borderRadius: 6,
+									border: 0,
+									cursor: note.trim().length > 0 ? "pointer" : "not-allowed",
+									fontFamily: "inherit",
+									color: "#fff",
+									background: note.trim().length > 0 ? ACCENT : "var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2))"
+								},
+								children: "注入草稿"
+							})]
+						})
+					]
+				}) : null,
+				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						position: "absolute",
+						top: 44,
+						left: "50%",
+						transform: "translateX(-50%)",
+						zIndex: 60,
+						fontSize: 10.5,
+						padding: "5px 12px",
+						borderRadius: 7,
+						background: "var(--dsw-alias-bg-layer-1, #fff)",
+						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+						boxShadow: "0 4px 14px rgba(0,0,0,.14)",
+						whiteSpace: "nowrap"
+					},
+					children: toast
+				}) : null
+			] });
 		}
 		function normalizeRect(r) {
 			return {

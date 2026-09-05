@@ -91,7 +91,7 @@ export function AnnotationOverlay({ snapshot, containerRef }: { snapshot: Canvas
     reportAnnotation({ canvasId: snapshot.canvasId, revision: snapshot.revision, targets: selected, note: note.trim() })
   }
 
-  // ── 非激活态：只渲染开关按钮（挂在卡片头部区） ──
+  // ── 非激活态：开关按钮浮在卡片头部右侧（与控制条同位，0.2.1 位置修复） ──
   if (!active) {
     return (
       <button
@@ -99,6 +99,7 @@ export function AnnotationOverlay({ snapshot, containerRef }: { snapshot: Canvas
         onClick={() => setActive(true)}
         title="标注画布：圈选元素写评注，注入输入框草稿"
         style={{
+          position: 'absolute', top: 6, right: 8, zIndex: 40,
           display: 'inline-flex', alignItems: 'center', gap: 5,
           fontSize: 10.5, padding: '2px 9px', borderRadius: 6, cursor: 'pointer',
           color: 'var(--dsw-alias-label-secondary, inherit)',
@@ -116,48 +117,76 @@ export function AnnotationOverlay({ snapshot, containerRef }: { snapshot: Canvas
   }
 
   // ── 激活态：蒙层 + 圈选 + 评注面板 ──
-  // 事件模型（2026-09-05 真机修复）：蒙层 pointer-events:none 让点击穿透到节点；
-  // 拖拽圈选与点选都挂在外层 Fragment 的包裹 div 上（onClickCapture 捕获节点点击）。
+  // 事件模型 v2（0.2.1 用户真机反馈修复）：蒙层 pointer-events:auto——
+  // ① cursor:crosshair 才生效（none 时鼠标命中下层普通元素，视觉无反馈）
+  // ② 点选改用 document.elementsFromPoint 穿透命中（蒙层在最上，但
+  //    elementsFromPoint 返回堆叠列表，可找到下方的 data-canvas-node）
+  // ③ userSelect:none 防拖拽圈选时选中页面文本
   const overlayStyle: CSSProperties = {
     position: 'absolute', inset: 0, zIndex: 30,
     background: 'rgba(0,0,0,.04)',
     cursor: 'crosshair',
-    pointerEvents: 'none',
+    pointerEvents: 'auto',
+    userSelect: 'none',
   }
 
   return (
-    <div
-      style={{ display: 'contents' }}
-      onClickCapture={(e) => {
-        // 点选：捕获穿透上来的节点点击（蒙层 pointer-events:none 不拦截）
-        const el = (e.target as HTMLElement).closest('[data-canvas-node]')
-        const id = el?.getAttribute('data-canvas-node')
-        if (id === undefined || id === null || id === '') return
-        e.stopPropagation()
-        e.preventDefault()
-        setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-      }}
-      onPointerDownCapture={(e) => {
-        // 拖拽圈选起点（捕获在容器级；蒙层纯视觉不接事件）
-        if (e.button !== 0) return
-        const box = surfaceRef.current?.getBoundingClientRect()
-        if (box === undefined) return
-        dragStart.current = { x: e.clientX - box.left, y: e.clientY - box.top }
-        setDragRect({ x: e.clientX - box.left, y: e.clientY - box.top, w: 0, h: 0 })
-      }}
-      onPointerMoveCapture={(e) => {
-        const start = dragStart.current
-        const box = surfaceRef.current?.getBoundingClientRect()
-        if (start === null || box === undefined) return
-        setDragRect({ x: start.x, y: start.y, w: e.clientX - box.left - start.x, h: e.clientY - box.top - start.y })
-      }}
-      onPointerUpCapture={() => {
-        if (dragRect !== null) finishDrag(normalizeRect(dragRect))
-        dragStart.current = null
-        setDragRect(null)
-      }}
-    >
-      {/* 评注控制条（覆盖在头部位置） */}
+    <>
+      {/* 蒙层：auto 事件（圈选拖拽 + 穿透点选），纯视觉装饰 */}
+      <div
+        style={overlayStyle}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          const box = surfaceRef.current?.getBoundingClientRect()
+          if (box === undefined) return
+          dragStart.current = { x: e.clientX - box.left, y: e.clientY - box.top }
+          setDragRect({ x: e.clientX - box.left, y: e.clientY - box.top, w: 0, h: 0 })
+        }}
+        onPointerMove={(e) => {
+          const start = dragStart.current
+          const box = surfaceRef.current?.getBoundingClientRect()
+          if (start === null || box === undefined) return
+          setDragRect({ x: start.x, y: start.y, w: e.clientX - box.left - start.x, h: e.clientY - box.top - start.y })
+        }}
+        onPointerUp={() => {
+          if (dragRect !== null) finishDrag(normalizeRect(dragRect))
+          dragStart.current = null
+          setDragRect(null)
+        }}
+        onClick={(e) => {
+          // 点选：纯几何命中（0.2.1 修复——elementsFromPoint 合成/覆盖层
+          // 场景不可靠）。遍历节点 rect，找包含点击坐标的节点；
+          // 多选取面积最小者（嵌套/容器节点时命中最内层）。
+          let best: { id: string; area: number } | null = null
+          for (const el of surfaceRef.current?.querySelectorAll<HTMLElement>('[data-canvas-node]') ?? []) {
+            const r = el.getBoundingClientRect()
+            const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+            if (!inside) continue
+            const area = r.width * r.height
+            if (best === null || area < best.area) {
+              const id = el.getAttribute('data-canvas-node')
+              if (id !== null && id.length > 0) best = { id, area }
+            }
+          }
+          if (best !== null) {
+            const id = best.id
+            setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+          }
+        }}
+      >
+        {/* 拖拽框 */}
+        {dragRect !== null ? <div style={{ ...normalizeRect(dragRect), position: 'absolute', border: `1.5px dashed ${ACCENT}`, background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)', borderRadius: 4, pointerEvents: 'none' }} /> : null}
+        {/* 已选节点高亮框 */}
+        {selected.map(id => {
+          const el = surfaceRef.current?.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(id)}"]`)
+          if (el === null || el === undefined) return null
+          const box = surfaceRef.current?.getBoundingClientRect()
+          if (box === undefined) return null
+          const r = el.getBoundingClientRect()
+          return <div key={id} style={{ position: 'absolute', left: r.left - box.left - 3, top: r.top - box.top - 3, width: r.width + 6, height: r.height + 6, border: `2px solid ${ACCENT}`, borderRadius: 8, pointerEvents: 'none', boxShadow: '0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)' }} />
+        })}
+      </div>
+      {/* 评注控制条（覆盖在头部位置；蒙层之后 z40 保持可点） */}
       <div style={{
         position: 'absolute', top: 6, right: 8, zIndex: 40,
         display: 'flex', alignItems: 'center', gap: 6,
@@ -243,7 +272,7 @@ export function AnnotationOverlay({ snapshot, containerRef }: { snapshot: Canvas
           {toast}
         </div>
       ) : null}
-    </div>
+    </>
   )
 }
 
