@@ -8257,7 +8257,7 @@ function validateWidget(widget, widgetId, panelId, depth = 0) {
 	const sourceRecord = source;
 	if (sourceRecord.type === "preset") {
 		const kind = sourceRecord.kind;
-		if (typeof kind !== "string" || !PRESET_KINDS.includes(kind)) throw new Error(`panel widget "${widgetId}" preset kind "${String(kind)}" is not in the preset whitelist; see §6.1 for the 40 supported kinds`);
+		if (typeof kind !== "string" || !PRESET_KINDS.includes(kind)) throw new Error(`panel widget "${widgetId}" preset kind "${String(kind)}" is not in the preset whitelist; see §6.1 for the 40 supported kinds. If you need a widget family the platform does not ship (e.g. form inputs), this is a platform capability gap: report it to the maintainer and stop — do not modify or patch platform packages under vendor/node_modules.`);
 		if (sourceRecord.props !== void 0 && (typeof sourceRecord.props !== "object" || sourceRecord.props === null)) throw new Error(`panel widget "${widgetId}" preset props must be an object`);
 		if (sourceRecord.children !== void 0) throw new Error(`panel widget "${widgetId}" preset source must not carry children directly — children is a prop: move it into source.props.children`);
 		const preset = getPreset(kind);

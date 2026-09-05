@@ -205,7 +205,8 @@ function validateWidget(widget: unknown, widgetId: string, panelId: string, dept
   if (sourceRecord.type === 'preset') {
     const kind = sourceRecord.kind
     if (typeof kind !== 'string' || !(PRESET_KINDS as readonly string[]).includes(kind)) {
-      throw new Error(`panel widget "${widgetId}" preset kind "${String(kind)}" is not in the preset whitelist; see §6.1 for the 40 supported kinds`)
+      // 平台边界协议（L3）：预设族之外（如 form 类）= 平台能力缺口——指引报告而非越界改平台
+      throw new Error(`panel widget "${widgetId}" preset kind "${String(kind)}" is not in the preset whitelist; see §6.1 for the 40 supported kinds. If you need a widget family the platform does not ship (e.g. form inputs), this is a platform capability gap: report it to the maintainer and stop — do not modify or patch platform packages under vendor/node_modules.`)
     }
     if (sourceRecord.props !== undefined && (typeof sourceRecord.props !== 'object' || sourceRecord.props === null)) {
       throw new Error(`panel widget "${widgetId}" preset props must be an object`)
