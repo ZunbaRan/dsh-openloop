@@ -667,18 +667,67 @@ window.__ModuleLoader__.load({
 			} catch {}
 		}
 		//#endregion
+		//#region src/client/canvas-annotations.ts
+		const KEY_PREFIX = "qoder-canvas.annotations.v1.";
+		function keyOf(canvasId) {
+			return KEY_PREFIX + canvasId;
+		}
+		function readAll(canvasId) {
+			try {
+				const raw = localStorage.getItem(keyOf(canvasId));
+				if (raw === null) return [];
+				const parsed = JSON.parse(raw);
+				return Array.isArray(parsed) ? parsed.filter((a) => typeof a?.id === "string" && typeof a?.note === "string") : [];
+			} catch {
+				return [];
+			}
+		}
+		function writeAll(canvasId, items) {
+			try {
+				localStorage.setItem(keyOf(canvasId), JSON.stringify(items));
+			} catch {}
+		}
+		function listAnnotations(canvasId) {
+			return readAll(canvasId);
+		}
+		function addAnnotation(input) {
+			const annotation = {
+				...input,
+				id: `ann_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`,
+				createdAt: (/* @__PURE__ */ new Date()).toISOString()
+			};
+			writeAll(input.canvasId, [...readAll(input.canvasId), annotation]);
+			return annotation;
+		}
+		function updateAnnotationNote(canvasId, id, note) {
+			writeAll(canvasId, readAll(canvasId).map((a) => a.id === id ? {
+				...a,
+				note
+			} : a));
+		}
+		function removeAnnotation(canvasId, id) {
+			writeAll(canvasId, readAll(canvasId).filter((a) => a.id !== id));
+		}
+		/** 进 composer 的草稿格式：引用头 + 评注（纯文本胶囊风格） */
+		function formatAnnotationDraft(snapshot, targets, note) {
+			const lines = targets.map((t) => t.kind === "node" ? `▸ ${t.id} ${t.label}` : `▸ 文本 "${t.excerpt}"`);
+			return `[画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}]\n${lines.join("\n")}\n${note}`;
+		}
+		//#endregion
 		//#region src/client/AnnotationOverlay.tsx
 		/**
-		* AnnotationOverlay：画布标注层（M2，设计文档 §3.3）。
+		* AnnotationOverlay v2（M2.5，用户 2026-09-05 拍板的交互重做）：
+		* 「浏览器检查器选择器 + CodeBuddy 注释」模型：
 		*
-		* 交互：标注模式开关（卡片头按钮）→ 元素 hover 高亮 + 点选 / 矩形拖圈
-		* （node rect 与选框相交判定）→ 评注输入弹层（快捷短语）→ 编排注入 composer。
+		* 1. 标注模式：节点 hover → outline 高亮 + 角标 badge（检查器感）；
+		*    点选 → 高亮固定 + 选中元素右上悬浮「💬 评论」按钮
+		* 2. 文本：画布内文本选中（浏览器原生 selection）→ 选区末端悬浮「评论」按钮
+		* 3. 框选：拖框圈节点 → 松手【直接弹出评注输入框】（用户拍板，少一步点击）
+		* 4. 评注输入框（悬浮可取消）→ 保存 → 草稿注入 composer（引用头+评注）
+		*    + 注释持久化到画布（元素角标 ①，hover 弹出详情卡可编辑/删除）
 		*
-		* 实现要点：
-		* - 每个 node 渲染时自带 data-canvas-node="<id>"（CanvasSurface 已加），
-		*   overlay 用它做命中判定，无需独立坐标系
-		* - 矩形圈选：overlay 蒙层上拖拽画框，松手时取所有与框相交的 node rect
-		* - 编排：node id → title 翻译（meta 内嵌快照在手），紧凑草稿格式见 §3.3
+		* 事件模型（v0.2.1 教训保留）：蒙层 pointer-events:auto + cursor:crosshair；
+		* 点选/框选/悬停命中全部走【纯几何法】（遍历节点 rect），不依赖 elementsFromPoint。
 		*/
 		const ACCENT = "var(--dsw-alias-state-business-primary, #4176e6)";
 		const QUICK_PHRASES = [
@@ -687,21 +736,48 @@ window.__ModuleLoader__.load({
 			"这里错了",
 			"删掉这块"
 		];
-		/** node id → 人类可读描述（类型 + 标题/首行文本） */
+		/** node id → 人类可读描述（类型 + 标题/首行） */
 		function nodeLabelOf(node) {
 			const p = node.props;
 			return typeof p.title === "string" && p.title.length > 0 ? p.title : typeof p.label === "string" && p.label.length > 0 ? p.label : typeof p.text === "string" && p.text.length > 0 ? p.text.length > 24 ? `${p.text.slice(0, 24)}…` : p.text : node.type;
 		}
-		/** 编排为紧凑草稿文本（§3.3 格式） */
-		function formatAnnotationDraft(snapshot, draft) {
-			const targetText = draft.targets.map((t) => `${t.id} ${t.label}`).join(", ");
-			return `[画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision} · 选中 ${draft.targets.length} 个节点: ${targetText}]\n${draft.note}`;
+		function normalizeRect(r) {
+			return {
+				x: Math.min(r.x, r.x + r.w),
+				y: Math.min(r.y, r.y + r.h),
+				w: Math.abs(r.w),
+				h: Math.abs(r.h)
+			};
+		}
+		/** 几何命中：surface 内找包含坐标点的最小面积 node */
+		function hitNode(surface, clientX, clientY) {
+			let best = null;
+			for (const el of surface.querySelectorAll("[data-canvas-node]")) {
+				const r = el.getBoundingClientRect();
+				if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+				const area = r.width * r.height;
+				const id = el.getAttribute("data-canvas-node");
+				if (id !== null && id.length > 0 && (best === null || area < best.area)) best = {
+					id,
+					area,
+					rect: r
+				};
+			}
+			return best === null ? null : {
+				id: best.id,
+				rect: best.rect
+			};
 		}
 		function AnnotationOverlay({ snapshot, containerRef }) {
 			const [active, setActive] = (0, react.useState)(false);
-			const [selected, setSelected] = (0, react.useState)([]);
+			const [hoveredId, setHoveredId] = (0, react.useState)(null);
+			const [lockedId, setLockedId] = (0, react.useState)(null);
+			const [targets, setTargets] = (0, react.useState)([]);
+			const [draftRect, setDraftRect] = (0, react.useState)(null);
 			const [note, setNote] = (0, react.useState)("");
-			const [dragRect, setDragRect] = (0, react.useState)(null);
+			const [noteBox, setNoteBox] = (0, react.useState)(null);
+			const [annotations, setAnnotations] = (0, react.useState)(() => listAnnotations(snapshot.canvasId));
+			const [editAnn, setEditAnn] = (0, react.useState)(null);
 			const [toast, setToast] = (0, react.useState)(null);
 			const dragStart = (0, react.useRef)(null);
 			const surfaceRef = containerRef;
@@ -710,53 +786,76 @@ window.__ModuleLoader__.load({
 				setToast(msg);
 				setTimeout(() => {
 					setToast((cur) => cur === msg ? null : cur);
-				}, 2e3);
+				}, 2200);
 			};
-			/** 矩形圈选：与选框相交的 node 全选 */
-			const finishDrag = (rect) => {
-				const surface = surfaceRef.current;
-				if (surface === null || Math.abs(rect.w) < 8 && Math.abs(rect.h) < 8) return;
-				const hits = [];
-				for (const el of surface.querySelectorAll("[data-canvas-node]")) {
-					const r = el.getBoundingClientRect();
-					const box = surface.getBoundingClientRect();
-					const nx = r.left - box.left, ny = r.top - box.top;
-					if (nx < rect.x + rect.w && nx + r.width > rect.x && ny < rect.y + rect.h && ny + r.height > rect.y) hits.push(el.getAttribute("data-canvas-node") ?? "");
-				}
-				setSelected((prev) => [.../* @__PURE__ */ new Set([...prev, ...hits.filter(Boolean)])]);
+			/** 文本选择监听（仅画布内）：selection 完成 → targets = 文本节选 + 浮评论按钮 */
+			(0, react.useEffect)(() => {
+				if (!active) return;
+				const onSel = () => {
+					const sel = window.getSelection();
+					if (sel === null || sel.isCollapsed || sel.rangeCount === 0) return;
+					const range = sel.getRangeAt(0);
+					const container = range.commonAncestorContainer;
+					const el = container.nodeType === Node.TEXT_NODE ? container.parentElement : container;
+					if (el === null || surfaceRef.current?.contains(el) !== true) return;
+					const text = sel.toString().trim();
+					if (text.length < 4) return;
+					const rects = range.getClientRects();
+					const last = rects[rects.length - 1];
+					if (last === void 0) return;
+					const box = surfaceRef.current.getBoundingClientRect();
+					setTargets([{
+						kind: "text",
+						excerpt: text.length > 60 ? `${text.slice(0, 60)}…` : text
+					}]);
+					setNoteBox({
+						x: last.right - box.left,
+						y: last.bottom - box.top + 6,
+						w: 320,
+						h: 0
+					});
+				};
+				document.addEventListener("mouseup", onSel);
+				return () => document.removeEventListener("mouseup", onSel);
+			}, [active, surfaceRef]);
+			/** 收集 targets（单节点锁定/框选/文本已各自写入 setTargets）后弹评注框 */
+			const openNoteBox = (anchor) => {
+				setNoteBox(anchor);
 			};
-			const submit = () => {
-				if (selected.length === 0 || note.trim().length === 0) return;
-				const targets = selected.map((id) => nodeById.get(id)).filter((n) => n !== void 0).map((n) => ({
-					id: n.id,
-					label: nodeLabelOf(n)
-				}));
-				const text = formatAnnotationDraft(snapshot, {
+			const saveAnnotation = () => {
+				const trimmed = note.trim();
+				if (trimmed.length === 0 || targets.length === 0) return;
+				const text = formatAnnotationDraft(snapshot, targets, trimmed);
+				const ok = injectComposerDraft(text);
+				addAnnotation({
+					canvasId: snapshot.canvasId,
+					revision: snapshot.revision,
 					targets,
-					note: note.trim()
+					note: trimmed
 				});
-				if (injectComposerDraft(text)) {
-					showToast(`已注入输入框草稿（${targets.length} 个节点）——可编辑后发送`);
-					setActive(false);
-					setSelected([]);
-					setNote("");
-				} else {
-					showToast("注入失败——复制到剪贴板");
-					try {
-						navigator.clipboard?.writeText(text);
-					} catch {}
-				}
+				setAnnotations(listAnnotations(snapshot.canvasId));
 				reportAnnotation({
 					canvasId: snapshot.canvasId,
 					revision: snapshot.revision,
-					targets: selected,
-					note: note.trim()
+					targets: targets.map((t) => t.kind === "node" ? t.id : "text"),
+					note: trimmed
 				});
+				showToast(ok ? "注释已保存并注入输入框草稿" : "注释已保存；注入失败已复制到剪贴板");
+				if (!ok) try {
+					navigator.clipboard?.writeText(text);
+				} catch {}
+				setTargets([]);
+				setLockedId(null);
+				setNote("");
+				setNoteBox(null);
+				setActive(false);
 			};
+			/** 评注详情卡：hover 元素角标弹出 */
+			const annForNode = (nodeId) => annotations.filter((a) => a.targets.some((t) => t.kind === "node" && t.id === nodeId));
 			if (!active) return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 				type: "button",
 				onClick: () => setActive(true),
-				title: "标注画布：圈选元素写评注，注入输入框草稿",
+				title: "标注画布：点选/框选元素或选中文本，写评注注入输入框",
 				style: {
 					position: "absolute",
 					top: 6,
@@ -787,94 +886,7 @@ window.__ModuleLoader__.load({
 					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M12 20h9" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" })]
 				}), "标注"]
 			});
-			const overlayStyle = {
-				position: "absolute",
-				inset: 0,
-				zIndex: 30,
-				background: "rgba(0,0,0,.04)",
-				cursor: "crosshair",
-				pointerEvents: "auto",
-				userSelect: "none"
-			};
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
-				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: overlayStyle,
-					onPointerDown: (e) => {
-						if (e.button !== 0) return;
-						const box = surfaceRef.current?.getBoundingClientRect();
-						if (box === void 0) return;
-						dragStart.current = {
-							x: e.clientX - box.left,
-							y: e.clientY - box.top
-						};
-						setDragRect({
-							x: e.clientX - box.left,
-							y: e.clientY - box.top,
-							w: 0,
-							h: 0
-						});
-					},
-					onPointerMove: (e) => {
-						const start = dragStart.current;
-						const box = surfaceRef.current?.getBoundingClientRect();
-						if (start === null || box === void 0) return;
-						setDragRect({
-							x: start.x,
-							y: start.y,
-							w: e.clientX - box.left - start.x,
-							h: e.clientY - box.top - start.y
-						});
-					},
-					onPointerUp: () => {
-						if (dragRect !== null) finishDrag(normalizeRect(dragRect));
-						dragStart.current = null;
-						setDragRect(null);
-					},
-					onClick: (e) => {
-						let best = null;
-						for (const el of surfaceRef.current?.querySelectorAll("[data-canvas-node]") ?? []) {
-							const r = el.getBoundingClientRect();
-							if (!(e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom)) continue;
-							const area = r.width * r.height;
-							if (best === null || area < best.area) {
-								const id = el.getAttribute("data-canvas-node");
-								if (id !== null && id.length > 0) best = {
-									id,
-									area
-								};
-							}
-						}
-						if (best !== null) {
-							const id = best.id;
-							setSelected((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-						}
-					},
-					children: [dragRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-						...normalizeRect(dragRect),
-						position: "absolute",
-						border: `1.5px dashed ${ACCENT}`,
-						background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
-						borderRadius: 4,
-						pointerEvents: "none"
-					} }) : null, selected.map((id) => {
-						const el = surfaceRef.current?.querySelector(`[data-canvas-node="${CSS.escape(id)}"]`);
-						if (el === null || el === void 0) return null;
-						const box = surfaceRef.current?.getBoundingClientRect();
-						if (box === void 0) return null;
-						const r = el.getBoundingClientRect();
-						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-							position: "absolute",
-							left: r.left - box.left - 3,
-							top: r.top - box.top - 3,
-							width: r.width + 6,
-							height: r.height + 6,
-							border: `2px solid ${ACCENT}`,
-							borderRadius: 8,
-							pointerEvents: "none",
-							boxShadow: "0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)"
-						} }, id);
-					})]
-				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
 						position: "absolute",
@@ -904,13 +916,15 @@ window.__ModuleLoader__.load({
 								fontSize: 10,
 								color: "var(--dsw-alias-label-caption, #888)"
 							},
-							children: selected.length > 0 ? `已选 ${selected.length} 个` : "点选或框选节点"
+							children: "点选 / 框选 / 选文本"
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 							type: "button",
 							onClick: () => {
 								setActive(false);
-								setSelected([]);
+								setTargets([]);
+								setLockedId(null);
+								setNoteBox(null);
 							},
 							style: {
 								fontSize: 10,
@@ -926,40 +940,149 @@ window.__ModuleLoader__.load({
 					]
 				}),
 				/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-					style: overlayStyle,
-					children: [dragRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-						...normalizeRect(dragRect),
-						position: "absolute",
-						border: `1.5px dashed ${ACCENT}`,
-						background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
-						borderRadius: 4,
-						pointerEvents: "none"
-					} }) : null, selected.map((id) => {
-						const el = surfaceRef.current?.querySelector(`[data-canvas-node="${CSS.escape(id)}"]`);
-						if (el === null || el === void 0) return null;
-						const box = surfaceRef.current?.getBoundingClientRect();
-						if (box === void 0) return null;
-						const r = el.getBoundingClientRect();
-						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
-							position: "absolute",
-							left: r.left - box.left - 3,
-							top: r.top - box.top - 3,
-							width: r.width + 6,
-							height: r.height + 6,
-							border: `2px solid ${ACCENT}`,
-							borderRadius: 8,
-							pointerEvents: "none",
-							boxShadow: "0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)"
-						} }, id);
-					})]
-				}),
-				selected.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: {
 						position: "absolute",
-						bottom: 10,
-						left: 10,
-						right: 10,
+						inset: 0,
+						zIndex: 30,
+						background: "rgba(0,0,0,.04)",
+						cursor: "crosshair",
+						pointerEvents: "auto",
+						userSelect: "none"
+					},
+					onPointerMove: (e) => {
+						const start = dragStart.current;
+						const box = surfaceRef.current?.getBoundingClientRect();
+						if (start !== null && box !== void 0) {
+							setDraftRect({
+								x: start.x,
+								y: start.y,
+								w: e.clientX - box.left - start.x,
+								h: e.clientY - box.top - start.y
+							});
+							setHoveredId(null);
+							return;
+						}
+						const surface = surfaceRef.current;
+						if (surface === null) return;
+						const hit = hitNode(surface, e.clientX, e.clientY);
+						setHoveredId(hit?.id ?? null);
+					},
+					onPointerDown: (e) => {
+						if (e.button !== 0) return;
+						const box = surfaceRef.current?.getBoundingClientRect();
+						if (box === void 0) return;
+						dragStart.current = {
+							x: e.clientX - box.left,
+							y: e.clientY - box.top
+						};
+						setDraftRect({
+							x: e.clientX - box.left,
+							y: e.clientY - box.top,
+							w: 0,
+							h: 0
+						});
+					},
+					onPointerUp: () => {
+						const rect = draftRect;
+						dragStart.current = null;
+						setDraftRect(null);
+						if (rect === null) return;
+						const n = normalizeRect(rect);
+						if (n.w < 10 && n.h < 10) {
+							const surface = surfaceRef.current;
+							if (surface === null) return;
+							const box = surface.getBoundingClientRect();
+							const hit = hitNode(surface, box.left + n.x, box.top + n.y);
+							if (hit !== null) {
+								const node = nodeById.get(hit.id);
+								if (node !== void 0) {
+									setLockedId(hit.id);
+									setTargets([{
+										kind: "node",
+										id: hit.id,
+										label: nodeLabelOf(node)
+									}]);
+									const box = surface.getBoundingClientRect();
+									openNoteBox({
+										x: hit.rect.right - box.left,
+										y: hit.rect.top - box.top,
+										w: 320,
+										h: 0
+									});
+								}
+							}
+							return;
+						}
+						const surface = surfaceRef.current;
+						if (surface === null) return;
+						const box = surface.getBoundingClientRect();
+						const hits = [];
+						for (const el of surface.querySelectorAll("[data-canvas-node]")) {
+							const r = el.getBoundingClientRect();
+							const nx = r.left - box.left, ny = r.top - box.top;
+							if (nx < n.x + n.w && nx + r.width > n.x && ny < n.y + n.h && ny + r.height > n.y) {
+								const id = el.getAttribute("data-canvas-node");
+								const node = id !== null ? nodeById.get(id) : void 0;
+								if (node !== void 0 && id !== null) hits.push({
+									kind: "node",
+									id,
+									label: nodeLabelOf(node)
+								});
+							}
+						}
+						if (hits.length > 0) {
+							setTargets(hits);
+							setLockedId(null);
+							openNoteBox({
+								x: n.x + n.w,
+								y: n.y,
+								w: 320,
+								h: 0
+							});
+						}
+					},
+					children: [
+						draftRect !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+							...normalizeRect(draftRect),
+							position: "absolute",
+							border: `1.5px dashed ${ACCENT}`,
+							background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)",
+							borderRadius: 4,
+							pointerEvents: "none"
+						} }) : null,
+						hoveredId !== null && hoveredId !== lockedId && !targets.some((t) => t.kind === "node" && t.id === hoveredId) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
+							surface: surfaceRef.current,
+							nodeId: hoveredId,
+							borderStyle: "outline"
+						}) : null,
+						targets.filter((t) => t.kind === "node").map((t) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightRect, {
+							surface: surfaceRef.current,
+							nodeId: t.id,
+							borderStyle: "solid"
+						}, t.id)),
+						snapshot.canvas.nodes.map((n) => {
+							const anns = annForNode(n.id);
+							if (anns.length === 0) return null;
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationBadge, {
+								surface: surfaceRef.current,
+								nodeId: n.id,
+								anns,
+								onEdit: (a) => setEditAnn(a),
+								onDelete: (a) => {
+									removeAnnotation(snapshot.canvasId, a.id);
+									setAnnotations(listAnnotations(snapshot.canvasId));
+								}
+							}, n.id);
+						})
+					]
+				}),
+				noteBox !== null && targets.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+					style: {
+						position: "absolute",
+						left: Math.max(8, Math.min(noteBox.x - 320, (surfaceRef.current?.getBoundingClientRect().width ?? 400) - 340)),
+						top: noteBox.y,
 						zIndex: 50,
+						width: 320,
 						display: "flex",
 						flexDirection: "column",
 						gap: 7,
@@ -967,7 +1090,7 @@ window.__ModuleLoader__.load({
 						borderRadius: 10,
 						background: "var(--dsw-alias-bg-layer-1, #fff)",
 						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
-						boxShadow: "0 8px 28px rgba(0,0,0,.18)"
+						boxShadow: "0 8px 28px rgba(0,0,0,.2)"
 					},
 					children: [
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
@@ -976,35 +1099,36 @@ window.__ModuleLoader__.load({
 								flexWrap: "wrap",
 								gap: 5
 							},
-							children: selected.map((id) => {
-								const n = nodeById.get(id);
-								return n === void 0 ? null : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+							children: targets.map((t, i) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+								style: {
+									display: "inline-flex",
+									alignItems: "center",
+									gap: 4,
+									fontSize: 10,
+									padding: "1.5px 7px",
+									borderRadius: 5,
+									background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
+									color: ACCENT,
+									maxWidth: "100%",
+									overflow: "hidden",
+									textOverflow: "ellipsis",
+									whiteSpace: "nowrap"
+								},
+								children: [t.kind === "node" ? `${t.id} ${t.label}` : `文本 "${t.excerpt}"`, /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => setTargets((prev) => prev.filter((_, j) => j !== i)),
 									style: {
-										display: "inline-flex",
-										alignItems: "center",
-										gap: 4,
-										fontSize: 10,
-										padding: "1.5px 7px",
-										borderRadius: 5,
-										background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
-										color: ACCENT
+										border: 0,
+										background: "none",
+										cursor: "pointer",
+										padding: 0,
+										color: "inherit",
+										fontSize: 11,
+										lineHeight: 1
 									},
-									children: [nodeLabelOf(n), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-										type: "button",
-										onClick: () => setSelected((prev) => prev.filter((x) => x !== id)),
-										style: {
-											border: 0,
-											background: "none",
-											cursor: "pointer",
-											padding: 0,
-											color: "inherit",
-											fontSize: 11,
-											lineHeight: 1
-										},
-										children: "×"
-									})]
-								}, id);
-							})
+									children: "×"
+								})]
+							}, i))
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 							style: {
@@ -1012,9 +1136,9 @@ window.__ModuleLoader__.load({
 								gap: 5,
 								flexWrap: "wrap"
 							},
-							children: QUICK_PHRASES.map((phrase) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							children: QUICK_PHRASES.map((p) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
-								onClick: () => setNote((cur) => cur.length > 0 ? `${cur}；${phrase}` : phrase),
+								onClick: () => setNote((cur) => cur.length > 0 ? `${cur}；${p}` : p),
 								style: {
 									fontSize: 10,
 									padding: "2px 8px",
@@ -1025,14 +1149,15 @@ window.__ModuleLoader__.load({
 									color: "var(--dsw-alias-label-secondary, inherit)",
 									fontFamily: "inherit"
 								},
-								children: phrase
-							}, phrase))
+								children: p
+							}, p))
 						}),
 						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
 							value: note,
 							onChange: (e) => setNote(e.target.value),
-							placeholder: "写下修改建议…（将注入输入框为草稿，可编辑后发送）",
-							rows: 2,
+							placeholder: "添加评论…（保存后注入输入框草稿）",
+							rows: 3,
+							autoFocus: true,
 							style: {
 								fontSize: 11.5,
 								padding: "6px 8px",
@@ -1052,7 +1177,12 @@ window.__ModuleLoader__.load({
 							},
 							children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
-								onClick: () => setSelected([]),
+								onClick: () => {
+									setNoteBox(null);
+									setTargets([]);
+									setLockedId(null);
+									setNote("");
+								},
 								style: {
 									fontSize: 10.5,
 									padding: "3px 10px",
@@ -1062,10 +1192,10 @@ window.__ModuleLoader__.load({
 									cursor: "pointer",
 									fontFamily: "inherit"
 								},
-								children: "清除选择"
+								children: "取消"
 							}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 								type: "button",
-								onClick: submit,
+								onClick: saveAnnotation,
 								disabled: note.trim().length === 0,
 								style: {
 									fontSize: 10.5,
@@ -1077,10 +1207,19 @@ window.__ModuleLoader__.load({
 									color: "#fff",
 									background: note.trim().length > 0 ? ACCENT : "var(--dsw-alias-interactive-bg-active, rgba(127,127,127,.2))"
 								},
-								children: "注入草稿"
+								children: "保存"
 							})]
 						})
 					]
+				}) : null,
+				editAnn !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(AnnotationEditPopover, {
+					ann: editAnn,
+					onSave: (note) => {
+						updateAnnotationNote(snapshot.canvasId, editAnn.id, note);
+						setAnnotations(listAnnotations(snapshot.canvasId));
+						setEditAnn(null);
+					},
+					onClose: () => setEditAnn(null)
 				}) : null,
 				toast !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 					style: {
@@ -1101,13 +1240,208 @@ window.__ModuleLoader__.load({
 				}) : null
 			] });
 		}
-		function normalizeRect(r) {
-			return {
-				x: Math.min(r.x, r.x + r.w),
-				y: Math.min(r.y, r.y + r.h),
-				w: Math.abs(r.w),
-				h: Math.abs(r.h)
-			};
+		/** 节点高亮框（hover outline / 锁定 solid） */
+		function HighlightRect({ surface, nodeId, borderStyle }) {
+			if (surface === null) return null;
+			const el = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"]`);
+			if (el === null) return null;
+			const box = surface.getBoundingClientRect();
+			const r = el.getBoundingClientRect();
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
+				position: "absolute",
+				left: r.left - box.left - 3,
+				top: r.top - box.top - 3,
+				width: r.width + 6,
+				height: r.height + 6,
+				border: borderStyle === "outline" ? `2px dashed ${ACCENT}` : `2px solid ${ACCENT}`,
+				borderRadius: 8,
+				pointerEvents: "none",
+				boxShadow: borderStyle === "solid" ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : "none"
+			} });
+		}
+		/** 已保存注释角标（①；hover 详情卡） */
+		function AnnotationBadge({ surface, nodeId, anns, onEdit, onDelete }) {
+			const [hover, setHover] = (0, react.useState)(false);
+			if (surface === null) return null;
+			const el = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"]`);
+			if (el === null) return null;
+			const box = surface.getBoundingClientRect();
+			const r = el.getBoundingClientRect();
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					position: "absolute",
+					left: r.right - box.left - 10,
+					top: r.top - box.top - 8,
+					zIndex: 35
+				},
+				onPointerEnter: () => setHover(true),
+				onPointerLeave: () => setHover(false),
+				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+					style: {
+						display: "inline-flex",
+						alignItems: "center",
+						justifyContent: "center",
+						minWidth: 17,
+						height: 17,
+						padding: "0 4px",
+						borderRadius: 999,
+						fontSize: 10,
+						fontWeight: 700,
+						color: "#fff",
+						background: ACCENT,
+						boxShadow: "0 2px 8px rgba(0,0,0,.2)",
+						cursor: "pointer"
+					},
+					children: anns.length
+				}), hover ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+					style: {
+						position: "absolute",
+						left: 0,
+						top: 20,
+						zIndex: 55,
+						width: 260,
+						display: "flex",
+						flexDirection: "column",
+						gap: 6,
+						padding: "8px 10px",
+						borderRadius: 9,
+						background: "var(--dsw-alias-bg-layer-1, #fff)",
+						border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+						boxShadow: "0 8px 26px rgba(0,0,0,.2)",
+						userSelect: "text"
+					},
+					children: anns.map((a) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							display: "flex",
+							gap: 6,
+							alignItems: "flex-start",
+							fontSize: 11,
+							lineHeight: 1.5
+						},
+						children: [
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+								style: {
+									flex: 1,
+									minWidth: 0
+								},
+								children: a.note
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: () => onEdit(a),
+								title: "编辑",
+								style: {
+									border: 0,
+									background: "none",
+									cursor: "pointer",
+									fontSize: 11,
+									color: "var(--dsw-alias-label-caption, #888)",
+									padding: 0
+								},
+								children: "✎"
+							}),
+							/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+								type: "button",
+								onClick: () => onDelete(a),
+								title: "删除",
+								style: {
+									border: 0,
+									background: "none",
+									cursor: "pointer",
+									fontSize: 11,
+									color: "var(--dsw-alias-label-caption, #888)",
+									padding: 0
+								},
+								children: "🗑"
+							})
+						]
+					}, a.id))
+				}) : null]
+			});
+		}
+		/** 注释编辑弹层 */
+		function AnnotationEditPopover({ ann, onSave, onClose }) {
+			const [note, setNote] = (0, react.useState)(ann.note);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+				style: {
+					position: "absolute",
+					top: 40,
+					left: "50%",
+					transform: "translateX(-50%)",
+					zIndex: 70,
+					width: 300,
+					display: "flex",
+					flexDirection: "column",
+					gap: 7,
+					padding: "10px 12px",
+					borderRadius: 10,
+					background: "var(--dsw-alias-bg-layer-1, #fff)",
+					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+					boxShadow: "0 8px 28px rgba(0,0,0,.22)"
+				},
+				children: [
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+						style: {
+							fontSize: 10.5,
+							fontWeight: 600,
+							color: ACCENT
+						},
+						children: "编辑注释"
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsx)("textarea", {
+						value: note,
+						onChange: (e) => setNote(e.target.value),
+						rows: 3,
+						autoFocus: true,
+						style: {
+							fontSize: 11.5,
+							padding: "6px 8px",
+							borderRadius: 7,
+							border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+							background: "var(--dsw-alias-bg-layer-2, #f6f6f7)",
+							color: "inherit",
+							resize: "vertical",
+							fontFamily: "inherit"
+						}
+					}),
+					/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+						style: {
+							display: "flex",
+							gap: 6,
+							justifyContent: "flex-end"
+						},
+						children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							onClick: onClose,
+							style: {
+								fontSize: 10.5,
+								padding: "3px 10px",
+								borderRadius: 6,
+								border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+								background: "none",
+								cursor: "pointer",
+								fontFamily: "inherit"
+							},
+							children: "取消"
+						}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+							type: "button",
+							onClick: () => onSave(note.trim()),
+							disabled: note.trim().length === 0,
+							style: {
+								fontSize: 10.5,
+								padding: "3px 12px",
+								borderRadius: 6,
+								border: 0,
+								cursor: "pointer",
+								fontFamily: "inherit",
+								color: "#fff",
+								background: ACCENT
+							},
+							children: "保存"
+						})]
+					})
+				]
+			});
 		}
 		//#endregion
 		//#region src/client/CanvasCard.tsx
@@ -1161,13 +1495,11 @@ window.__ModuleLoader__.load({
 				const label = typeof node.props.label === "string" ? node.props.label : "action";
 				const context = node.props.context;
 				const ctxText = typeof context === "object" && context !== null ? Object.entries(context).map(([k, v]) => `${k}=${String(v)}`).slice(0, 6).join(", ") : "";
-				const text = formatAnnotationDraft(snapshot, {
-					targets: [{
-						id: node.id,
-						label
-					}],
-					note: `执行动作：${intent}${ctxText.length > 0 ? `（${ctxText}）` : ""}`
-				});
+				const text = formatAnnotationDraft(snapshot, [{
+					kind: "node",
+					id: node.id,
+					label
+				}], `执行动作：${intent}${ctxText.length > 0 ? `（${ctxText}）` : ""}`);
 				const ok = injectComposerDraft(text);
 				showToast(ok ? `「${label}」已注入输入框草稿——可编辑后发送` : `「${label}」注入失败，已复制到剪贴板`);
 				if (!ok) try {

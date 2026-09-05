@@ -7,7 +7,8 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { useRef, useState, type ReactNode } from 'react'
 import type { CanvasSnapshot } from '../dsl.ts'
 import { CanvasSurface } from './CanvasSurface.tsx'
-import { AnnotationOverlay, formatAnnotationDraft } from './AnnotationOverlay.tsx'
+import { AnnotationOverlay } from './AnnotationOverlay.tsx'
+import { formatAnnotationDraft } from './canvas-annotations.ts'
 import { injectComposerDraft } from './composer-bridge.ts'
 
 const captionStyle = { color: 'var(--dsw-alias-label-caption, #888)', fontSize: 12 } as const
@@ -53,10 +54,9 @@ function CanvasCardInner({ snapshot }: { snapshot: CanvasSnapshot }): ReactNode 
     const ctxText = typeof context === 'object' && context !== null
       ? Object.entries(context as Record<string, unknown>).map(([k, v]) => `${k}=${String(v)}`).slice(0, 6).join(', ')
       : ''
-    const text = formatAnnotationDraft(snapshot, {
-      targets: [{ id: node.id, label }],
-      note: `执行动作：${intent}${ctxText.length > 0 ? `（${ctxText}）` : ''}`,
-    })
+    const text = formatAnnotationDraft(snapshot, [
+      { kind: 'node', id: node.id, label },
+    ], `执行动作：${intent}${ctxText.length > 0 ? `（${ctxText}）` : ''}`)
     const ok = injectComposerDraft(text)
     showToast(ok ? `「${label}」已注入输入框草稿——可编辑后发送` : `「${label}」注入失败，已复制到剪贴板`)
     if (!ok) { try { void navigator.clipboard?.writeText(text) } catch { /* 不可用 */ } }

@@ -6,6 +6,18 @@
 
 ---
 
+## ⚠️ 先读：平台能力边界（2026-09-05 首轮实跑教训）
+
+本 PRD 混合了两类内容，喂给 DSH 前必须区分，否则它会提出「改 vendor node_modules 里的平台包」这种越界方案：
+
+- **平台已有能力**（A 轨，会话内可直接用）：PB 集合机制（app_events/api_usage 先例，initCollections 幂等）、panels 数据驱动注入 + 本地后端预设族（local-backend.ts，7 预设 5 端点）、relations refresh 取数、浏览器侧 POST 写路径（30s 去重）、app-manager 写操作先例
+- **平台待扩展**（B 轨，回 openloop 源仓库走发布纪律，不归 DSH 会话）：form 预设族、声明式 submitAction 写桥、通用建集合 action、自定义聚合端点（pipeline-stats/overview）
+- **硬边界**：禁止改 vendor node_modules 平台包；禁止重启/占用 3080；真机验证用隔离实例（独立 DSH_HOME + 3082/3084）
+
+若 DSH 提出扩展平台才能继续：让它先出「能力审计 + A/B 分轨计划」（A 轨现有能力先建 studio 骨架，B 轨输出需求清单给维护者），确认后再动手。
+
+---
+
 ## 阶段 0 · 读 PRD + 复述理解（先贴这段）
 
 ```
@@ -80,14 +92,15 @@ M2：
 ## M3 · 排期/素材/表单组件
 
 ```
-M3：
+M3（注意：form 预设族属 B 轨平台扩展——若审计确认平台尚无 form 预设，
+本阶段 3/4 顺延，先交付 1/2，表单组件等 B 轨发布后补建）：
 1. studio:calendar（timeline，绑定 studio:calendar?week=）+ 排期改期写操作
 2. studio:asset-table（data-table + 搜索栏 ?q=）
 3. studio:idea-create / studio:idea-edit（form 预设族，声明式 submitAction，
-   校验失败不出请求、错误文案双语）
-4. idea-detail 的「✎ 编辑」→ emits idea:edit → idea-edit 以浮窗/跳转打开（不内嵌编辑模式）
+   校验失败不出请求、错误文案双语）【依赖 B 轨】
+4. idea-detail 的「✎ 编辑」→ emits idea:edit → idea-edit 以浮窗/跳转打开（不内嵌编辑模式）【依赖 B 轨】
 验收：空标题提交 idea-create 返回结构化校验错误；idea-edit 保存后详情/列表同步刷新；
-素材搜索过滤生效
+素材搜索过滤生效（3/4 顺延时验收只覆盖 1/2）
 ```
 
 ## M4 · 看板组装 + 系统地图 + 自观察
