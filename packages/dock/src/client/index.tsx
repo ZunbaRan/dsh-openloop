@@ -45,8 +45,9 @@ export interface DockClientService {
   isOpen(): boolean
 }
 
-function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
+function DockToggle({ open, onToggle, right }: { open: boolean; onToggle: () => void; count: number; right: number }): ReactNode {
   // 开态隐藏：顶栏自带「收起」按钮（0.8.0 起统一入口）
+  // 0.9.24：count 不再展示（幽灵化去数字），保留在签名里兼容调用方
   const [hover, setHover] = useState(false)
   if (open) return null
   return (
@@ -58,36 +59,35 @@ function DockToggle({ open, onToggle, count, right }: { open: boolean; onToggle:
       onMouseLeave={() => setHover(false)}
       style={{
         position: 'fixed',
-        // 0.9.22 用户拍板：top:60——明确落在 bsb toggle 簇（top:3~31）之下，
-        // 与 better-sidebar 共存不扎堆（0.9.17 的 36 与 bsb 簇视觉粘连）
-        top: 60,
+        // 0.9.24 用户拍板：top:38——bsb toggle 簇（top:3~31）正下方、header 分割线
+        // （≈77）以上；幽灵化（无边框/无计数/加粗图标）后与 bsb 簇融为一列
+        top: 38,
         right,
         zIndex: 2147483100,
-        minWidth: 34,
-        height: 34,
-        padding: '0 8px',
-        borderRadius: 10,
-        // 低存在感处理：无阴影、静止半透明，hover 才完全显现——浮动按钮不该抢视觉
-        border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))',
-        background: 'var(--dsw-alias-bg-layer-1, #fff)',
+        width: 28,
+        height: 28,
+        padding: 0,
+        borderRadius: '50%',
+        // 幽灵按钮：透明底、无边框，静止半透明，hover 完全显现——对齐 bsb toggle 手感
+        border: 'none',
+        background: hover ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))' : 'transparent',
         cursor: 'pointer',
         lineHeight: 1,
         opacity: hover ? 1 : 0.55,
-        transition: 'opacity .15s ease',
+        transition: 'opacity .15s ease, background .15s ease',
         display: 'flex',
         alignItems: 'center',
-        gap: 4,
+        justifyContent: 'center',
         color: 'var(--dsw-alias-label-secondary, inherit)',
       }}
     >
-      {/* 0.8.3 icon 替换：四宫格 tiles 拼贴——「看板」的本体形态 */}
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {/* 四宫格 tiles 拼贴——「看板」的本体形态（0.9.24 加粗描边适配幽灵化） */}
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <rect x="3" y="3" width="7" height="7" rx="1" />
         <rect x="14" y="3" width="7" height="7" rx="1" />
         <rect x="3" y="14" width="7" height="7" rx="1" />
         <rect x="14" y="14" width="7" height="7" rx="1" />
       </svg>
-      {count > 0 ? <span style={{ fontSize: 10, opacity: 0.7 }}>{count}</span> : null}
     </button>
   )
 }

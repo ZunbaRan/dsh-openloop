@@ -11841,10 +11841,10 @@ window.__ModuleLoader__.load({
 		//#region src/client/index.tsx
 		const name = "openloop-dock";
 		const inject = [];
-		function DockToggle({ open, onToggle, count, right }) {
+		function DockToggle({ open, onToggle, right }) {
 			const [hover, setHover] = (0, react.useState)(false);
 			if (open) return null;
-			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 				type: "button",
 				onClick: onToggle,
 				title: "展开 OpenLoop Dock",
@@ -11852,31 +11852,31 @@ window.__ModuleLoader__.load({
 				onMouseLeave: () => setHover(false),
 				style: {
 					position: "fixed",
-					top: 60,
+					top: 38,
 					right,
 					zIndex: 2147483100,
-					minWidth: 34,
-					height: 34,
-					padding: "0 8px",
-					borderRadius: 10,
-					border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.25))",
-					background: "var(--dsw-alias-bg-layer-1, #fff)",
+					width: 28,
+					height: 28,
+					padding: 0,
+					borderRadius: "50%",
+					border: "none",
+					background: hover ? "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))" : "transparent",
 					cursor: "pointer",
 					lineHeight: 1,
 					opacity: hover ? 1 : .55,
-					transition: "opacity .15s ease",
+					transition: "opacity .15s ease, background .15s ease",
 					display: "flex",
 					alignItems: "center",
-					gap: 4,
+					justifyContent: "center",
 					color: "var(--dsw-alias-label-secondary, inherit)"
 				},
-				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
-					width: "15",
-					height: "15",
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+					width: "16",
+					height: "16",
 					viewBox: "0 0 24 24",
 					fill: "none",
 					stroke: "currentColor",
-					strokeWidth: "1.6",
+					strokeWidth: "2.2",
 					strokeLinecap: "round",
 					strokeLinejoin: "round",
 					"aria-hidden": "true",
@@ -11910,13 +11910,7 @@ window.__ModuleLoader__.load({
 							rx: "1"
 						})
 					]
-				}), count > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
-					style: {
-						fontSize: 10,
-						opacity: .7
-					},
-					children: count
-				}) : null]
+				})
 			});
 		}
 		const WIDTH_KEY = "openloop.dock.width.v1";
