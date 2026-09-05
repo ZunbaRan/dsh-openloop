@@ -50,6 +50,14 @@ const SCENES = [
     ],
   },
   {
+    id: 'artifact', t: '⑧ artifact 价值场', d: '发布预览 + 提词器：预设原理上给不了的整页',
+    anno: [
+      ['kw', 'publish-preview', '多平台卡片仿真：标题输入 → 三平台卡片即时联动，一稿多投前最后一眼'],
+      ['kw', 'teleprompter', '提词器：整页大字自滚动，阅读型设备页——视频创作者刚需'],
+      ['k', 'rule', '判断标准：不是「想要好看整页」，而是「预设契约原理上表达不了」'],
+    ],
+  },
+  {
     id: 'topo', t: '⑦ 拓扑 · 系统自观察', d: 'system-map 全页 + 事件/用量元数据带',
     anno: [
       ['kw', 'artifact', 'network 档整页拓扑，节点可拖拽，openloop.fetch 取数'],
@@ -107,6 +115,7 @@ function App() {
             {scene === 'forms' ? <SceneForms /> : null}
             {scene === 'detail' ? <SceneDetail /> : null}
             {scene === 'edit' ? <SceneEdit /> : null}
+            {scene === 'artifact' ? <SceneArtifact /> : null}
             {scene === 'topo' ? <SceneTopology /> : null}
           </div>
           <div className="anno-bar">

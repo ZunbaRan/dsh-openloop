@@ -92,9 +92,34 @@ export class CanvasValidationError extends Error {
   }
 }
 
-function fail(path: string, why: string, expected?: string): never {
-  const hint = expected !== undefined ? ` Expected: ${expected}.` : ''
-  throw new CanvasValidationError(`canvas document invalid at ${path}: ${why}.${hint} Fix this field and retry.`)
+/**
+ * 错误聚合收集器（0.1.2 真机修复）：一轮校验收集【全部】错误统一报出——
+ * 真机教训：单错快抛导致模型 32 次重试才收敛（每轮 10s 只买到一个信息点）。
+ * 同一节点超过 3 个错误即截断（防错误风暴）；校验函数照旧提前 return 不抛。
+ */
+class ErrorCollector {
+  private readonly items: string[] = []
+
+  fail(path: string, why: string, expected?: string): void {
+    const hint = expected !== undefined ? ` Expected: ${expected}.` : ''
+    this.items.push(`${path}: ${why}.${hint}`)
+  }
+
+  get size(): number { return this.items.length }
+
+  throwIfAny(max = 3): void {
+    if (this.items.length === 0) return
+    const shown = this.items.slice(0, max)
+    const more = this.items.length > max ? ` (+${this.items.length - max} more — fix the listed ones and re-run; remaining errors will be reported next round)` : ''
+    throw new CanvasValidationError(`canvas document invalid (${this.items.length} error${this.items.length > 1 ? 's' : ''}):\n${shown.map(s => `  - ${s}`).join('\n')}${more}\nFix ALL listed fields and retry.`)
+  }
+}
+
+/** 当前校验回合的收集器（validateCanvasDocument 每次调用重建） */
+let collector: ErrorCollector | null = null
+
+function fail(path: string, why: string, expected?: string): void {
+  if (collector !== null) collector.fail(path, why, expected)
 }
 
 const ID_RE = /^[a-zA-Z0-9_-]{1,32}$/
@@ -121,7 +146,7 @@ function isPlainObject(v: unknown): v is JsonObject {
 }
 
 function checkString(path: string, v: unknown, maxLength: number): string {
-  if (typeof v !== 'string') fail(path, 'must be a string', 'string')
+  if (typeof v !== 'string') { fail(path, 'must be a string', 'string'); return '' }
   if (v.length > maxLength) fail(path, `length ${v.length} exceeds max ${maxLength}`, `≤ ${maxLength} chars`)
   return v
 }
@@ -134,27 +159,27 @@ function checkProp(path: string, value: unknown, rule: NodePropRule): void {
       return
     case 'number':
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (typeof value !== 'number' || !Number.isFinite(value)) fail(path, 'must be a finite number', 'number')
+      if (typeof value !== 'number' || !Number.isFinite(value)) { fail(path, 'must be a finite number', 'number'); return }
       if (rule.min !== undefined && value < rule.min) fail(path, `${value} < min ${rule.min}`)
       if (rule.max !== undefined && value > rule.max) fail(path, `${value} > max ${rule.max}`)
       return
     case 'enum':
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (typeof value !== 'string' || !rule.values.includes(value)) fail(path, `must be one of ${rule.values.join('/')}`, rule.values.join(' | '))
+      if (typeof value !== 'string' || !rule.values.includes(value)) { fail(path, `must be one of ${rule.values.join('/')}`, rule.values.join(' | ')); return }
       return
     case 'boolean':
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (typeof value !== 'boolean') fail(path, 'must be boolean', 'true | false')
+      if (typeof value !== 'boolean') { fail(path, 'must be boolean', 'true | false'); return }
       return
     case 'string-array':
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!Array.isArray(value)) fail(path, 'must be an array', 'string[]')
+      if (!Array.isArray(value)) { fail(path, 'must be an array', 'string[]'); return }
       if (value.length > rule.maxLength) fail(path, `array length ${value.length} exceeds max ${rule.maxLength}`)
       for (let i = 0; i < value.length; i += 1) checkString(`${path}[${i}]`, value[i], rule.itemMaxLength)
       return
     case 'kv-pairs': {
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!isPlainObject(value)) fail(path, 'must be an object', '{ key: value }')
+      if (!isPlainObject(value)) { fail(path, 'must be an object', '{ key: value }'); return }
       const keys = Object.keys(value)
       if (keys.length > rule.maxPairs) fail(path, `${keys.length} pairs exceeds max ${rule.maxPairs}`)
       for (const k of keys) {
@@ -165,7 +190,7 @@ function checkProp(path: string, value: unknown, rule: NodePropRule): void {
     }
     case 'chart-series': {
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!Array.isArray(value)) fail(path, 'must be an array of series', 'series[]')
+      if (!Array.isArray(value)) { fail(path, 'must be an array of series', 'series[]'); return }
       if (value.length > LIMITS.maxSeries) fail(path, `${value.length} series exceeds max ${LIMITS.maxSeries}`)
       for (let i = 0; i < value.length; i += 1) {
         const s = value[i]
@@ -187,11 +212,11 @@ function checkProp(path: string, value: unknown, rule: NodePropRule): void {
     }
     case 'table-data': {
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!Array.isArray(value)) fail(path, 'must be an array of rows', 'row[][]')
+      if (!Array.isArray(value)) { fail(path, 'must be an array of rows', 'row[][]'); return }
       if (value.length > LIMITS.maxTableRows) fail(path, `${value.length} rows exceeds max ${LIMITS.maxTableRows}; aggregate the data first`)
       for (let i = 0; i < value.length; i += 1) {
         const row = value[i]
-        if (!Array.isArray(row)) fail(`${path}[${i}]`, 'must be an array (one cell per column)')
+        if (!Array.isArray(row)) { fail(`${path}[${i}]`, 'must be an array (one cell per column)'); continue }
         if (row.length > LIMITS.maxTableColumns) fail(`${path}[${i}]`, `${row.length} cells exceeds max ${LIMITS.maxTableColumns}`)
         for (let j = 0; j < row.length; j += 1) {
           const cell = row[j]
@@ -204,7 +229,7 @@ function checkProp(path: string, value: unknown, rule: NodePropRule): void {
     }
     case 'context-object': {
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!isPlainObject(value)) fail(path, 'must be a flat object', '{ string|number|boolean }')
+      if (!isPlainObject(value)) { fail(path, 'must be a flat object', '{ string|number|boolean }'); return }
       const bytes = byteSize(value)
       if (bytes > rule.maxBytes) fail(path, `size ${bytes}B exceeds max ${rule.maxBytes}B`)
       for (const k of Object.keys(value)) {
@@ -224,36 +249,57 @@ function checkHref(path: string, href: string): void {
   }
 }
 
-/** 校验画布 document（fail-closed；抛 CanvasValidationError，消息面向 Agent 自修正） */
+/** 结构性错误（无法继续校验）——抛哨兵异常中断本轮回合，由 validateCanvasDocument 的 finally 统一报错 */
+function unreachable(): never {
+  throw new CanvasValidationError('__structural__')
+}
+
+/** 校验画布 document（fail-closed；错误聚合后统一抛 CanvasValidationError，面向 Agent 自修正） */
 export function validateCanvasDocument(value: unknown): CanvasDocument {
-  if (!isPlainObject(value)) fail('document', 'must be a JSON object')
+  collector = new ErrorCollector()
+  try {
+    return validateInner(value)
+  } catch (error) {
+    if (error instanceof CanvasValidationError && error.message === '__structural__') {
+      // 结构哨兵：本轮已有收集的错误，直接进 finally 汇总
+    } else {
+      throw error
+    }
+    return { title: '', layout: 'grid', nodes: [], edges: [] } // 不会被消费（throwIfAny 必抛）
+  } finally {
+    try { collector.throwIfAny() } finally { collector = null }
+  }
+}
+
+function validateInner(value: unknown): CanvasDocument {
+  if (!isPlainObject(value)) { fail('document', 'must be a JSON object'); throw unreachable() }
   const bytes = byteSize(value)
   if (bytes > LIMITS.maxDocumentBytes) fail('document', `size ${bytes}B exceeds max ${LIMITS.maxDocumentBytes}B; reduce nodes or data volume`)
   const title = value['title']
   if (typeof title !== 'string' || title.length === 0) fail('title', 'must be a non-empty string')
-  if (title.length > LIMITS.maxTitleLength) fail('title', `length exceeds max ${LIMITS.maxTitleLength}`)
+  else if (title.length > LIMITS.maxTitleLength) fail('title', `length exceeds max ${LIMITS.maxTitleLength}`)
   const layout = value['layout']
   if (typeof layout !== 'string' || !LAYOUTS.includes(layout as CanvasLayout)) fail('layout', `must be one of ${LAYOUTS.join('/')}`, LAYOUTS.join(' | '))
   const nodes = value['nodes']
-  if (!Array.isArray(nodes)) fail('nodes', 'must be an array')
+  if (!Array.isArray(nodes)) { fail('nodes', 'must be an array'); throw unreachable() }
   if (nodes.length === 0) fail('nodes', 'must contain at least 1 node')
   if (nodes.length > LIMITS.maxNodes) fail('nodes', `${nodes.length} nodes exceeds max ${LIMITS.maxNodes}`)
   const seenIds = new Set<string>()
   for (let i = 0; i < nodes.length; i += 1) {
     const n = nodes[i]
     const path = `nodes[${i}]`
-    if (!isPlainObject(n)) fail(path, 'must be an object')
+    if (!isPlainObject(n)) { fail(path, 'must be an object'); continue }
     if (byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`)
     const id = n['id']
     if (typeof id !== 'string' || !ID_RE.test(id)) fail(`${path}.id`, 'must match [a-zA-Z0-9_-]{1,32}')
-    if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`)
-    seenIds.add(id)
+    else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`)
+    else seenIds.add(id)
     const type = n['type']
-    if (typeof type !== 'string') fail(`${path}.type`, 'must be a string')
+    if (typeof type !== 'string') { fail(`${path}.type`, 'must be a string'); continue }
     const def = NODE_REGISTRY[type]
-    if (def === undefined) fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(' | '))
+    if (def === undefined) { fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(' | ')); continue }
     const props = n['props']
-    if (!isPlainObject(props)) fail(`${path}.props`, 'must be an object')
+    if (!isPlainObject(props)) { fail(`${path}.props`, 'must be an object'); continue }
     for (const [key, rule] of Object.entries(def.props)) {
       checkProp(`${path}.props.${key}`, props[key], rule)
     }
@@ -267,20 +313,22 @@ export function validateCanvasDocument(value: unknown): CanvasDocument {
   const edges = value['edges']
   const checkedEdges: { from: string; to: string }[] = []
   if (edges !== undefined) {
-    if (!Array.isArray(edges)) fail('edges', 'must be an array')
+    if (!Array.isArray(edges)) { fail('edges', 'must be an array'); throw unreachable() }
     if (edges.length > LIMITS.maxEdges) fail('edges', `${edges.length} edges exceeds max ${LIMITS.maxEdges}`)
     for (let i = 0; i < edges.length; i += 1) {
       const e = edges[i]
-      if (!isPlainObject(e)) fail(`edges[${i}]`, 'must be { from, to }')
+      if (!isPlainObject(e)) { fail(`edges[${i}]`, 'must be { from, to }'); continue }
       const from = e['from'], to = e['to']
-      if (typeof from !== 'string' || !seenIds.has(from)) fail(`edges[${i}].from`, `must reference an existing node id`)
-      if (typeof to !== 'string' || !seenIds.has(to)) fail(`edges[${i}].to`, 'must reference an existing node id')
-      checkedEdges.push({ from, to })
+      const fromOk = typeof from === 'string' && seenIds.has(from)
+      const toOk = typeof to === 'string' && seenIds.has(to)
+      if (!fromOk) fail(`edges[${i}].from`, `must reference an existing node id`)
+      if (!toOk) fail(`edges[${i}].to`, 'must reference an existing node id')
+      if (fromOk && toOk) checkedEdges.push({ from: from as string, to: to as string })
     }
   }
   // 未知顶层键拒绝（fail-closed）
   for (const key of Object.keys(value)) {
     if (key !== 'title' && key !== 'layout' && key !== 'nodes' && key !== 'edges') fail(key, 'unknown top-level field', 'title | layout | nodes | edges')
   }
-  return { title, layout: layout as CanvasLayout, nodes: nodes as CanvasNode[], edges: checkedEdges }
+  return { title: title as string, layout: layout as CanvasLayout, nodes: nodes as CanvasNode[], edges: checkedEdges }
 }

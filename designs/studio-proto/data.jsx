@@ -32,12 +32,13 @@ const DRAFTS = [
   { id: 'd6', ideaId: 'i2', title: '工作室搭建日志 #1', stage: '已发布', platform: '公众号', due: '09-04', owner: '阿洛' },
 ]
 
+/** 管线阶段：count 之外必须有 aging/top —— 否则管线只是美化版计数器（用户 2026-09-05 指正） */
 const STAGES = [
-  { key: 'backlog', label: '想法池', tone: 'neutral', count: 5 },
-  { key: 'doing', label: '制作中', tone: 'info', count: 1 },
-  { key: 'review', label: '审核中', tone: 'warning', count: 1 },
-  { key: 'scheduled', label: '排期中', tone: 'primary', count: 2 },
-  { key: 'published', label: '已发布', tone: 'success', count: 2 },
+  { key: 'backlog', label: '想法池', tone: 'neutral', count: 5, aging: null, top: ['Cursor vs CodeBuddy 实测', 'MCP 协议三分钟讲透'] },
+  { key: 'doing', label: '制作中', tone: 'info', count: 1, aging: '1.5 天', top: ['Claude Code 隐藏功能 Top10'] },
+  { key: 'review', label: '审核中', tone: 'warning', count: 1, aging: '3.2 天', stuck: true, top: ['我用 DSH 搭了个工作室'] },
+  { key: 'scheduled', label: '排期中', tone: 'primary', count: 2, aging: '0.8 天', top: ['30 天挑战 · Day 1-7 合集', 'Top10 图文版'] },
+  { key: 'published', label: '已发布', tone: 'success', count: 2, aging: null, top: ['30 天挑战 · 预告片', '工作室搭建日志 #1'] },
 ]
 
 const CALENDAR = [
@@ -89,6 +90,9 @@ const REL_DECLS = [
   { from: 'studio:draft-list', dir: 'in', ev: 'studio:idea:open · studio:stage:open · studio:day:open', to: '（多消费方聚合）', tpl: '—' },
   { from: 'studio:idea-detail', dir: 'in', ev: 'studio:idea:open', to: '（详情即消费方）', tpl: '{{ideaId}}' },
   { from: 'studio:idea-detail', dir: 'out', ev: 'studio:idea:promote', to: 'studio:draft-list（立项 → 建稿件）', tpl: '{{ideaId}}' },
+  { from: 'studio:idea-detail', dir: 'out', ev: 'studio:idea:edit', to: 'studio:idea-edit（独立编辑组件 · 浮窗打开）', tpl: '{{ideaId}}' },
+  { from: 'studio:idea-edit', dir: 'out', ev: 'studio:idea:updated', to: 'studio:idea-detail · studio:idea-bank（刷新）', tpl: '{{ideaId}}' },
+  { from: 'studio:idea-create', dir: 'out', ev: 'studio:idea:created', to: 'studio:idea-bank（刷新）', tpl: '—' },
   { from: 'studio:draft-detail', dir: 'in', ev: 'studio:draft:open · studio:asset:open', to: '（多消费方聚合）', tpl: '—' },
 ]
 
@@ -101,7 +105,12 @@ const STUDIO_RESOURCES = [
   { rid: 'studio:calendar', name: '排期日历', kind: 'panel', desc: 'timeline 预设 · 本周排期', emits: 'studio:day:open' },
   { rid: 'studio:asset-table', name: '素材库', kind: 'panel', desc: 'data-table 预设 · 搜索栏', emits: 'studio:asset:open' },
   { rid: 'studio:methodology', name: '创作方法论', kind: 'panel', desc: 'markdown 预设 · 静态文档', emits: null },
-  { rid: 'studio:system-map', name: '系统地图', kind: 'artifact', desc: 'network 档 · 全系统拓扑', emits: null },
+  { rid: 'studio:system-map', name: '系统地图', kind: 'artifact', desc: 'network 档 · 导航中枢 + 健康状态 + Agent 说明书', emits: null },
+  { rid: 'studio:idea-create', name: '新建想法', kind: 'panel', desc: 'form 预设族 · 校验 fail-closed', emits: 'studio:idea:created' },
+  { rid: 'studio:idea-edit', name: '编辑想法', kind: 'panel', desc: 'form 预设族 · 独立编辑组件，consumes idea:edit', emits: 'studio:idea:updated' },
+  { rid: 'studio:draft-edit', name: '编辑稿件', kind: 'panel', desc: 'form 预设族 · 独立编辑组件，consumes draft:edit', emits: 'studio:draft:updated' },
+  { rid: 'studio:publish-preview', name: '多平台发布预览', kind: 'artifact', desc: 'scripts 档 · 平台卡片仿真（预设表达不了）', emits: null },
+  { rid: 'studio:teleprompter', name: '提词器', kind: 'artifact', desc: 'scripts 档 · 整页大字自滚动（视频创作者刚需）', emits: null },
 ]
 
 const STUDIO_APIS = [

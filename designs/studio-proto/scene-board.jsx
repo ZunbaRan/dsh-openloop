@@ -84,7 +84,7 @@ function SceneBoard() {
                 label: s.label,
                 count: s.key === 'doing' ? drafts.filter((d) => d.stage === '制作中').length : s.key === 'review' ? drafts.filter((d) => d.stage === '审核中').length : s.key === 'scheduled' ? drafts.filter((d) => d.stage === '排期中').length : s.key === 'published' ? drafts.filter((d) => d.stage === '已发布').length : s.count,
                 tone: s.tone,
-                detail: s.key === 'backlog' ? '待评估的候选想法' : s.key === 'published' ? '近 30 天' : '点节点开浮窗看稿件',
+                detail: (s.stuck ? `⚠ 滞留 ${s.aging} · ` : s.aging ? `平均滞留 ${s.aging} · ` : '') + (s.top[0] || ''),
                 edgeLabel: s.key === 'doing' ? '立项' : s.key === 'review' ? '初稿完成' : s.key === 'scheduled' ? '过审' : s.key === 'published' ? '到点发布' : '',
               }))}
               onSelect={(n) => {
@@ -92,6 +92,7 @@ function SceneBoard() {
                 if (stageLabel) openFloat(stageLabel)
               }}
             />
+            <div className="ol-micro" style={{ padding: '0 14px 12px' }}>管线的作用 = <b>瓶颈监测</b>（哪阶段在堆积、滞留多久）+ <b>阶段导航</b>（点节点 → 该阶段稿件浮窗）。只显示计数的管线不如 metric-grid。</div>
           </PanelShell>
         </TileFrame>
 

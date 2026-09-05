@@ -1,11 +1,133 @@
-/** 场景 3 · APP 三列：资源注册表 + 关联声明 + 详情预览（artifact 渲染上下文 + pin） */
+/** 场景 3 · APP 三列：资源注册表 + 关联声明 + 详情预览（注册表只管寻址/预览/pin——编辑是独立组件） */
 
 const REG_APPS = [
   { id: 'openloop', name: 'openloop', kind: 'builtin', sub: '43 预设 · 自管理四件套', dot: 'ok' },
-  { id: 'studio', name: 'studio', kind: 'local', sub: '7 组件 · 5 API · 本地后端', dot: 'ok' },
+  { id: 'studio', name: 'studio', kind: 'local', sub: '14 组件 · 5 API · 本地后端', dot: 'ok' },
   { id: 'excalidraw', name: 'excalidraw', kind: 'thirdparty', sub: 'MCP Apps 2.0 · 4 工具', dot: 'ok' },
   { id: 'tldraw', name: 'tldraw', kind: 'thirdparty', sub: '不可达 · 惰性重连中', dot: 'off' },
 ]
+
+function stageNodeDetail(s) {
+  const bits = []
+  if (s.stuck) bits.push(`⚠ 滞留 ${s.aging}`)
+  else if (s.aging) bits.push(`平均滞留 ${s.aging}`)
+  if (s.top && s.top[0]) bits.push(s.top[0])
+  return bits.join(' · ')
+}
+
+function RegistryPreview({ rid }) {
+  if (rid === 'studio:system-map') {
+    return (
+      <div className="mini-topo">
+        <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+          <line x1="50%" y1="26" x2="50%" y2="64" stroke="color-mix(in srgb, var(--art-accent) 42%, transparent)" strokeWidth="1.5" />
+          <line x1="50%" y1="64" x2="16%" y2="128" stroke="color-mix(in srgb, var(--art-accent) 42%, transparent)" strokeWidth="1.5" />
+          <line x1="50%" y1="64" x2="42%" y2="128" stroke="color-mix(in srgb, var(--art-accent) 42%, transparent)" strokeWidth="1.5" />
+          <line x1="50%" y1="64" x2="62%" y2="128" stroke="color-mix(in srgb, var(--art-accent) 42%, transparent)" strokeWidth="1.5" />
+          <line x1="50%" y1="64" x2="86%" y2="128" stroke="color-mix(in srgb, var(--art-accent) 42%, transparent)" strokeWidth="1.5" />
+          <line x1="50%" y1="26" x2="84%" y2="64" stroke="color-mix(in srgb, var(--dsw-alias-label-caption) 45%, transparent)" strokeWidth="1.5" strokeDasharray="4 4" />
+        </svg>
+        <span className="mini-node hub" style={{ left: '50%', top: 12, transform: 'translateX(-50%)' }}>studio APP</span>
+        <span className="mini-node" style={{ left: '6%', top: 116 }}>想法库</span>
+        <span className="mini-node" style={{ left: '32%', top: 116 }}>管线</span>
+        <span className="mini-node" style={{ left: '54%', top: 116 }}>排期</span>
+        <span className="mini-node" style={{ left: '76%', top: 116 }}>PB × 5 集合</span>
+        <span className="mini-node warn" style={{ left: '80%', top: 52 }}>tldraw · 不可达</span>
+      </div>
+    )
+  }
+  if (rid === 'studio:pipeline-flow') {
+    return <FlowMock nodes={STAGES.map((s) => ({ key: s.key, label: s.label, count: s.count, tone: s.tone, detail: stageNodeDetail(s) }))} />
+  }
+  if (rid === 'studio:calendar') {
+    return <TimelineMock items={CALENDAR.slice(0, 3).map((c, i) => ({ time: c.day, title: c.title, detail: c.platform, status: i === 0 ? 'current' : 'future' }))} />
+  }
+  if (rid === 'studio:methodology') {
+    return (
+      <div className="ol-body ol-md">
+        <p><strong>钩子三秒法则</strong>：开头必须抛出观众此刻的问题。</p>
+        <p>一稿多投先改 <code>cover + 前 3 秒</code>。</p>
+      </div>
+    )
+  }
+  if (rid === 'studio:idea-detail' || rid === 'studio:draft-detail') {
+    return (
+      <div style={{ padding: 12 }}>
+        <DetailGridMock cells={rid === 'studio:idea-detail' ? [
+          { k: '热度', v: '92' }, { k: '标签', v: 'AI / 工具' }, { k: '状态', v: '采中' },
+          { k: '关联稿件', v: '2 条' }, { k: '创建时间', v: '2026-09-01' }, { k: '来源', v: '社群讨论' },
+        ] : [
+          { k: '阶段', v: '制作中' }, { k: '平台', v: 'B站' }, { k: '截稿', v: '09-08' },
+          { k: '负责人', v: '阿洛' }, { k: '引用素材', v: '2 项' }, { k: '来源想法', v: 'i1' },
+        ]} />
+        <div className="ol-micro" style={{ marginTop: 8 }}>只读详情 · 编辑走独立组件 studio:idea-edit（relations 浮窗，场景⑤）</div>
+      </div>
+    )
+  }
+  if (rid === 'studio:idea-create' || rid === 'studio:idea-edit' || rid === 'studio:draft-edit') {
+    return (
+      <div style={{ padding: 14 }}>
+        <div className="ol-field">
+          <span className="fl">标题 <span className="req">*</span></span>
+          <input className="ol-input" defaultValue={rid === 'studio:idea-create' ? '' : 'Claude Code 隐藏功能 Top10'} placeholder={rid === 'studio:idea-create' ? '例如：Claude Code 隐藏功能 Top12' : ''} readOnly />
+        </div>
+        <div className="ol-field">
+          <span className="fl">标签 <span className="fh">1–4 项</span></span>
+          <div className="multi-tags">
+            {['AI', '工具', '教程'].map((t, i) => <button key={t} className={`multi-tag ${i < 2 ? 'on' : ''}`}>{t}</button>)}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="save-btn">保存</button>
+          <span className="ol-micro" style={{ alignSelf: 'center' }}>submitAction 由宿主写桥执行（panel 无网络）</span>
+        </div>
+      </div>
+    )
+  }
+  if (rid === 'studio:publish-preview') {
+    return (
+      <div className="pf-row">
+        <div className="pf-card">
+          <div className="pf-cover" style={{ background: '#1f3a5f' }}><span className="t">我用 DSH 搭了个工作室</span></div>
+          <div className="pf-meta"><div className="pf1">视频号 · 竖版卡片</div><div className="pf2">封面 9:16 · 标题 2 行截断</div></div>
+        </div>
+        <div className="pf-card">
+          <div className="pf-cover" style={{ background: '#4a2d52' }}><span className="t">我用 DSH 搭了个工作室</span></div>
+          <div className="pf-meta"><div className="pf1">B站 · 横版卡片</div><div className="pf2">封面 16:9 · 时长角标</div></div>
+        </div>
+        <div className="pf-card">
+          <div className="pf-cover" style={{ background: '#5f2d2d' }}><span className="t">我用 DSH 搭了个工作室</span></div>
+          <div className="pf-meta"><div className="pf1">小红书 · 笔记卡片</div><div className="pf2">封面 3:4 · 标题压图</div></div>
+        </div>
+      </div>
+    )
+  }
+  if (rid === 'studio:teleprompter') {
+    return (
+      <div className="tp-mock">
+        <span className="tp-hint">▸ 播放中 · 1.0×</span>
+        <div className="tp-line dim">开场三秒，我只问一个问题：</div>
+        <div className="tp-line mid">你的内容管线，还在五个软件之间来回搬吗？</div>
+        <div className="tp-line">这个工作室，是我用对话搭出来的。</div>
+      </div>
+    )
+  }
+  // data-table 类默认
+  return (
+    <DataTableMock compact
+      columns={[
+        { key: 'title', label: rid === 'studio:asset-table' ? '素材' : rid === 'studio:draft-list' ? '稿件' : '想法' },
+        ...(rid === 'studio:asset-table'
+          ? [{ key: 'kind', label: '类型', render: (r) => <span className="ol-tag">{r.kind}</span> }, { key: 'size', label: '大小', num: true }]
+          : rid === 'studio:draft-list'
+            ? [{ key: 'stage', label: '阶段', render: (r) => <ToneBadge tone="info">{r.stage}</ToneBadge> }, { key: 'platform', label: '平台' }]
+            : [{ key: 'tags', label: '标签', render: (r) => <TagList tags={r.tags} /> }, { key: 'heat', label: '热度', num: true }]),
+      ]}
+      rows={rid === 'studio:asset-table' ? ASSETS.slice(0, 4) : rid === 'studio:draft-list' ? DRAFTS.slice(0, 4) : IDEAS.slice(0, 4)}
+      rowKey="id"
+    />
+  )
+}
 
 function SceneRegistry() {
   const [appId, setAppId] = React.useState('studio')
@@ -33,7 +155,7 @@ function SceneRegistry() {
           ))}
         </div>
         <div style={{ padding: '0 10px 12px' }}>
-          <div className="gap-note">同一 APP 内 builtin 预设与 remote 组件<b>组件级合并</b>（mergeApps）——openloop 的 4 个 artifact 范例就是这么并进来的。</div>
+          <div className="gap-note">读组件与写组件分列：detail 只读，edit/create 是独立 form 组件，靠 relations 串联——没有任何组件内嵌「编辑模式开关」。</div>
         </div>
       </div>
 
@@ -88,63 +210,18 @@ function SceneRegistry() {
             <div className="mono" style={{ fontSize: 10.5, color: 'var(--dsw-alias-label-caption)', marginTop: 2 }}>{selected.rid} · {selected.desc}</div>
           </div>
           <button className="pin-primary">⌖ Pin 到看板</button>
-          <button className="pc-btn" title="行内编辑 / 编辑模式见场景⑤，新建表单见场景⑥">✎ 编辑</button>
         </div>
-        <div className="ol-micro" style={{ marginTop: -6 }}>编辑能力不落在此处：行内/编辑模式在详情页（场景⑤），创建与校验在表单（场景⑥）——注册表只管资源寻址与预览。</div>
 
         <div>
           <div className="sec-label" style={{ marginBottom: 8 }}>预览 PREVIEW <span className="en">{selected.kind === 'artifact' ? '· 沙箱 iframe 渲染上下文' : '· panel 渲染上下文'}</span></div>
           <div className="d2-frame">
             <div className="d2-frame-bar">
               <span className="d2-fdots"><i></i><i></i><i></i></span>
-              <span>{selected.kind === 'artifact' ? 'artifact · network 档 · openloop.fetch' : `panel · ${selected.name} · 数据绑定`}</span>
+              <span>{selected.kind === 'artifact' ? `artifact · ${selected.desc.split('·')[0].trim()} 档` : `panel · ${selected.name} · 数据绑定`}</span>
               <span style={{ marginLeft: 'auto' }}>{selected.kind === 'artifact' ? 'opaque origin' : 'preset 契约'}</span>
             </div>
             <div className="d2-frame-body">
-              {rid === 'studio:system-map' ? (
-                <div style={{ padding: 14, background: 'var(--art-background)' }}>
-                  <div style={{ fontSize: 12, fontWeight: 650, color: 'var(--art-foreground)' }}>Studio 系统地图</div>
-                  <div style={{ fontSize: 10, color: 'var(--art-muted)', margin: '2px 0 10px' }}>组件 · API · 后端 · 自观察层 拓扑（场景 5 为全页视图）</div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {['想法库', '管线', '排期', '素材', '方法论', 'PB × 5 集合', 'event-log 回环'].map((n, i) => (
-                      <span key={n} style={{ fontSize: 10, padding: '4px 10px', borderRadius: 8, border: `1px ${i > 4 ? 'dashed' : 'solid'} var(--art-border)`, color: 'var(--art-foreground)', background: 'var(--art-surface)' }}>{n}</span>
-                    ))}
-                  </div>
-                </div>
-              ) : rid === 'studio:pipeline-flow' ? (
-                <FlowMock nodes={STAGES.map((s) => ({ key: s.key, label: s.label, count: s.count, tone: s.tone, detail: '' }))} />
-              ) : rid === 'studio:calendar' ? (
-                <TimelineMock items={CALENDAR.slice(0, 3).map((c, i) => ({ time: c.day, title: c.title, detail: c.platform, status: i === 0 ? 'current' : 'future' }))} />
-              ) : rid === 'studio:methodology' ? (
-                <div className="ol-body ol-md">
-                  <p><strong>钩子三秒法则</strong>：开头必须抛出观众此刻的问题。</p>
-                  <p>一稿多投先改 <code>cover + 前 3 秒</code>。</p>
-                </div>
-              ) : rid === 'studio:idea-detail' || rid === 'studio:draft-detail' ? (
-                <div style={{ padding: 12 }}>
-                  <DetailGridMock cells={rid === 'studio:idea-detail' ? [
-                    { k: '热度', v: '92' }, { k: '标签', v: 'AI / 工具' }, { k: '状态', v: '采中' },
-                    { k: '关联稿件', v: '2 条' }, { k: '创建时间', v: '2026-09-01' }, { k: '来源', v: '社群讨论' },
-                  ] : [
-                    { k: '阶段', v: '制作中' }, { k: '平台', v: 'B站' }, { k: '截稿', v: '09-08' },
-                    { k: '负责人', v: '阿洛' }, { k: '引用素材', v: '2 项' }, { k: '来源想法', v: 'i1' },
-                  ]} />
-                  <div className="ol-micro" style={{ marginTop: 8 }}>组合模式：detail-grid + 关联列表 + 状态时间线（完整形态见场景 ⑥）</div>
-                </div>
-              ) : (
-                <DataTableMock compact
-                  columns={[
-                    { key: 'title', label: rid === 'studio:asset-table' ? '素材' : rid === 'studio:draft-list' ? '稿件' : '想法' },
-                    ...(rid === 'studio:asset-table'
-                      ? [{ key: 'kind', label: '类型', render: (r) => <span className="ol-tag">{r.kind}</span> }, { key: 'size', label: '大小', num: true }]
-                      : rid === 'studio:draft-list'
-                        ? [{ key: 'stage', label: '阶段', render: (r) => <ToneBadge tone="info">{r.stage}</ToneBadge> }, { key: 'platform', label: '平台' }]
-                        : [{ key: 'tags', label: '标签', render: (r) => <TagList tags={r.tags} /> }, { key: 'heat', label: '热度', num: true }]),
-                  ]}
-                  rows={rid === 'studio:asset-table' ? ASSETS.slice(0, 4) : rid === 'studio:draft-list' ? DRAFTS.slice(0, 4) : IDEAS.slice(0, 4)}
-                  rowKey="id"
-                />
-              )}
+              <RegistryPreview rid={rid} />
             </div>
           </div>
         </div>

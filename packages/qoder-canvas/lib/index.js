@@ -205,8 +205,31 @@ var CanvasValidationError = class extends Error {
 		this.name = "CanvasValidationError";
 	}
 };
+/**
+* 错误聚合收集器（0.1.2 真机修复）：一轮校验收集【全部】错误统一报出——
+* 真机教训：单错快抛导致模型 32 次重试才收敛（每轮 10s 只买到一个信息点）。
+* 同一节点超过 3 个错误即截断（防错误风暴）；校验函数照旧提前 return 不抛。
+*/
+var ErrorCollector = class {
+	items = [];
+	fail(path, why, expected) {
+		const hint = expected !== void 0 ? ` Expected: ${expected}.` : "";
+		this.items.push(`${path}: ${why}.${hint}`);
+	}
+	get size() {
+		return this.items.length;
+	}
+	throwIfAny(max = 3) {
+		if (this.items.length === 0) return;
+		const shown = this.items.slice(0, max);
+		const more = this.items.length > max ? ` (+${this.items.length - max} more — fix the listed ones and re-run; remaining errors will be reported next round)` : "";
+		throw new CanvasValidationError(`canvas document invalid (${this.items.length} error${this.items.length > 1 ? "s" : ""}):\n${shown.map((s) => `  - ${s}`).join("\n")}${more}\nFix ALL listed fields and retry.`);
+	}
+};
+/** 当前校验回合的收集器（validateCanvasDocument 每次调用重建） */
+let collector = null;
 function fail(path, why, expected) {
-	throw new CanvasValidationError(`canvas document invalid at ${path}: ${why}.${expected !== void 0 ? ` Expected: ${expected}.` : ""} Fix this field and retry.`);
+	if (collector !== null) collector.fail(path, why, expected);
 }
 const ID_RE = /^[a-zA-Z0-9_-]{1,32}$/;
 const CANVAS_ID_RE = /^cv_[a-z0-9]{8}$/;
@@ -227,7 +250,10 @@ function isPlainObject(v) {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 function checkString(path, v, maxLength) {
-	if (typeof v !== "string") fail(path, "must be a string", "string");
+	if (typeof v !== "string") {
+		fail(path, "must be a string", "string");
+		return "";
+	}
 	if (v.length > maxLength) fail(path, `length ${v.length} exceeds max ${maxLength}`, `≤ ${maxLength} chars`);
 	return v;
 }
@@ -245,7 +271,10 @@ function checkProp(path, value, rule) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (typeof value !== "number" || !Number.isFinite(value)) fail(path, "must be a finite number", "number");
+			if (typeof value !== "number" || !Number.isFinite(value)) {
+				fail(path, "must be a finite number", "number");
+				return;
+			}
 			if (rule.min !== void 0 && value < rule.min) fail(path, `${value} < min ${rule.min}`);
 			if (rule.max !== void 0 && value > rule.max) fail(path, `${value} > max ${rule.max}`);
 			return;
@@ -254,21 +283,30 @@ function checkProp(path, value, rule) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (typeof value !== "string" || !rule.values.includes(value)) fail(path, `must be one of ${rule.values.join("/")}`, rule.values.join(" | "));
+			if (typeof value !== "string" || !rule.values.includes(value)) {
+				fail(path, `must be one of ${rule.values.join("/")}`, rule.values.join(" | "));
+				return;
+			}
 			return;
 		case "boolean":
 			if (value === void 0) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (typeof value !== "boolean") fail(path, "must be boolean", "true | false");
+			if (typeof value !== "boolean") {
+				fail(path, "must be boolean", "true | false");
+				return;
+			}
 			return;
 		case "string-array":
 			if (value === void 0) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (!Array.isArray(value)) fail(path, "must be an array", "string[]");
+			if (!Array.isArray(value)) {
+				fail(path, "must be an array", "string[]");
+				return;
+			}
 			if (value.length > rule.maxLength) fail(path, `array length ${value.length} exceeds max ${rule.maxLength}`);
 			for (let i = 0; i < value.length; i += 1) checkString(`${path}[${i}]`, value[i], rule.itemMaxLength);
 			return;
@@ -277,7 +315,10 @@ function checkProp(path, value, rule) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (!isPlainObject(value)) fail(path, "must be an object", "{ key: value }");
+			if (!isPlainObject(value)) {
+				fail(path, "must be an object", "{ key: value }");
+				return;
+			}
 			const keys = Object.keys(value);
 			if (keys.length > rule.maxPairs) fail(path, `${keys.length} pairs exceeds max ${rule.maxPairs}`);
 			for (const k of keys) {
@@ -291,7 +332,10 @@ function checkProp(path, value, rule) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (!Array.isArray(value)) fail(path, "must be an array of series", "series[]");
+			if (!Array.isArray(value)) {
+				fail(path, "must be an array of series", "series[]");
+				return;
+			}
 			if (value.length > LIMITS.maxSeries) fail(path, `${value.length} series exceeds max ${LIMITS.maxSeries}`);
 			for (let i = 0; i < value.length; i += 1) {
 				const s = value[i];
@@ -315,11 +359,17 @@ function checkProp(path, value, rule) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (!Array.isArray(value)) fail(path, "must be an array of rows", "row[][]");
+			if (!Array.isArray(value)) {
+				fail(path, "must be an array of rows", "row[][]");
+				return;
+			}
 			if (value.length > LIMITS.maxTableRows) fail(path, `${value.length} rows exceeds max ${LIMITS.maxTableRows}; aggregate the data first`);
 			for (let i = 0; i < value.length; i += 1) {
 				const row = value[i];
-				if (!Array.isArray(row)) fail(`${path}[${i}]`, "must be an array (one cell per column)");
+				if (!Array.isArray(row)) {
+					fail(`${path}[${i}]`, "must be an array (one cell per column)");
+					continue;
+				}
 				if (row.length > LIMITS.maxTableColumns) fail(`${path}[${i}]`, `${row.length} cells exceeds max ${LIMITS.maxTableColumns}`);
 				for (let j = 0; j < row.length; j += 1) {
 					const cell = row[j];
@@ -334,7 +384,10 @@ function checkProp(path, value, rule) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (!isPlainObject(value)) fail(path, "must be a flat object", "{ string|number|boolean }");
+			if (!isPlainObject(value)) {
+				fail(path, "must be a flat object", "{ string|number|boolean }");
+				return;
+			}
 			const bytes = byteSize(value);
 			if (bytes > rule.maxBytes) fail(path, `size ${bytes}B exceeds max ${rule.maxBytes}B`);
 			for (const k of Object.keys(value)) {
@@ -350,36 +403,78 @@ function checkHref(path, href) {
 	const normalized = href.trim().toLowerCase();
 	if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) fail(path, "href scheme must be http or https", "https://…");
 }
-/** 校验画布 document（fail-closed；抛 CanvasValidationError，消息面向 Agent 自修正） */
+/** 结构性错误（无法继续校验）——抛哨兵异常中断本轮回合，由 validateCanvasDocument 的 finally 统一报错 */
+function unreachable() {
+	throw new CanvasValidationError("__structural__");
+}
+/** 校验画布 document（fail-closed；错误聚合后统一抛 CanvasValidationError，面向 Agent 自修正） */
 function validateCanvasDocument(value) {
-	if (!isPlainObject(value)) fail("document", "must be a JSON object");
+	collector = new ErrorCollector();
+	try {
+		return validateInner(value);
+	} catch (error) {
+		if (error instanceof CanvasValidationError && error.message === "__structural__") {} else throw error;
+		return {
+			title: "",
+			layout: "grid",
+			nodes: [],
+			edges: []
+		};
+	} finally {
+		try {
+			collector.throwIfAny();
+		} finally {
+			collector = null;
+		}
+	}
+}
+function validateInner(value) {
+	if (!isPlainObject(value)) {
+		fail("document", "must be a JSON object");
+		throw unreachable();
+	}
 	const bytes = byteSize(value);
 	if (bytes > LIMITS.maxDocumentBytes) fail("document", `size ${bytes}B exceeds max ${LIMITS.maxDocumentBytes}B; reduce nodes or data volume`);
 	const title = value["title"];
 	if (typeof title !== "string" || title.length === 0) fail("title", "must be a non-empty string");
-	if (title.length > LIMITS.maxTitleLength) fail("title", `length exceeds max ${LIMITS.maxTitleLength}`);
+	else if (title.length > LIMITS.maxTitleLength) fail("title", `length exceeds max ${LIMITS.maxTitleLength}`);
 	const layout = value["layout"];
 	if (typeof layout !== "string" || !LAYOUTS.includes(layout)) fail("layout", `must be one of ${LAYOUTS.join("/")}`, LAYOUTS.join(" | "));
 	const nodes = value["nodes"];
-	if (!Array.isArray(nodes)) fail("nodes", "must be an array");
+	if (!Array.isArray(nodes)) {
+		fail("nodes", "must be an array");
+		throw unreachable();
+	}
 	if (nodes.length === 0) fail("nodes", "must contain at least 1 node");
 	if (nodes.length > LIMITS.maxNodes) fail("nodes", `${nodes.length} nodes exceeds max ${LIMITS.maxNodes}`);
 	const seenIds = /* @__PURE__ */ new Set();
 	for (let i = 0; i < nodes.length; i += 1) {
 		const n = nodes[i];
 		const path = `nodes[${i}]`;
-		if (!isPlainObject(n)) fail(path, "must be an object");
+		if (!isPlainObject(n)) {
+			fail(path, "must be an object");
+			continue;
+		}
 		if (byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`);
 		const id = n["id"];
 		if (typeof id !== "string" || !ID_RE.test(id)) fail(`${path}.id`, "must match [a-zA-Z0-9_-]{1,32}");
-		if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`);
-		seenIds.add(id);
+		else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`);
+		else seenIds.add(id);
 		const type = n["type"];
-		if (typeof type !== "string") fail(`${path}.type`, "must be a string");
+		if (typeof type !== "string") {
+			fail(`${path}.type`, "must be a string");
+			continue;
+		}
 		const def = NODE_REGISTRY[type];
-		if (def === void 0) fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(" | "));
+		if (def === void 0) {
+			fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(" | "));
+			continue;
+		}
 		const props = n["props"];
-		if (!isPlainObject(props)) fail(`${path}.props`, "must be an object");
+		if (!isPlainObject(props)) {
+			fail(`${path}.props`, "must be an object");
+			continue;
+		}
 		for (const [key, rule] of Object.entries(def.props)) checkProp(`${path}.props.${key}`, props[key], rule);
 		if (type === "link" && typeof props["href"] === "string") checkHref(`${path}.props.href`, props["href"]);
 		for (const key of Object.keys(props)) if (!(key in def.props)) fail(`${path}.props.${key}`, `unknown prop for ${type}; allowed: ${Object.keys(def.props).join(", ") || "(none)"}`);
@@ -387,15 +482,23 @@ function validateCanvasDocument(value) {
 	const edges = value["edges"];
 	const checkedEdges = [];
 	if (edges !== void 0) {
-		if (!Array.isArray(edges)) fail("edges", "must be an array");
+		if (!Array.isArray(edges)) {
+			fail("edges", "must be an array");
+			throw unreachable();
+		}
 		if (edges.length > LIMITS.maxEdges) fail("edges", `${edges.length} edges exceeds max ${LIMITS.maxEdges}`);
 		for (let i = 0; i < edges.length; i += 1) {
 			const e = edges[i];
-			if (!isPlainObject(e)) fail(`edges[${i}]`, "must be { from, to }");
+			if (!isPlainObject(e)) {
+				fail(`edges[${i}]`, "must be { from, to }");
+				continue;
+			}
 			const from = e["from"], to = e["to"];
-			if (typeof from !== "string" || !seenIds.has(from)) fail(`edges[${i}].from`, `must reference an existing node id`);
-			if (typeof to !== "string" || !seenIds.has(to)) fail(`edges[${i}].to`, "must reference an existing node id");
-			checkedEdges.push({
+			const fromOk = typeof from === "string" && seenIds.has(from);
+			const toOk = typeof to === "string" && seenIds.has(to);
+			if (!fromOk) fail(`edges[${i}].from`, `must reference an existing node id`);
+			if (!toOk) fail(`edges[${i}].to`, "must reference an existing node id");
+			if (fromOk && toOk) checkedEdges.push({
 				from,
 				to
 			});
@@ -498,7 +601,7 @@ function apply(ctx) {
 		parameters: {
 			document: {
 				type: "json",
-				description: "Canvas document: { title, layout: \"grid\"|\"flow\"|\"split-h\"|\"split-v\", nodes: [{ id, type, props }], edges?: [{ from, to }] }. Node types: panel, section, stat-card, chart, table, key-value, markdown, callout, action, link. Omit when only using list."
+				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 10 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder). (* = required). Limits: whole document ≤256KB. Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
 			},
 			canvasId: {
 				type: "string",

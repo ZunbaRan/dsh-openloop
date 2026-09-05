@@ -528,6 +528,25 @@
   .usage-row .ubar { flex: 1; height: 5px; border-radius: 3px; background: var(--dsw-alias-interactive-bg-hover); overflow: hidden; }
   .usage-row .ubar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
   .usage-row .unum { font-variant-numeric: tabular-nums; color: var(--dsw-alias-label-primary); font-weight: 600; width: 34px; text-align: right; }
+
+  /* 注册表 mini 预览：拓扑 / 平台卡片 / 提词器 */
+  .mini-topo { position: relative; height: 170px; background: var(--art-background); overflow: hidden; }
+  .mini-node { position: absolute; font-size: 9px; padding: 3px 8px; border-radius: 7px; border: 1px solid var(--art-border); background: var(--art-surface); color: var(--art-foreground); white-space: nowrap; }
+  .mini-node.hub { border-color: color-mix(in srgb, var(--art-accent) 50%, transparent); background: color-mix(in srgb, var(--art-accent) 9%, var(--art-surface)); font-weight: 650; }
+  .mini-node.warn { border-style: dashed; opacity: .8; }
+  .pf-row { display: flex; gap: 10px; padding: 12px; }
+  .pf-card { flex: 1; min-width: 0; border: 1px solid var(--art-border); border-radius: 10px; overflow: hidden; background: var(--art-surface); }
+  .pf-cover { height: 72px; display: flex; align-items: flex-end; padding: 8px; color: #fff; }
+  .pf-cover .t { font-size: 10px; font-weight: 650; line-height: 1.35; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
+  .pf-meta { padding: 7px 9px; }
+  .pf-meta .pf1 { font-size: 10px; font-weight: 550; color: var(--art-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pf-meta .pf2 { font-size: 9px; color: var(--art-muted); margin-top: 2px; }
+  .tp-mock { background: #0b0b0d; color: #f5f5f7; padding: 16px 18px; overflow: hidden; position: relative; height: 150px; }
+  .tp-mock .tp-hint { position: absolute; top: 8px; right: 12px; font-size: 9px; color: rgba(255,255,255,.4); }
+  .tp-line { font-size: 19px; font-weight: 600; line-height: 1.9; letter-spacing: .01em; }
+  .tp-line.dim { opacity: .32; }
+  .tp-line.mid { opacity: .62; }
+  @keyframes tp-scroll { from { transform: translateY(0); } to { transform: translateY(-38%); } }
 </style>
 </head>
 <body>
@@ -544,6 +563,7 @@
 <script type="text/babel" src="scene-forms.jsx"></script>
 <script type="text/babel" src="scene-detail.jsx"></script>
 <script type="text/babel" src="scene-edit.jsx"></script>
+<script type="text/babel" src="scene-artifact.jsx"></script>
 <script type="text/babel" src="scene-topology.jsx"></script>
 <script type="text/babel" src="app.jsx"></script>
 </body>

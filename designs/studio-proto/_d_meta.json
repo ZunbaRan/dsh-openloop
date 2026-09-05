@@ -94,8 +94,17 @@
           "status": "needs-review"
         }
       ]
+    },
+    "scene-artifact.jsx": {
+      "versions": [
+        {
+          "path": "scene-artifact.jsx",
+          "createdAt": "2026-09-05T09:33:32.311Z",
+          "status": "needs-review"
+        }
+      ]
     }
   },
   "createdAt": "2026-09-05T08:20:41.619Z",
-  "updatedAt": "2026-09-05T09:14:01.525Z"
+  "updatedAt": "2026-09-05T09:33:33.367Z"
 }

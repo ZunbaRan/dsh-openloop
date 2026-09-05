@@ -92,7 +92,7 @@ declare class CanvasValidationError extends Error {
 declare function isValidCanvasId(id: string): boolean;
 /** 生成 canvasId：cv_ + 8 位 base32（host 专用） */
 declare function generateCanvasId(rand?: () => number): string;
-/** 校验画布 document（fail-closed；抛 CanvasValidationError，消息面向 Agent 自修正） */
+/** 校验画布 document（fail-closed；错误聚合后统一抛 CanvasValidationError，面向 Agent 自修正） */
 declare function validateCanvasDocument(value: unknown): CanvasDocument;
 //#endregion
 //#region src/storage.d.ts
