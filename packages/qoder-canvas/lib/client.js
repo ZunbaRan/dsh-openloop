@@ -609,20 +609,19 @@ window.__ModuleLoader__.load({
 			color: "var(--dsw-alias-label-caption, #888)",
 			fontSize: 12
 		};
-		/** 容错解析 presentationMeta 的快照（§5.3 惯例：无法解析返回 undefined 不抛错） */
+		/** 容错解析 presentationMeta 的快照（§5.3 惯例：无法解析返回 undefined 不抛错）。
+		*  ⚠️ 0.1.1 真机修复：presentationMeta 返回的就是扁平 snapshot 本体（无 .snapshot
+		*  包装层）——原实现多剥了一层导致永远解析失败、卡片渲染成 "metadata unavailable"。 */
 		function canvasMetaFrom(value) {
 			if (typeof value !== "object" || value === null) return void 0;
-			const record = value;
-			if (record.kind !== "qoder-canvas" || record.version !== 1) return void 0;
-			const snapshot = record.snapshot;
-			if (typeof snapshot !== "object" || snapshot === null) return void 0;
-			const s = snapshot;
-			if (s.kind !== "qoder-canvas" || typeof s.canvasId !== "string" || typeof s.revision !== "number") return void 0;
+			const s = value;
+			if (s.kind !== "qoder-canvas" || s.version !== 1) return void 0;
+			if (typeof s.canvasId !== "string" || typeof s.revision !== "number") return void 0;
 			const canvas = s.canvas;
 			if (typeof canvas !== "object" || canvas === null) return void 0;
 			const c = canvas;
 			if (typeof c.title !== "string" || !Array.isArray(c.nodes)) return void 0;
-			return snapshot;
+			return value;
 		}
 		function CanvasCard({ block }) {
 			if (!("kind" in block)) return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {

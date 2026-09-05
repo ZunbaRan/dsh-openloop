@@ -8,15 +8,20 @@
 const PLATFORMS = ['视频号', 'B站', '小红书', '公众号']
 
 const IDEAS = [
-  { id: 'i1', title: 'Claude Code 隐藏功能 Top10', tags: ['AI', '工具'], heat: 92, status: '采中' },
-  { id: 'i2', title: '我用 DSH 搭了个工作室（本系统）', tags: ['AI', '产品'], heat: 88, status: '采中' },
-  { id: 'i3', title: '30 天 AI 工具挑战', tags: ['AI', '挑战'], heat: 76, status: '采中' },
-  { id: 'i4', title: 'Cursor vs CodeBuddy 实测', tags: ['AI', '工具'], heat: 64, status: '候选' },
-  { id: 'i5', title: '一人公司内容管线复盘', tags: ['产品', '复盘'], heat: 58, status: '候选' },
-  { id: 'i6', title: 'MCP 协议三分钟讲透', tags: ['AI', '科普'], heat: 51, status: '候选' },
-  { id: 'i7', title: '内容创作者的自动化栈', tags: ['工具', '自动化'], heat: 44, status: '候选' },
-  { id: 'i8', title: '2026 上半年 AI 视频工具横评', tags: ['AI', '视频'], heat: 39, status: '候选' },
+  { id: 'i1', title: 'Claude Code 隐藏功能 Top10', tags: ['AI', '工具'], heat: 92, status: '采中', created: '09-01', source: '社群讨论' },
+  { id: 'i2', title: '我用 DSH 搭了个工作室（本系统）', tags: ['AI', '产品'], heat: 88, status: '采中', created: '09-02', source: '自我复盘' },
+  { id: 'i3', title: '30 天 AI 工具挑战', tags: ['AI', '挑战'], heat: 76, status: '采中', created: '08-30', source: '粉丝提议' },
+  { id: 'i4', title: 'Cursor vs CodeBuddy 实测', tags: ['AI', '工具'], heat: 64, status: '候选', created: '09-03', source: '竞品观察' },
+  { id: 'i5', title: '一人公司内容管线复盘', tags: ['产品', '复盘'], heat: 58, status: '候选', created: '09-03', source: '自我复盘' },
+  { id: 'i6', title: 'MCP 协议三分钟讲透', tags: ['AI', '科普'], heat: 51, status: '候选', created: '09-04', source: '评论区提问' },
+  { id: 'i7', title: '内容创作者的自动化栈', tags: ['工具', '自动化'], heat: 44, status: '搁置', created: '08-25', source: '自我复盘' },
+  { id: 'i8', title: '2026 上半年 AI 视频工具横评', tags: ['AI', '视频'], heat: 39, status: '候选', created: '09-04', source: '社群讨论' },
+  { id: 'i9', title: '播客化尝试：双人对谈 AI 圈', tags: ['播客', '实验'], heat: 12, status: '归档', created: '08-10', source: '头脑风暴' },
 ]
+
+/** 想法状态机：候选 → 采中 → 立项（转稿件）/ 搁置 → 归档；搁置可复活回候选 */
+const IDEA_FILTERS = ['全部', '采中', '候选', '搁置', '归档']
+const IDEA_STATUS_TONE = { '采中': 'primary', '候选': 'neutral', '搁置': 'warning', '归档': 'neutral' }
 
 const DRAFTS = [
   { id: 'd1', ideaId: 'i1', title: 'Claude Code 隐藏功能 Top10（视频）', stage: '制作中', platform: 'B站', due: '09-08', owner: '阿洛' },
@@ -82,10 +87,15 @@ const REL_DECLS = [
   { from: 'studio:calendar', dir: 'out', ev: 'studio:day:open', to: 'studio:draft-list', tpl: '{{date}}' },
   { from: 'studio:asset-table', dir: 'out', ev: 'studio:asset:open', to: 'studio:draft-detail', tpl: '{{assetId}}' },
   { from: 'studio:draft-list', dir: 'in', ev: 'studio:idea:open · studio:stage:open · studio:day:open', to: '（多消费方聚合）', tpl: '—' },
+  { from: 'studio:idea-detail', dir: 'in', ev: 'studio:idea:open', to: '（详情即消费方）', tpl: '{{ideaId}}' },
+  { from: 'studio:idea-detail', dir: 'out', ev: 'studio:idea:promote', to: 'studio:draft-list（立项 → 建稿件）', tpl: '{{ideaId}}' },
+  { from: 'studio:draft-detail', dir: 'in', ev: 'studio:draft:open · studio:asset:open', to: '（多消费方聚合）', tpl: '—' },
 ]
 
 const STUDIO_RESOURCES = [
-  { rid: 'studio:idea-bank', name: '想法库', kind: 'panel', desc: 'data-table 预设 · 数据绑定 ideas', emits: 'studio:idea:open' },
+  { rid: 'studio:idea-bank', name: '想法库', kind: 'panel', desc: 'data-table 预设 · 数据绑定 ideas · 状态筛选', emits: 'studio:idea:open' },
+  { rid: 'studio:idea-detail', name: '想法详情', kind: 'panel', desc: '组合模式 · detail-grid + 关联稿件 + 状态时间线', emits: 'studio:idea:promote' },
+  { rid: 'studio:draft-detail', name: '稿件详情', kind: 'panel', desc: '组合模式 · detail-grid + 素材引用 + 阶段流转', emits: null },
   { rid: 'studio:pipeline-flow', name: '创作管线', kind: 'panel', desc: 'flow 预设 · 五阶段状态机', emits: 'studio:stage:open' },
   { rid: 'studio:draft-list', name: '稿件列表', kind: 'panel', desc: 'data-table 预设 · 多消费方聚合', emits: 'studio:draft:open' },
   { rid: 'studio:calendar', name: '排期日历', kind: 'panel', desc: 'timeline 预设 · 本周排期', emits: 'studio:day:open' },
@@ -276,6 +286,34 @@ function EventLogMock({ events, max }) {
   )
 }
 
+/** detail 组合件：k/v 网格（预设缺口候选 detail-grid 的 mock） */
+function DetailGridMock({ cells }) {
+  return (
+    <div className="ol-detail-grid">
+      {cells.map((c) => (
+        <div key={c.k} className="ol-detail-cell">
+          <div className="k">{c.k}</div>
+          <div className="v">{c.render ? c.render() : c.v}</div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** 状态筛选 chips */
+function FilterChips({ options, counts, value, onChange }) {
+  return (
+    <div className="ol-chips">
+      {options.map((o) => (
+        <button key={o} className={`ol-chip ${value === o ? 'on' : ''}`} onClick={() => onChange(o)}>
+          {o}
+          <span className="cnt">{counts[o] ?? 0}</span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /** 看板 tile 外壳（dock tile chrome + body） */
 function TileFrame({ title, rid, kind, badge, glow, dimmed, style, children, onHover }) {
   return (
@@ -297,5 +335,7 @@ function TileFrame({ title, rid, kind, badge, glow, dimmed, style, children, onH
 
 Object.assign(window, {
   PLATFORMS, IDEAS, DRAFTS, STAGES, CALENDAR, ASSETS, EVENTS, API_USAGE, REL_DECLS, STUDIO_RESOURCES, STUDIO_APIS,
+  IDEA_FILTERS, IDEA_STATUS_TONE,
   PanelShell, ToneBadge, TagList, DataTableMock, HeatmapMock, FlowMock, TimelineMock, MetricGridMock, ProgressMock, EventLogMock, TileFrame,
+  DetailGridMock, FilterChips,
 })

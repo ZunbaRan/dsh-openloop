@@ -1,12 +1,24 @@
-/** 场景 1 · 对话流：系统诞生——Agent 生成 + 数据绑定 + relations 联动 + 写路径 */
+/** 场景 1 · 对话流：系统诞生——Agent 生成 + 数据绑定 + relations 联动 + 写路径 + 状态筛选/轻操作 */
 
 function SceneChat() {
+  const [ideas, setIdeas] = React.useState(IDEAS.map((i) => ({ ...i })))
+  const [filter, setFilter] = React.useState('全部')
   const [selIdea, setSelIdea] = React.useState('i1')
   const [advanced, setAdvanced] = React.useState(false)
+  const [pulse, setPulse] = React.useState(null)
 
-  const idea = IDEAS.find((i) => i.id === selIdea)
+  const idea = ideas.find((i) => i.id === selIdea)
   const linkedDrafts = DRAFTS.filter((d) => d.ideaId === selIdea)
   const d3Stage = advanced ? '制作中' : '排期中'
+
+  const counts = Object.fromEntries(IDEA_FILTERS.map((f) => [f, f === '全部' ? ideas.length : ideas.filter((i) => i.status === f).length]))
+  const visible = filter === '全部' ? ideas : ideas.filter((i) => i.status === filter)
+
+  const quickAction = (row, next, ev) => {
+    setIdeas((list) => list.map((i) => (i.id === row.id ? { ...i, status: next } : i)))
+    setPulse(`${ev} · ${row.id}`)
+    setTimeout(() => setPulse(null), 2400)
+  }
 
   return (
     <div className="scene-col">
@@ -22,32 +34,46 @@ function SceneChat() {
             <div className="tool-line"><span className="tname">app_backend</span><span>create_collections → ideas / drafts / assets / calendar · 5 集合已建（幂等）</span></div>
             <div className="tool-line"><span className="tname">app_backend</span><span>register_api → studio:ideas … studio:events · 5 个 API 资源</span></div>
             <div className="tool-line"><span className="tname">panel</span><span>生成「想法库」data-table 预设 · 数据绑定 studio:ideas（服务端注入，面板零网络）</span></div>
-            <div style={{ marginTop: 6 }}>骨架好了。这是想法库，已按热度排序——点一行可以看到它名下的稿件，不用等我：</div>
+            <div style={{ marginTop: 6 }}>骨架好了。想法库带状态机（候选/采中/搁置/归档），行内可以直接轻操作——点一行能看到它名下的稿件，不用等我：</div>
           </div>
         </div>
 
         <div className="stream-card">
           <div className="linked-banner">
             <span>panel · 对话流内渲染</span>
+            {pulse ? <span className="event-pulse">{pulse}</span> : null}
             <span style={{ marginLeft: 'auto' }} className="mono">studio:idea-bank</span>
           </div>
-          <PanelShell preset="data-table" title="想法库" desc="按热度排序 · 数据绑定 studio:ideas">
+          <PanelShell preset="data-table" title="想法库" desc="按热度排序 · 数据绑定 studio:ideas · 状态机驱动筛选">
+            <FilterChips options={IDEA_FILTERS} counts={counts} value={filter} onChange={setFilter} />
             <DataTableMock
               columns={[
                 { key: 'title', label: '想法', render: (r) => <span style={{ fontWeight: 500 }}>{r.title}</span> },
                 { key: 'tags', label: '标签', render: (r) => <TagList tags={r.tags} /> },
                 { key: 'heat', label: '热度', num: true, render: (r) => <b>{r.heat}</b> },
-                { key: 'status', label: '状态', render: (r) => <ToneBadge tone={r.status === '采中' ? 'primary' : 'neutral'}>{r.status}</ToneBadge> },
+                { key: 'status', label: '状态', render: (r) => <ToneBadge tone={IDEA_STATUS_TONE[r.status]}>{r.status}</ToneBadge> },
+                { key: 'act', label: '操作', render: (r) => (
+                  <span style={{ display: 'inline-flex', gap: 5 }} onClick={(e) => e.stopPropagation()}>
+                    {r.status === '候选' ? <button className="ol-act-btn" onClick={() => quickAction(r, '采中', 'studio:idea:pick')}>采中</button> : null}
+                    {r.status === '采中' ? <button className="ol-act-btn muted" onClick={() => quickAction(r, '搁置', 'studio:idea:hold')}>搁置</button> : null}
+                    {r.status === '搁置' ? <button className="ol-act-btn" onClick={() => quickAction(r, '候选', 'studio:idea:revive')}>复活</button> : null}
+                    {r.status === '归档' ? <span className="ol-micro">只读</span> : null}
+                  </span>
+                ) },
               ]}
-              rows={IDEAS.slice(0, 6)}
+              rows={visible}
               rowKey="id"
               selKey={selIdea}
               onSelect={(r) => setSelIdea(r.id)}
             />
+            {visible.length === 0 ? (
+              <div className="ol-meta" style={{ padding: '14px 12px' }}>「{filter}」状态下暂无想法——空态也该是设计的一部分。</div>
+            ) : null}
             <div className="linked-slot">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                 <span className="event-pulse">studio:idea:open</span>
                 <span className="ol-micro">→ studio:draft-list · 参数 {'{{ideaId}}'} = {selIdea} · 即时取数，不经 Agent</span>
+                <span className="ol-micro" style={{ marginLeft: 'auto' }}>详情页见场景 ⑤</span>
               </div>
               {linkedDrafts.length > 0 ? (
                 <DataTableMock
@@ -62,7 +88,7 @@ function SceneChat() {
                   rowKey="id"
                 />
               ) : (
-                <div className="ol-meta" style={{ padding: '6px 2px' }}>「{idea.title}」名下还没有稿件——右键可让 Agent 立项。</div>
+                <div className="ol-meta" style={{ padding: '6px 2px' }}>「{idea ? idea.title : ''}」名下还没有稿件——可在详情页「立项」。</div>
               )}
             </div>
           </PanelShell>

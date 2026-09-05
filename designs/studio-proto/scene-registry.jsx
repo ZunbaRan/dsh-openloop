@@ -88,7 +88,9 @@ function SceneRegistry() {
             <div className="mono" style={{ fontSize: 10.5, color: 'var(--dsw-alias-label-caption)', marginTop: 2 }}>{selected.rid} · {selected.desc}</div>
           </div>
           <button className="pin-primary">⌖ Pin 到看板</button>
+          <button className="pc-btn" title="行内编辑 / 编辑模式见场景⑤，新建表单见场景⑥">✎ 编辑</button>
         </div>
+        <div className="ol-micro" style={{ marginTop: -6 }}>编辑能力不落在此处：行内/编辑模式在详情页（场景⑤），创建与校验在表单（场景⑥）——注册表只管资源寻址与预览。</div>
 
         <div>
           <div className="sec-label" style={{ marginBottom: 8 }}>预览 PREVIEW <span className="en">{selected.kind === 'artifact' ? '· 沙箱 iframe 渲染上下文' : '· panel 渲染上下文'}</span></div>
@@ -117,6 +119,17 @@ function SceneRegistry() {
                 <div className="ol-body ol-md">
                   <p><strong>钩子三秒法则</strong>：开头必须抛出观众此刻的问题。</p>
                   <p>一稿多投先改 <code>cover + 前 3 秒</code>。</p>
+                </div>
+              ) : rid === 'studio:idea-detail' || rid === 'studio:draft-detail' ? (
+                <div style={{ padding: 12 }}>
+                  <DetailGridMock cells={rid === 'studio:idea-detail' ? [
+                    { k: '热度', v: '92' }, { k: '标签', v: 'AI / 工具' }, { k: '状态', v: '采中' },
+                    { k: '关联稿件', v: '2 条' }, { k: '创建时间', v: '2026-09-01' }, { k: '来源', v: '社群讨论' },
+                  ] : [
+                    { k: '阶段', v: '制作中' }, { k: '平台', v: 'B站' }, { k: '截稿', v: '09-08' },
+                    { k: '负责人', v: '阿洛' }, { k: '引用素材', v: '2 项' }, { k: '来源想法', v: 'i1' },
+                  ]} />
+                  <div className="ol-micro" style={{ marginTop: 8 }}>组合模式：detail-grid + 关联列表 + 状态时间线（完整形态见场景 ⑥）</div>
                 </div>
               ) : (
                 <DataTableMock compact

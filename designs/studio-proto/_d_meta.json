@@ -76,8 +76,26 @@
           "status": "needs-review"
         }
       ]
+    },
+    "scene-detail.jsx": {
+      "versions": [
+        {
+          "path": "scene-detail.jsx",
+          "createdAt": "2026-09-05T08:49:48.935Z",
+          "status": "needs-review"
+        }
+      ]
+    },
+    "scene-edit.jsx": {
+      "versions": [
+        {
+          "path": "scene-edit.jsx",
+          "createdAt": "2026-09-05T09:00:35.345Z",
+          "status": "needs-review"
+        }
+      ]
     }
   },
   "createdAt": "2026-09-05T08:20:41.619Z",
-  "updatedAt": "2026-09-05T08:20:42.013Z"
+  "updatedAt": "2026-09-05T09:14:01.525Z"
 }

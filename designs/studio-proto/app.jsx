@@ -34,7 +34,23 @@ const SCENES = [
     ],
   },
   {
-    id: 'topo', t: '⑤ 拓扑 · 系统自观察', d: 'system-map 全页 + 事件/用量元数据带',
+    id: 'detail', t: '⑤ 详情与行内编辑', d: '详情页组合模式 + 行内编辑 + 编辑模式（dirty/PATCH）',
+    anno: [
+      ['k', 'detail', '详情页 = 组合模式（detail-grid + 关联列表 + 状态时间线），非单预设——预设缺口候选'],
+      ['k', 'inline', '行内编辑：单字段点开即改（Enter 存 / Esc 消）——一句话都嫌多的场景用它'],
+      ['k', 'edit-mode', '编辑模式：多字段 dirty 标记，一次 PATCH 而非逐字段 N 次 POST'],
+    ],
+  },
+  {
+    id: 'edit', t: '⑥ 表单与批量', d: '新建表单（校验演示）+ form 预设族 + 写路径时序 + 批量',
+    anno: [
+      ['k', 'form', 'form 预设族 = 必备能力：input-text/number/select/multi-select/date/toggle'],
+      ['kw', 'declarative', '声明式提交：panels 无网络，submitAction 由宿主写桥执行 POST'],
+      ['k', 'bulk', '批量操作：多选 → bulk bar → 一次批量 POST，事件留痕'],
+    ],
+  },
+  {
+    id: 'topo', t: '⑦ 拓扑 · 系统自观察', d: 'system-map 全页 + 事件/用量元数据带',
     anno: [
       ['kw', 'artifact', 'network 档整页拓扑，节点可拖拽，openloop.fetch 取数'],
       ['k', 'meta', '自观察四件套回环：它读的正是 studio 自己的集合'],
@@ -76,7 +92,7 @@ function App() {
           ))}
           <div className="nav-gap"></div>
           <div className="gap-note">
-            <b>查漏补缺</b>（设计时补进原列举的）：写操作入口 · 错误态/降级态 · 空态开场 · 素材搜索 · 来源徽标 · rid 露出
+            <b>查漏补缺</b>（设计时补进原列举的）：写操作入口 · 错误态/降级态 · 空态开场 · 素材搜索 · 来源徽标 · rid 露出 · 页面四面（⑤）· <b>编辑五模式 + form 预设族（⑤⑥）</b>
           </div>
           <div className="gap-note">
             未覆盖（用户拍板排除）：收入记账 · 发布分析（funnel/chart 留给后续迭代）
@@ -89,6 +105,8 @@ function App() {
             {scene === 'board' ? <SceneBoard /> : null}
             {scene === 'registry' ? <SceneRegistry /> : null}
             {scene === 'forms' ? <SceneForms /> : null}
+            {scene === 'detail' ? <SceneDetail /> : null}
+            {scene === 'edit' ? <SceneEdit /> : null}
             {scene === 'topo' ? <SceneTopology /> : null}
           </div>
           <div className="anno-bar">
