@@ -1229,11 +1229,13 @@ window.__ModuleLoader__.load({
 						});
 					} else if (mode === "text") {
 						const hits = hitText();
-						if (hits.length > 0) {
+						const first = hits[0];
+						if (first !== void 0) {
 							const excerpt = hits.map((h) => h.text).join(" ").slice(0, 120);
 							callbacks.onTargetsChange([{
 								kind: "text",
-								excerpt
+								excerpt,
+								nodeId: first.nodeId
 							}]);
 						}
 					}
@@ -1817,23 +1819,31 @@ window.__ModuleLoader__.load({
 		function removeAnnotation(canvasId, id) {
 			writeAll(canvasId, readAll(canvasId).filter((a) => a.id !== id));
 		}
-		/**
-		* 进 composer 的草稿格式（S6 结构化重做，2026-09-06 用户拍板）：
-		* 标注是给 Agent 消费的结构化上下文（Qoder「注释即 API 文档」），不是给人看的标签。
-		* 每个 node target 带：document 路径（nodes[i]）+ 节点类型 + id + 【完整 DSL 源码片段】
-		* ——Agent 拿到后能精确定位 canvas 工具的 document 里改哪一段。
-		*/
-		function formatAnnotationDraft(snapshot, targets, note) {
-			const nodes = snapshot.canvas.nodes ?? [];
-			const blocks = [];
-			for (const t of targets) if (t.kind === "node" || t.kind === "element") {
+		/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位） */
+		function formatTargetBlock(t, nodes) {
+			if (t.kind === "node" || t.kind === "element") {
 				const idx = nodes.findIndex((n) => n.id === t.id);
 				const node = idx >= 0 ? nodes[idx] : void 0;
 				const elementAttrs = t.kind === "element" ? ` element="${t.domPath}" tag="${t.tag}"${t.text !== void 0 && t.text.length > 0 ? ` text="${t.text.replace(/"/g, "&quot;")}"` : ""}` : "";
-				if (node !== void 0) blocks.push(`<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`);
-				else blocks.push(`<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`);
-			} else blocks.push(`<target type="text">"${t.excerpt}"</target>`);
-			return `画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}\n${blocks.join("\n")}\n${note}`;
+				if (node !== void 0) return `<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`;
+				return `<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`;
+			}
+			const idx = t.nodeId !== void 0 ? nodes.findIndex((n) => n.id === t.nodeId) : -1;
+			return `<target type="text"${idx >= 0 ? ` in="nodes[${idx}]"` : t.nodeId !== void 0 ? ` in="${t.nodeId}"` : ""}>"${t.excerpt}"</target>`;
+		}
+		/**
+		* 同画布多条注释合并注入（S7.1）：共享一个定位头，逐条编号。
+		* 头部不带方括号（真机教训：Lexical composer 的 markdown 插件会把 `[...]`
+		* 误识别为 link 语法）；条目序号用 `#1`（`[1]` 有 link 风险、`1)` 行首有
+		* 有序列表转换风险，`#1` 无 markdown 语义——`#` 后必须跟空格才是 heading）。
+		*/
+		function formatAnnotationBatch(snapshot, anns) {
+			const nodes = snapshot.canvas.nodes ?? [];
+			const multi = anns.length > 1;
+			return `${`画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId} · r${snapshot.revision}${multi ? `（${anns.length} 条）` : ""}`}\n${anns.map((ann, i) => {
+				const block = ann.targets.map((t) => formatTargetBlock(t, nodes)).join("\n");
+				return `${multi ? `#${i + 1} ` : ""}${block}\n评注：${ann.note}`;
+			}).join("\n")}`;
 		}
 		//#endregion
 		//#region src/client/composer-bridge.ts
@@ -1841,27 +1851,37 @@ window.__ModuleLoader__.load({
 		function findComposer() {
 			return document.querySelector("[data-composer-input=\"true\"]");
 		}
-		/** 向 composer 追加草稿文本。返回是否成功。 */
+		/**
+		* 向 composer 追加草稿文本。返回是否成功。
+		*
+		* 真机教训（2026-09-06，S7.1）：多行 insertText 在 DSH 的 Lexical 覆写里
+		* 行为畸形——第一行总是跑到文档末尾（头部「画布标注 · ...」出现在消息
+		* 最后而不是最前）。改为【逐行插入】（单行 insertText 行为 M0 验证可靠，
+		* 行间用 insertParagraph 分段）。
+		*/
 		function injectComposerDraft(text, _options) {
 			const el = findComposer();
 			if (el === null) return false;
 			el.focus();
-			let ok = false;
-			try {
-				ok = document.execCommand("insertText", false, text);
-			} catch {
-				ok = false;
-			}
-			if (!ok) try {
-				el.dispatchEvent(new InputEvent("beforeinput", {
-					bubbles: true,
-					cancelable: true,
-					inputType: "insertText",
-					data: text
-				}));
-				ok = true;
-			} catch {
-				ok = false;
+			const lines = text.split("\n");
+			let ok = true;
+			for (let i = 0; i < lines.length; i += 1) {
+				if (i > 0) try {
+					document.execCommand("insertParagraph", false);
+				} catch {
+					ok = false;
+				}
+				const line = lines[i];
+				if (line !== void 0 && line.length > 0) try {
+					if (!document.execCommand("insertText", false, line)) el.dispatchEvent(new InputEvent("beforeinput", {
+						bubbles: true,
+						cancelable: true,
+						inputType: "insertText",
+						data: line
+					}));
+				} catch {
+					ok = false;
+				}
 			}
 			return ok;
 		}
@@ -1907,15 +1927,23 @@ window.__ModuleLoader__.load({
 		}
 		function flushDraftsIntoComposer() {
 			if (drafts.length === 0) return;
-			const parts = [];
+			const byCanvas = /* @__PURE__ */ new Map();
 			for (const ann of drafts) {
-				const snap = latestSnapshots.get(ann.canvasId);
-				if (snap !== void 0) parts.push(formatAnnotationDraft({
-					canvasId: ann.canvasId,
-					revision: ann.revision,
-					canvas: snap.canvas
-				}, ann.targets, ann.note));
-				else parts.push(`画布标注 · ${ann.canvasId}@r${ann.revision}\n${ann.note}`);
+				const list = byCanvas.get(ann.canvasId) ?? [];
+				list.push(ann);
+				byCanvas.set(ann.canvasId, list);
+			}
+			const parts = [];
+			for (const [canvasId, anns] of byCanvas) {
+				const snap = latestSnapshots.get(canvasId);
+				if (snap !== void 0) {
+					const revision = Math.max(...anns.map((a) => a.revision));
+					parts.push(formatAnnotationBatch({
+						canvasId,
+						revision,
+						canvas: snap.canvas
+					}, anns));
+				} else parts.push(`画布标注 · ${canvasId}\n${anns.map((a, i) => `#${i + 1} 评注：${a.note}`).join("\n")}`);
 			}
 			injectComposerDraft(parts.join("\n\n"));
 			drafts.length = 0;
@@ -1988,21 +2016,41 @@ window.__ModuleLoader__.load({
 					clearInterval(timer);
 				};
 			}, []);
+			const resendRef = (0, react.useRef)(false);
 			(0, react.useEffect)(() => {
+				const tryFlushAndResend = (input) => {
+					if (resendRef.current) return;
+					const sendBtn = findSendButton(findComposerFrame(input));
+					flushDraftsIntoComposer();
+					if (sendBtn === null) return;
+					resendRef.current = true;
+					setTimeout(() => {
+						sendBtn.click();
+						setTimeout(() => {
+							resendRef.current = false;
+						}, 120);
+					}, 80);
+				};
 				const onKeydown = (e) => {
-					if (drafts.length === 0) return;
+					if (drafts.length === 0 || resendRef.current) return;
 					if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
 					const input = findComposerInput();
 					if (input === null || !input.contains(e.target)) return;
-					flushDraftsIntoComposer();
+					if ((input.textContent ?? "").trim().length === 0) return;
+					e.preventDefault();
+					e.stopImmediatePropagation();
+					tryFlushAndResend(input);
 				};
 				const onClick = (e) => {
-					if (drafts.length === 0) return;
+					if (drafts.length === 0 || resendRef.current) return;
 					const input = findComposerInput();
 					if (input === null) return;
 					const sendBtn = findSendButton(findComposerFrame(input));
-					if (sendBtn !== null && e.target.nodeType === 1 && sendBtn.contains(e.target)) {
-						if ((input.textContent ?? "").trim().length > 0) flushDraftsIntoComposer();
+					if (sendBtn !== null && sendBtn.contains(e.target)) {
+						if ((input.textContent ?? "").trim().length === 0) return;
+						e.preventDefault();
+						e.stopImmediatePropagation();
+						tryFlushAndResend(input);
 					}
 				};
 				document.addEventListener("keydown", onKeydown, true);

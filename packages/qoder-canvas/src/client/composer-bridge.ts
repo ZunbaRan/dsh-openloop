@@ -30,20 +30,36 @@ function findComposer(): HTMLElement | null {
   return document.querySelector('[data-composer-input="true"]')
 }
 
-/** 向 composer 追加草稿文本。返回是否成功。 */
+/**
+ * 向 composer 追加草稿文本。返回是否成功。
+ *
+ * 真机教训（2026-09-06，S7.1）：多行 insertText 在 DSH 的 Lexical 覆写里
+ * 行为畸形——第一行总是跑到文档末尾（头部「画布标注 · ...」出现在消息
+ * 最后而不是最前）。改为【逐行插入】（单行 insertText 行为 M0 验证可靠，
+ * 行间用 insertParagraph 分段）。
+ */
 export function injectComposerDraft(text: string, _options?: ComposerInjectOptions): boolean {
   const el = findComposer()
   if (el === null) return false
   el.focus()
-  // 首选：execCommand（Lexical 覆写实现，M0 实测可靠）
-  let ok = false
-  try { ok = document.execCommand('insertText', false, text) } catch { ok = false }
-  if (!ok) {
-    // 兜底：beforeinput 事件（M0 实测同样生效）
-    try {
-      el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text }))
-      ok = true
-    } catch { ok = false }
+  const lines = text.split('\n')
+  let ok = true
+  for (let i = 0; i < lines.length; i += 1) {
+    if (i > 0) {
+      try { document.execCommand('insertParagraph', false) } catch { ok = false }
+    }
+    const line = lines[i]
+    if (line !== undefined && line.length > 0) {
+      try {
+        const lineOk = document.execCommand('insertText', false, line)
+        if (!lineOk) {
+          // 单行兜底：beforeinput
+          el.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: line }))
+        }
+      } catch {
+        ok = false
+      }
+    }
   }
   return ok
 }

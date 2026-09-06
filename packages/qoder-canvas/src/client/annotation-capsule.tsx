@@ -16,7 +16,7 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { CanvasAnnotation } from './canvas-annotations.ts'
-import { formatAnnotationDraft } from './canvas-annotations.ts'
+import { formatAnnotationBatch } from './canvas-annotations.ts'
 import { injectComposerDraft } from './composer-bridge.ts'
 import type { CanvasSnapshot } from '../dsl.ts'
 
@@ -43,13 +43,21 @@ export function registerCanvasSnapshot(snap: CanvasSnapshot): void {
 
 function flushDraftsIntoComposer(): void {
   if (drafts.length === 0) return
-  const parts: string[] = []
+  // 同画布多条注释合并注入（共享一个定位头，逐条 #n 编号）
+  const byCanvas = new Map<string, CanvasAnnotation[]>()
   for (const ann of drafts) {
-    const snap = latestSnapshots.get(ann.canvasId)
+    const list = byCanvas.get(ann.canvasId) ?? []
+    list.push(ann)
+    byCanvas.set(ann.canvasId, list)
+  }
+  const parts: string[] = []
+  for (const [canvasId, anns] of byCanvas) {
+    const snap = latestSnapshots.get(canvasId)
     if (snap !== undefined) {
-      parts.push(formatAnnotationDraft({ canvasId: ann.canvasId, revision: ann.revision, canvas: snap.canvas }, ann.targets, ann.note))
+      const revision = Math.max(...anns.map(a => a.revision))
+      parts.push(formatAnnotationBatch({ canvasId, revision, canvas: snap.canvas }, anns))
     } else {
-      parts.push(`画布标注 · ${ann.canvasId}@r${ann.revision}\n${ann.note}`)
+      parts.push(`画布标注 · ${canvasId}\n${anns.map((a, i) => `#${i + 1} 评注：${a.note}`).join('\n')}`)
     }
   }
   injectComposerDraft(parts.join('\n\n'))
@@ -134,25 +142,47 @@ export function AnnotationCapsuleBar(): ReactNode {
     }
   }, [])
 
-  // 发送拦截：Enter（非 shift / 非输入法）+ 发送按钮 click，capture 阶段先注入
+  // 发送拦截（S7.1 竞态修复）：Enter/发送按钮 → 【拦下】→ 注入 → 延迟重发。
+  // 真机教训：Lexical 的 execCommand 写入是异步生效，DSH 的 Enter handler 同步
+  // 读 model 时注入还没落进 model——只发走了用户文本，标注块残留在 composer。
+  // 所以必须 preventDefault + stopImmediatePropagation 拦下原事件，注入后延迟
+  // 触发发送按钮 click（此时 drafts 已空，拦截器天然幂等放行）。
+  const resendRef = useRef(false)
   useEffect(() => {
+    const tryFlushAndResend = (input: HTMLElement): void => {
+      if (resendRef.current) return
+      const frame = findComposerFrame(input)
+      const sendBtn = findSendButton(frame)
+      flushDraftsIntoComposer()
+      if (sendBtn === null) return // 找不到发送按钮——注入留在 composer，用户手动发送（草稿已含标注）
+      resendRef.current = true
+      setTimeout(() => {
+        sendBtn.click()
+        setTimeout(() => { resendRef.current = false }, 120)
+      }, 80)
+    }
     const onKeydown = (e: KeyboardEvent): void => {
-      if (drafts.length === 0) return
+      if (drafts.length === 0 || resendRef.current) return
       if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
       const input = findComposerInput()
       if (input === null || !input.contains(e.target as Node)) return
-      flushDraftsIntoComposer()
-      // 不阻止默认——事件继续传播，DSH 发送完整文档
+      if ((input.textContent ?? '').trim().length === 0) return // 空输入不浪费注释
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      tryFlushAndResend(input)
     }
     const onClick = (e: MouseEvent): void => {
-      if (drafts.length === 0) return
+      if (drafts.length === 0 || resendRef.current) return
       const input = findComposerInput()
       if (input === null) return
       const frame = findComposerFrame(input)
       const sendBtn = findSendButton(frame)
-      if (sendBtn !== null && (e.target as Node).nodeType === 1 && sendBtn.contains(e.target as Node)) {
-        // 输入框非空才注入（空输入点发送无效，不浪费注释）
-        if ((input.textContent ?? '').trim().length > 0) flushDraftsIntoComposer()
+      if (sendBtn !== null && sendBtn.contains(e.target as Node)) {
+        if ((input.textContent ?? '').trim().length === 0) return
+        // 真实 click 在 capture 阶段拦下——注入后程序性重发
+        e.preventDefault()
+        e.stopImmediatePropagation()
+        tryFlushAndResend(input)
       }
     }
     document.addEventListener('keydown', onKeydown, true)

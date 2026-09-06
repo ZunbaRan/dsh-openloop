@@ -22,7 +22,12 @@ export type AnnotationTarget =
       /** 元素文本节选（前 40 字符，可空） */
       readonly text?: string | undefined
     }
-  | { readonly kind: 'text'; readonly excerpt: string }
+  | {
+      readonly kind: 'text'
+      readonly excerpt: string
+      /** 划选文本所属的节点 id（S7.1 增强：Agent 不再只靠文本猜位置） */
+      readonly nodeId?: string | undefined
+    }
 
 export interface CanvasAnnotation {
   readonly id: string
@@ -82,32 +87,56 @@ export function removeAnnotation(canvasId: string, id: string): void {
  * 每个 node target 带：document 路径（nodes[i]）+ 节点类型 + id + 【完整 DSL 源码片段】
  * ——Agent 拿到后能精确定位 canvas 工具的 document 里改哪一段。
  */
+type SnapshotLike = { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[] } }
+
+/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位） */
+function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[]): string {
+  if (t.kind === 'node' || t.kind === 'element') {
+    const idx = nodes.findIndex(n => n.id === t.id)
+    const node = idx >= 0 ? nodes[idx] : undefined
+    // 元素级：额外带 element（DOM 路径）+ tag + text——Agent 知道用户指的是节点内哪个子元素
+    const elementAttrs = t.kind === 'element'
+      ? ` element="${t.domPath}" tag="${t.tag}"${t.text !== undefined && t.text.length > 0 ? ` text="${t.text.replace(/"/g, '&quot;')}"` : ''}`
+      : ''
+    if (node !== undefined) {
+      return `<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`
+    }
+    // 节点不在当前快照（快照迭代后被删）——降级为 id 引用
+    return `<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`
+  }
+  // 划字：带所属节点定位（S7.1——只给文本 Agent 只能猜它在哪个节点）
+  const idx = t.nodeId !== undefined ? nodes.findIndex(n => n.id === t.nodeId) : -1
+  const inAttr = idx >= 0 ? ` in="nodes[${idx}]"` : t.nodeId !== undefined ? ` in="${t.nodeId}"` : ''
+  return `<target type="text"${inAttr}>"${t.excerpt}"</target>`
+}
+
 export function formatAnnotationDraft(
-  snapshot: { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[] } },
+  snapshot: SnapshotLike,
   targets: readonly AnnotationTarget[],
   note: string,
 ): string {
+  return formatAnnotationBatch(snapshot, [{ targets, note }])
+}
+
+/**
+ * 同画布多条注释合并注入（S7.1）：共享一个定位头，逐条编号。
+ * 头部不带方括号（真机教训：Lexical composer 的 markdown 插件会把 `[...]`
+ * 误识别为 link 语法）；条目序号用 `#1`（`[1]` 有 link 风险、`1)` 行首有
+ * 有序列表转换风险，`#1` 无 markdown 语义——`#` 后必须跟空格才是 heading）。
+ */
+export function formatAnnotationBatch(
+  snapshot: SnapshotLike,
+  anns: readonly { targets: readonly AnnotationTarget[]; note: string }[],
+): string {
   const nodes = snapshot.canvas.nodes ?? []
-  const blocks: string[] = []
-  for (const t of targets) {
-    if (t.kind === 'node' || t.kind === 'element') {
-      const idx = nodes.findIndex(n => n.id === t.id)
-      const node = idx >= 0 ? nodes[idx] : undefined
-      // 元素级：额外带 element（DOM 路径）+ tag + text——Agent 知道用户指的是节点内哪个子元素
-      const elementAttrs = t.kind === 'element'
-        ? ` element="${t.domPath}" tag="${t.tag}"${t.text !== undefined && t.text.length > 0 ? ` text="${t.text.replace(/"/g, '&quot;')}"` : ''}`
-        : ''
-      if (node !== undefined) {
-        blocks.push(`<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`)
-      } else {
-        // 节点不在当前快照（快照迭代后被删）——降级为 id 引用
-        blocks.push(`<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`)
-      }
-    } else {
-      blocks.push(`<target type="text">"${t.excerpt}"</target>`)
-    }
-  }
-  // 头部不带方括号（真机教训：Lexical composer 的 markdown 插件会把 `[...]`
-  // 误识别为 link 语法，导致头部丢失、评注顺序错乱）
-  return `画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId}@r${snapshot.revision}\n${blocks.join('\n')}\n${note}`
+  const multi = anns.length > 1
+  // 头部不带 @（真机教训：cv@r1 的 @ 会触发 Lexical composer 的 mention 弹窗，
+  // 干扰插入落点/发送）；不带方括号（markdown link 误识别）
+  const head = `画布标注 · ${snapshot.canvas.title} ${snapshot.canvasId} · r${snapshot.revision}${multi ? `（${anns.length} 条）` : ''}`
+  const body = anns.map((ann, i) => {
+    const block = ann.targets.map(t => formatTargetBlock(t, nodes)).join('\n')
+    const prefix = multi ? `#${i + 1} ` : ''
+    return `${prefix}${block}\n评注：${ann.note}`
+  })
+  return `${head}\n${body.join('\n')}`
 }

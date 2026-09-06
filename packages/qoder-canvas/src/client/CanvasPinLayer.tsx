@@ -282,9 +282,11 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Prop
         })
       } else if (mode === 'text') {
         const hits = hitText()
-        if (hits.length > 0) {
+        const first = hits[0]
+        if (first !== undefined) {
           const excerpt = hits.map(h => h.text).join(' ').slice(0, 120)
-          callbacks.onTargetsChange([{ kind: 'text', excerpt }])
+          // 带所属节点 id（S7.1：注入时 Agent 能定位到 nodes[i]，不再只靠文本猜）
+          callbacks.onTargetsChange([{ kind: 'text', excerpt, nodeId: first.nodeId }])
         }
       }
     }
