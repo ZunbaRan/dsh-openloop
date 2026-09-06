@@ -209,6 +209,7 @@ export function CanvasWorkbench(): ReactNode {
                   snapshot={snapshot}
                   containerRef={canvasAreaRef}
                   mode={mode}
+                  targets={targets}
                   callbacks={{
                     onTargetsChange: (t) => { setTargets([...t]); setNote('') },
                     onSave: () => saveAnnotation(),

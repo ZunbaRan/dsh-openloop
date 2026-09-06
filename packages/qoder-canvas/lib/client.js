@@ -1036,11 +1036,14 @@ window.__ModuleLoader__.load({
 				})]
 			}) : null] });
 		}
-		function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }) {
+		function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 			const [hovered, setHovered] = (0, react.useState)(null);
 			const [locked, setLocked] = (0, react.useState)(null);
 			const [marquee, setMarquee] = (0, react.useState)(null);
+			/** 框选拖拽中实时命中的 nodeIds（Figma 式即时反馈） */
+			const [marqueeHits, setMarqueeHits] = (0, react.useState)([]);
 			const marqueeActive = (0, react.useRef)(false);
+			const marqueeStart = (0, react.useRef)(null);
 			const surfaceRef = (0, react.useRef)(null);
 			surfaceRef.current = containerRef.current;
 			const annotationsByNode = /* @__PURE__ */ new Map();
@@ -1151,22 +1154,39 @@ window.__ModuleLoader__.load({
 						return;
 					}
 					if (mode === "point" && !marqueeActive.current) setHovered(hitElement(e.clientX, e.clientY));
-					else if (marqueeActive.current) setMarquee((prev) => prev !== null ? {
-						...prev,
-						x1: e.clientX,
-						y1: e.clientY
-					} : null);
+					else if (marqueeActive.current) {
+						setMarquee((prev) => prev !== null ? {
+							...prev,
+							x1: e.clientX,
+							y1: e.clientY
+						} : null);
+						const start = marqueeStart.current;
+						if (start !== null) {
+							const rect = {
+								left: Math.min(start.x, e.clientX),
+								right: Math.max(start.x, e.clientX),
+								top: Math.min(start.y, e.clientY),
+								bottom: Math.max(start.y, e.clientY)
+							};
+							setMarqueeHits(hitNodesInRect(rect));
+						}
+					}
 				};
 				const onPointerDown = (e) => {
 					if (inFloatPanel(e)) return;
 					if (mode === "marquee" && e.button === 0) {
 						marqueeActive.current = true;
+						marqueeStart.current = {
+							x: e.clientX,
+							y: e.clientY
+						};
 						setMarquee({
 							x0: e.clientX,
 							y0: e.clientY,
 							x1: e.clientX,
 							y1: e.clientY
 						});
+						setMarqueeHits([]);
 						setLocked(null);
 						e.preventDefault();
 					}
@@ -1174,7 +1194,9 @@ window.__ModuleLoader__.load({
 				const onPointerUp = (e) => {
 					if (inFloatPanel(e)) {
 						marqueeActive.current = false;
+						marqueeStart.current = null;
 						setMarquee(null);
+						setMarqueeHits([]);
 						return;
 					}
 					if (mode === "point" && !marqueeActive.current) {
@@ -1204,6 +1226,8 @@ window.__ModuleLoader__.load({
 						}
 					} else if (marqueeActive.current) {
 						marqueeActive.current = false;
+						marqueeStart.current = null;
+						setMarqueeHits([]);
 						setMarquee((prev) => {
 							if (prev !== null) {
 								const rect = {
@@ -1244,6 +1268,7 @@ window.__ModuleLoader__.load({
 					if (e.key === "Escape") {
 						setLocked(null);
 						setMarquee(null);
+						setMarqueeHits([]);
 						callbacks.onTargetsChange([]);
 					}
 					if (e.key === "Enter" && (e.target === document.body || e.target === container)) callbacks.onSave();
@@ -1279,12 +1304,37 @@ window.__ModuleLoader__.load({
 						borderStyle: "outline",
 						nodeType: snapshot.canvas.nodes.find((n) => n.id === hovered.nodeId)?.type
 					}) : null,
-					locked !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
+					targets.map((t) => {
+						if (t.kind !== "node" && t.kind !== "element") return null;
+						const hit = t.kind === "element" ? {
+							nodeId: t.id,
+							domPath: t.domPath,
+							tag: t.tag,
+							text: t.text
+						} : {
+							nodeId: t.id,
+							domPath: "",
+							tag: "div"
+						};
+						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
+							surface: surfaceRef.current,
+							hit,
+							borderStyle: "solid",
+							nodeType: snapshot.canvas.nodes.find((n) => n.id === t.id)?.type,
+							showTooltip: targets.length === 1
+						}, `sel-${t.id}-${t.kind === "element" ? t.domPath : "root"}`);
+					}),
+					marqueeHits.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
 						surface: surfaceRef.current,
-						hit: locked,
-						borderStyle: "solid",
-						nodeType: snapshot.canvas.nodes.find((n) => n.id === locked.nodeId)?.type
-					}) : null,
+						hit: {
+							nodeId: id,
+							domPath: "",
+							tag: "div"
+						},
+						borderStyle: "outline",
+						nodeType: void 0,
+						showTooltip: false
+					}, `mq-${id}`)),
 					marquee !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
 						position: "fixed",
 						left: Math.min(marquee.x0, marquee.x1),
@@ -1362,8 +1412,8 @@ window.__ModuleLoader__.load({
 				})
 			});
 		}
-		/** 元素级高亮框 + DevTools 式 tooltip（type tag · 宽×高） */
-		function HighlightEl({ surface, hit, borderStyle, nodeType }) {
+		/** 元素级高亮框 + DevTools 式 tooltip（type tag · 宽×高；showTooltip=false 时只画框） */
+		function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }) {
 			if (surface === null) return null;
 			const nodeEl = surface.querySelector(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`);
 			if (nodeEl === null) return null;
@@ -1389,7 +1439,7 @@ window.__ModuleLoader__.load({
 				zIndex: 30,
 				background: "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)",
 				boxShadow: borderStyle === "solid" ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : "none"
-			} }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+			} }), showTooltip ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
 				style: {
 					position: "absolute",
 					left: r.left - box.left - 2,
@@ -1407,7 +1457,7 @@ window.__ModuleLoader__.load({
 					boxShadow: "0 2px 6px rgba(0,0,0,.2)"
 				},
 				children: tooltip
-			})] });
+			}) : null] });
 		}
 		//#endregion
 		//#region src/client/CommentPanel.tsx
@@ -2700,6 +2750,7 @@ window.__ModuleLoader__.load({
 									snapshot,
 									containerRef: canvasAreaRef,
 									mode,
+									targets,
 									callbacks: {
 										onTargetsChange: (t) => {
 											setTargets([...t]);

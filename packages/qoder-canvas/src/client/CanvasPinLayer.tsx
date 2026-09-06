@@ -34,6 +34,8 @@ interface Props {
   readonly snapshot: CanvasSnapshot
   readonly containerRef: { readonly current: HTMLElement | null }
   readonly mode: PinMode
+  /** 当前选中 targets（S8 高亮驱动源：框选 N 个全部亮蓝框；保存/Esc 清空后高亮自动消失） */
+  readonly targets: readonly AnnotationTarget[]
   readonly callbacks: PinLayerCallbacks
 }
 
@@ -100,11 +102,14 @@ function PinBadge({ n, annotation, onEdit, onDelete, onHover }: {
   )
 }
 
-export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Props): ReactNode {
+export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }: Props): ReactNode {
   const [hovered, setHovered] = useState<ElementHit | null>(null)
   const [locked, setLocked] = useState<ElementHit | null>(null)
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  /** 框选拖拽中实时命中的 nodeIds（Figma 式即时反馈） */
+  const [marqueeHits, setMarqueeHits] = useState<string[]>([])
   const marqueeActive = useRef(false)
+  const marqueeStart = useRef<{ x: number; y: number } | null>(null)
   const surfaceRef = useRef<HTMLElement | null>(null)
   // 每次渲染同步 surface（监听挂在画布容器上——画布会随 snapshot 重渲染，但容器稳定）
   surfaceRef.current = containerRef.current
@@ -220,19 +225,30 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Prop
         setHovered(hitElement(e.clientX, e.clientY))
       } else if (marqueeActive.current) {
         setMarquee(prev => prev !== null ? { ...prev, x1: e.clientX, y1: e.clientY } : null)
+        // 实时反馈：矩形内 node 即时亮框（用 ref 起点算，避免 state 闭包旧值）
+        const start = marqueeStart.current
+        if (start !== null) {
+          const rect = {
+            left: Math.min(start.x, e.clientX), right: Math.max(start.x, e.clientX),
+            top: Math.min(start.y, e.clientY), bottom: Math.max(start.y, e.clientY),
+          }
+          setMarqueeHits(hitNodesInRect(rect))
+        }
       }
     }
     const onPointerDown = (e: PointerEvent): void => {
       if (inFloatPanel(e)) return
       if (mode === 'marquee' && e.button === 0) {
         marqueeActive.current = true
+        marqueeStart.current = { x: e.clientX, y: e.clientY }
         setMarquee({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY })
+        setMarqueeHits([])
         setLocked(null)
         e.preventDefault()
       }
     }
     const onPointerUp = (e: PointerEvent): void => {
-      if (inFloatPanel(e)) { marqueeActive.current = false; setMarquee(null); return }
+      if (inFloatPanel(e)) { marqueeActive.current = false; marqueeStart.current = null; setMarquee(null); setMarqueeHits([]); return }
       if (mode === 'point' && !marqueeActive.current) {
         const hit = hitElement(e.clientX, e.clientY)
         if (hit !== null) {
@@ -259,6 +275,8 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Prop
         }
       } else if (marqueeActive.current) {
         marqueeActive.current = false
+        marqueeStart.current = null
+        setMarqueeHits([])
         setMarquee(prev => {
           if (prev !== null) {
             const rect = {
@@ -291,7 +309,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Prop
       }
     }
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { setLocked(null); setMarquee(null); callbacks.onTargetsChange([]) }
+      if (e.key === 'Escape') { setLocked(null); setMarquee(null); setMarqueeHits([]); callbacks.onTargetsChange([]) }
       if (e.key === 'Enter' && (e.target === document.body || e.target === container)) callbacks.onSave()
     }
     container.addEventListener('pointermove', onPointerMove)
@@ -319,10 +337,25 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Prop
         {hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? (
           <HighlightEl surface={surfaceRef.current} hit={hovered} borderStyle="outline" nodeType={snapshot.canvas.nodes.find(n => n.id === hovered.nodeId)?.type} />
         ) : null}
-        {/* 锁定高亮 */}
-        {locked !== null ? (
-          <HighlightEl surface={surfaceRef.current} hit={locked} borderStyle="solid" nodeType={snapshot.canvas.nodes.find(n => n.id === locked.nodeId)?.type} />
-        ) : null}
+        {/* 选中高亮（S8：targets 驱动——点选 1 个带 tooltip；框选 N 个全部亮框不带 tooltip） */}
+        {targets.map(t => {
+          if (t.kind !== 'node' && t.kind !== 'element') return null
+          const hit: ElementHit = t.kind === 'element'
+            ? { nodeId: t.id, domPath: t.domPath, tag: t.tag, text: t.text }
+            : { nodeId: t.id, domPath: '', tag: 'div' }
+          return (
+            <HighlightEl key={`sel-${t.id}-${t.kind === 'element' ? t.domPath : 'root'}`}
+              surface={surfaceRef.current} hit={hit} borderStyle="solid"
+              nodeType={snapshot.canvas.nodes.find(n => n.id === t.id)?.type}
+              showTooltip={targets.length === 1} />
+          )
+        })}
+        {/* 框选拖拽中的实时命中高亮（outline，无 tooltip） */}
+        {marqueeHits.map(id => (
+          <HighlightEl key={`mq-${id}`} surface={surfaceRef.current}
+            hit={{ nodeId: id, domPath: '', tag: 'div' }} borderStyle="outline"
+            nodeType={undefined} showTooltip={false} />
+        ))}
         {/* 框选矩形 */}
         {marquee !== null ? (
           <div style={{
@@ -388,12 +421,13 @@ function NodeBadgeAnchor({ surface, nodeId, children }: { surface: HTMLElement |
   )
 }
 
-/** 元素级高亮框 + DevTools 式 tooltip（type tag · 宽×高） */
-function HighlightEl({ surface, hit, borderStyle, nodeType }: {
+/** 元素级高亮框 + DevTools 式 tooltip（type tag · 宽×高；showTooltip=false 时只画框） */
+function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }: {
   surface: HTMLElement | null
   hit: ElementHit
   borderStyle: 'outline' | 'solid'
   nodeType: string | undefined
+  showTooltip?: boolean
 }): ReactNode {
   if (surface === null) return null
   const nodeEl = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`)
@@ -414,15 +448,17 @@ function HighlightEl({ surface, hit, borderStyle, nodeType }: {
         background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)',
         boxShadow: borderStyle === 'solid' ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : 'none',
       }} />
-      <div style={{
-        position: 'absolute', left: r.left - box.left - 2, top: Math.max(2, r.top - box.top - 22), zIndex: 31,
-        fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: 1,
-        padding: '3px 7px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
-        color: '#fff', background: 'var(--dsw-alias-state-business-primary, #4176e6)',
-        boxShadow: '0 2px 6px rgba(0,0,0,.2)',
-      }}>
-        {tooltip}
-      </div>
+      {showTooltip ? (
+        <div style={{
+          position: 'absolute', left: r.left - box.left - 2, top: Math.max(2, r.top - box.top - 22), zIndex: 31,
+          fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: 1,
+          padding: '3px 7px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
+          color: '#fff', background: 'var(--dsw-alias-state-business-primary, #4176e6)',
+          boxShadow: '0 2px 6px rgba(0,0,0,.2)',
+        }}>
+          {tooltip}
+        </div>
+      ) : null}
     </>
   )
 }
