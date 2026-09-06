@@ -1,220 +1,403 @@
 /**
- * CanvasPinLayer：工作台画布的元素 pin 标注层（design-comments 范式，QODER_CANVAS_SIDEBAR §3）。
+ * CanvasPinLayer：画布上的元素 pin 标注层（S7 元素级精度重写）。
  *
- * 与对话流版 AnnotationOverlay（已废弃的蒙层架构）的根本区别：
- * - 【零蒙层】：事件直接挂画布容器（DOM 监听），节点直接被 hover/点选
- * - 评论标记 = 钉在元素上的 pin（①角标），评论 UI 在右侧【评论面板】（常驻），
- *   不再挤画布浮动小框
- * - 点选：元素实线高亮 + pin 亮起 + 评论面板定位该元素 + 元素旁浮「💬」
- * - 框选：拖框 → 弹评注框（targets 多 pin）
- * - 文本：选中文本 → 弹评注框（节选进 targets）
+ * 核心升级（2026-09-06 用户拍板，对齐 workbuddy/DevTools 检查器精度）：
+ * - 点选命中 = elementsFromPoint 的【最深层 DOM 元素】，不再只到 data-canvas-node 级
+ *   ——复杂布局里能选到一个小框里的一个胶囊/一个字
+ * - target 记录：所属 nodeId（DSL 注入）+ domPath（node → 元素的 CSS 路径）+ tag + 文本
+ * - hover 高亮元素本身 + DevTools 式 tooltip（tag · 宽×高）
+ * - mode 受控（toolbar 提到 CanvasWorkbench）
  *
- * 事件用容器级 DOM 监听（v0.3.1 无蒙层几何法验证版），在本组件内聚。
+ * 设计参照（QODER_CANVAS_SIDEBAR §3）：零蒙层拦截，hover 高亮 → 点击锁定 →
+ * targets 气泡 → 评注 → 结构化草稿（canvas-annotations.ts）。
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { CanvasNode, CanvasSnapshot } from '../dsl.ts'
-import { injectComposerDraft, reportAnnotation } from './composer-bridge.ts'
-import { addAnnotation, formatAnnotationDraft, listAnnotations, type AnnotationTarget, type CanvasAnnotation } from './canvas-annotations.ts'
+import type { CanvasSnapshot } from '../dsl.ts'
+import type { AnnotationTarget, CanvasAnnotation } from './canvas-annotations.ts'
 
-const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
-interface Rect { x: number; y: number; w: number; h: number }
-
-export function nodeLabelOf(node: CanvasNode): string {
-  const p = node.props as Record<string, unknown>
-  return typeof p.title === 'string' && p.title.length > 0 ? p.title
-    : typeof p.label === 'string' && p.label.length > 0 ? p.label
-    : typeof p.text === 'string' && p.text.length > 0 ? (p.text.length > 24 ? `${p.text.slice(0, 24)}…` : p.text)
-    : node.type
-}
-
-function normalizeRect(r: Rect): Rect {
-  return { x: Math.min(r.x, r.x + r.w), y: Math.min(r.y, r.y + r.h), w: Math.abs(r.w), h: Math.abs(r.h) }
-}
-
-function hitNode(surface: HTMLElement, clientX: number, clientY: number): { id: string; rect: DOMRect } | null {
-  let best: { id: string; area: number; rect: DOMRect } | null = null
-  for (const el of surface.querySelectorAll<HTMLElement>('[data-canvas-node]')) {
-    const r = el.getBoundingClientRect()
-    if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue
-    const area = r.width * r.height
-    const id = el.getAttribute('data-canvas-node')
-    if (id !== null && id.length > 0 && (best === null || area < best.area)) best = { id, area, rect: r }
-  }
-  return best === null ? null : { id: best.id, rect: best.rect }
-}
+export type PinMode = 'point' | 'marquee' | 'text'
 
 export interface PinLayerCallbacks {
-  /** targets 变化（评论面板据此显示新建输入框） */
-  onTargetsChange: (targets: AnnotationTarget[]) => void
-  /** 保存注释（写 store + 注入 composer + toast） */
-  onSave: (targets: AnnotationTarget[], note: string) => void
-  /** 已保存注释（元素 pin 角标） */
-  annotations: CanvasAnnotation[]
-  onEditAnnotation: (a: CanvasAnnotation) => void
-  onDeleteAnnotation: (a: CanvasAnnotation) => void
-  /** 定位到某元素的注释（评论面板滚动） */
-  onFocusNode: (nodeId: string) => void
+  /** 一次完整交互（点选锁定/框选完成/划字完成）产出的 targets */
+  readonly onTargetsChange: (targets: readonly AnnotationTarget[]) => void
+  /** Enter 快捷键 → 工作台保存 */
+  readonly onSave: () => void
+  /** 已存注释（画 badges） */
+  readonly annotations: readonly CanvasAnnotation[]
+  readonly onEditAnnotation: (a: CanvasAnnotation) => void
+  readonly onDeleteAnnotation: (a: CanvasAnnotation) => void
+  /** hover badge/列表 → 工作台联动高亮 */
+  readonly onFocusNode: (nodeId: string | null) => void
 }
 
-export function CanvasPinLayer({ snapshot, containerRef, callbacks }: {
-  snapshot: CanvasSnapshot
-  containerRef: { current: HTMLDivElement | null }
-  callbacks: PinLayerCallbacks
+interface Props {
+  readonly snapshot: CanvasSnapshot
+  readonly containerRef: { readonly current: HTMLElement | null }
+  readonly mode: PinMode
+  readonly callbacks: PinLayerCallbacks
+}
+
+/** 元素级命中结果 */
+interface ElementHit {
+  readonly nodeId: string
+  /** 从 node 元素到命中元素的 CSS 路径；'' = node 根元素本身 */
+  readonly domPath: string
+  readonly tag: string
+  readonly text?: string | undefined
+}
+
+const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
+
+/** 已存注释的编号角标（点击弹操作卡） */
+function PinBadge({ n, annotation, onEdit, onDelete, onHover }: {
+  readonly n: number
+  readonly annotation: CanvasAnnotation
+  readonly onEdit: () => void
+  readonly onDelete: () => void
+  readonly onHover: (id: string | null) => void
 }): ReactNode {
-  const [hoveredId, setHoveredId] = useState<string | null>(null)
-  const [lockedId, setLockedId] = useState<string | null>(null)
-  const [draftRect, setDraftRect] = useState<Rect | null>(null)
-  const dragStart = useRef<{ x: number; y: number } | null>(null)
-  const surfaceRef = containerRef
-  const nodeById = new Map(snapshot.canvas.nodes.map(n => [n.id, n]))
-
-  /** 容器级 DOM 监听（零蒙层） */
-  useEffect(() => {
-    const surface = surfaceRef.current
-    if (surface === null) return
-    const prev = { cursor: surface.style.cursor, userSelect: surface.style.userSelect }
-    surface.style.cursor = 'crosshair'
-    surface.style.userSelect = 'none'
-
-    const onPointerMove = (e: PointerEvent): void => {
-      if (dragStart.current !== null) {
-        const box = surface.getBoundingClientRect()
-        setDraftRect({ x: dragStart.current.x, y: dragStart.current.y, w: e.clientX - box.left - dragStart.current.x, h: e.clientY - box.top - dragStart.current.y })
-        setHoveredId(null)
-        return
-      }
-      const hit = hitNode(surface, e.clientX, e.clientY)
-      setHoveredId(hit?.id ?? null)
-    }
-    const onPointerDown = (e: PointerEvent): void => {
-      if (e.button !== 0) return
-      // 点选（立即命中）：锁定高亮 + targets + 评论面板定位
-      const hit = hitNode(surface, e.clientX, e.clientY)
-      if (hit !== null) {
-        const node = nodeById.get(hit.id)
-        if (node !== undefined) {
-          setLockedId(hit.id)
-          callbacks.onFocusNode(hit.id)
-          callbacks.onTargetsChange([{ kind: 'node', id: hit.id, label: nodeLabelOf(node) }])
-        }
-        return
-      }
-      // 空白按下：进入框选
-      const box = surface.getBoundingClientRect()
-      dragStart.current = { x: e.clientX - box.left, y: e.clientY - box.top }
-      setDraftRect({ x: e.clientX - box.left, y: e.clientY - box.top, w: 0, h: 0 })
-    }
-    const onPointerUp = (): void => {
-      const rect = draftRect
-      dragStart.current = null
-      setDraftRect(null)
-      if (rect === null) return
-      const n = normalizeRect(rect)
-      if (n.w < 10 && n.h < 10) return  // 小位移非框选（已在 down 里处理点选）
-      // 框选：收集相交节点 → targets
-      const box = surface.getBoundingClientRect()
-      const hits: AnnotationTarget[] = []
-      for (const el of surface.querySelectorAll<HTMLElement>('[data-canvas-node]')) {
-        const r = el.getBoundingClientRect()
-        const nx = r.left - box.left, ny = r.top - box.top
-        if (nx < n.x + n.w && nx + r.width > n.x && ny < n.y + n.h && ny + r.height > n.y) {
-          const id = el.getAttribute('data-canvas-node')
-          const node = id !== null ? nodeById.get(id) : undefined
-          if (node !== undefined && id !== null) hits.push({ kind: 'node', id, label: nodeLabelOf(node) })
-        }
-      }
-      if (hits.length > 0) { setLockedId(null); callbacks.onTargetsChange(hits) }
-    }
-    surface.addEventListener('pointermove', onPointerMove)
-    surface.addEventListener('pointerdown', onPointerDown)
-    surface.addEventListener('pointerup', onPointerUp)
-    return () => {
-      surface.style.cursor = prev.cursor
-      surface.style.userSelect = prev.userSelect
-      surface.removeEventListener('pointermove', onPointerMove)
-      surface.removeEventListener('pointerdown', onPointerDown)
-      surface.removeEventListener('pointerup', onPointerUp)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [surfaceRef, snapshot.canvasId])
-
+  const [cardOpen, setCardOpen] = useState(false)
+  const firstTarget = annotation.targets[0]
+  const anchorId = firstTarget !== undefined && (firstTarget.kind === 'node' || firstTarget.kind === 'element') ? firstTarget.id : null
   return (
     <>
-      {/* hover 高亮 + DevTools 风格元素信息 tooltip（type #id · 宽×高） */}
-      {hoveredId !== null && hoveredId !== lockedId ? (
-        <HighlightRect surface={surfaceRef.current} nodeId={hoveredId} borderStyle="outline"
-          tooltip={(() => { const n = nodeById.get(hoveredId); return n !== undefined ? `${n.type} #${hoveredId}` : `#${hoveredId}` })()} />
+      <button
+        type="button"
+        data-openloop-pin-badge
+        onPointerDown={e => e.stopPropagation()}
+        onClick={e => { e.stopPropagation(); setCardOpen(v => !v) }}
+        onPointerEnter={() => { if (anchorId !== null) onHover(anchorId) }}
+        onPointerLeave={() => onHover(null)}
+        title={annotation.note}
+        style={{
+          position: 'absolute', right: -9, top: -9, zIndex: 40,
+          width: 18, height: 18, borderRadius: '50%', border: '2px solid var(--dsw-alias-bg-layer-1, #fff)',
+          background: ACCENT, color: '#fff', fontSize: 10, fontWeight: 700, lineHeight: 1,
+          cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 1px 4px rgba(0,0,0,.25)', fontFamily: 'inherit',
+        }}
+      >
+        {n}
+      </button>
+      {cardOpen ? (
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'absolute', right: -8, top: 14, zIndex: 41, width: 190,
+            borderRadius: 9, padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6,
+            background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))',
+            boxShadow: '0 8px 24px rgba(0,0,0,.22)', fontSize: 11,
+          }}
+        >
+          <div style={{ color: 'var(--dsw-alias-label-secondary, inherit)', lineHeight: 1.5, maxHeight: 72, overflow: 'auto' }}>{annotation.note}</div>
+          <div style={{ display: 'flex', gap: 5, justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => { onEdit(); setCardOpen(false) }} style={{ fontSize: 10.5, padding: '2px 9px', borderRadius: 5, border: `1px solid ${ACCENT}`, background: 'none', color: ACCENT, cursor: 'pointer', fontFamily: 'inherit' }}>编辑</button>
+            <button type="button" onClick={() => { onDelete(); setCardOpen(false) }} style={{ fontSize: 10.5, padding: '2px 9px', borderRadius: 5, border: '1px solid var(--dsw-alias-state-business-danger, #d0453e)', background: 'none', color: 'var(--dsw-alias-state-business-danger, #d0453e)', cursor: 'pointer', fontFamily: 'inherit' }}>删除</button>
+          </div>
+        </div>
       ) : null}
-      {/* 锁定/框选高亮（targets 由 callbacks 传给面板，pin 层只画当前锁定的） */}
-      {lockedId !== null ? (
-        <HighlightRect surface={surfaceRef.current} nodeId={lockedId} borderStyle="solid"
-          tooltip={(() => { const n = nodeById.get(lockedId); return n !== undefined ? `${n.type} #${lockedId}` : `#${lockedId}` })()} />
-      ) : null}
-      {/* 框选拖拽虚线框 */}
-      {draftRect !== null ? <div style={{ ...normalizeRect(draftRect), position: 'absolute', border: `1.5px dashed ${ACCENT}`, background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 10%, transparent)', borderRadius: 4, pointerEvents: 'none', zIndex: 30 }} /> : null}
-      {/* 元素 pin（①角标 + hover 详情卡） */}
-      {snapshot.canvas.nodes.map(n => {
-        const anns = callbacks.annotations.filter(a => a.targets.some(t => t.kind === 'node' && t.id === n.id))
-        if (anns.length === 0) return null
-        return <PinBadge key={n.id} surface={surfaceRef.current} nodeId={n.id} anns={anns} onEdit={callbacks.onEditAnnotation} onDelete={callbacks.onDeleteAnnotation} />
-      })}
     </>
   )
 }
 
-function HighlightRect({ surface, nodeId, borderStyle, tooltip }: { surface: HTMLElement | null; nodeId: string; borderStyle: 'outline' | 'solid'; tooltip?: string }): ReactNode {
+export function CanvasPinLayer({ snapshot, containerRef, mode, callbacks }: Props): ReactNode {
+  const [hovered, setHovered] = useState<ElementHit | null>(null)
+  const [locked, setLocked] = useState<ElementHit | null>(null)
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const marqueeActive = useRef(false)
+  const surfaceRef = useRef<HTMLElement | null>(null)
+  // 每次渲染同步 surface（监听挂在画布容器上——画布会随 snapshot 重渲染，但容器稳定）
+  surfaceRef.current = containerRef.current
+
+  // node 目标分组（badges：一个 node 上可能有多个注释，取第一个定位）
+  const annotationsByNode = new Map<string, { ann: CanvasAnnotation; n: number }[]>()
+  callbacks.annotations.forEach((ann, i) => {
+    const t = ann.targets[0]
+    if (t !== undefined && (t.kind === 'node' || t.kind === 'element')) {
+      const list = annotationsByNode.get(t.id) ?? []
+      list.push({ ann, n: i + 1 })
+      annotationsByNode.set(t.id, list)
+    }
+  })
+
+  /**
+   * 元素级命中（S7 核心）：elementsFromPoint 取最深层属于画布的元素。
+   * - 跳过 pin 层自身（badges/高亮——高亮是 pointer-events:none 本不会被返回，badge 需要跳过）
+   * - 返回元素 + 所属 nodeId + domPath
+   */
+  const hitElement = (x: number, y: number): ElementHit | null => {
+    const surface = surfaceRef.current
+    if (surface === null) return null
+    for (const el of document.elementsFromPoint(x, y)) {
+      if (el.closest('[data-openloop-canvas-pin-layer]') !== null) continue
+      if (!surface.contains(el)) continue
+      const nodeEl = el.closest('[data-canvas-node]')
+      if (nodeEl === null || !surface.contains(nodeEl)) continue
+      const nodeId = nodeEl.getAttribute('data-canvas-node')
+      if (nodeId === null || nodeId.length === 0) continue
+      if (el === nodeEl) {
+        return { nodeId, domPath: '', tag: nodeEl.tagName.toLowerCase() }
+      }
+      const domPath = domPathWithin(nodeEl, el)
+      const text = (el.textContent ?? '').trim()
+      return {
+        nodeId,
+        domPath,
+        tag: el.tagName.toLowerCase(),
+        text: text.length > 0 ? text.slice(0, 40) : undefined,
+      }
+    }
+    return null
+  }
+
+  /** 命中矩形内的全部 node（框选保持 node 级——用户拍板框选暂不深化） */
+  const hitNodesInRect = (rect: { left: number; top: number; right: number; bottom: number }): string[] => {
+    const surface = surfaceRef.current
+    if (surface === null) return []
+    const out: string[] = []
+    for (const el of surface.querySelectorAll('[data-canvas-node]')) {
+      const r = el.getBoundingClientRect()
+      if (r.left >= rect.left && r.right <= rect.right && r.top >= rect.top && r.bottom <= rect.bottom) {
+        const id = el.getAttribute('data-canvas-node')
+        if (id !== null) out.push(id)
+      }
+    }
+    return out
+  }
+
+  // 文本划选：Range 索引（与 S4 相同）
+  const buildRangeIndex = (range: Range): { nodeId: string; text: string }[] => {
+    const surface = surfaceRef.current
+    if (surface === null) return []
+    const out: { nodeId: string; text: string }[] = []
+    for (const el of surface.querySelectorAll('[data-canvas-node]')) {
+      const id = el.getAttribute('data-canvas-node')
+      if (id === null) continue
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      let textNode = walker.nextNode()
+      let acc = ''
+      let hit = false
+      while (textNode !== null) {
+        const tr = document.createRange()
+        tr.selectNodeContents(textNode)
+        if (range.compareBoundaryPoints(Range.END_TO_START, tr) < 0 && range.compareBoundaryPoints(Range.START_TO_END, tr) > 0) {
+          acc += textNode.textContent ?? ''
+          hit = true
+        }
+        textNode = walker.nextNode()
+      }
+      if (hit) out.push({ nodeId: id, text: acc.trim() })
+    }
+    return out
+  }
+
+  const hitText = (): { nodeId: string; text: string }[] => {
+    const sel = window.getSelection()
+    if (sel === null || sel.rangeCount === 0 || sel.isCollapsed) return []
+    const surface = surfaceRef.current
+    if (surface === null) return []
+    const range = sel.getRangeAt(0)
+    if (!surface.contains(range.commonAncestorContainer)) return []
+    return buildRangeIndex(range)
+  }
+
+  // 容器级事件（挂画布滚动容器，零蒙层）
+  useEffect(() => {
+    const container = containerRef.current
+    if (container === null) return
+
+    const onPointerMove = (e: PointerEvent): void => {
+      if (mode === 'point' && !marqueeActive.current) {
+        setHovered(hitElement(e.clientX, e.clientY))
+      } else if (marqueeActive.current) {
+        setMarquee(prev => prev !== null ? { ...prev, x1: e.clientX, y1: e.clientY } : null)
+      }
+    }
+    const onPointerDown = (e: PointerEvent): void => {
+      if (mode === 'marquee' && e.button === 0) {
+        marqueeActive.current = true
+        setMarquee({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY })
+        setLocked(null)
+        e.preventDefault()
+      }
+    }
+    const onPointerUp = (e: PointerEvent): void => {
+      if (mode === 'point' && !marqueeActive.current) {
+        const hit = hitElement(e.clientX, e.clientY)
+        if (hit !== null) {
+          setLocked(hit)
+          const node = snapshot.canvas.nodes.find(n => n.id === hit.nodeId)
+          const type = node?.type ?? hit.nodeId
+          if (hit.domPath.length === 0) {
+            // 命中 node 根元素——node 级
+            const label = node !== undefined ? String(node.props.label ?? node.props.title ?? hit.nodeId) : hit.nodeId
+            callbacks.onTargetsChange([{ kind: 'node', id: hit.nodeId, label }])
+          } else {
+            callbacks.onTargetsChange([{
+              kind: 'element',
+              id: hit.nodeId,
+              label: `${type} ${hit.tag}${hit.text !== undefined ? ` "${hit.text.slice(0, 20)}"` : ''}`,
+              tag: hit.tag,
+              domPath: hit.domPath,
+              text: hit.text,
+            }])
+          }
+        } else {
+          setLocked(null)
+          callbacks.onTargetsChange([])
+        }
+      } else if (marqueeActive.current) {
+        marqueeActive.current = false
+        setMarquee(prev => {
+          if (prev !== null) {
+            const rect = {
+              left: Math.min(prev.x0, prev.x1), right: Math.max(prev.x0, prev.x1),
+              top: Math.min(prev.y0, prev.y1), bottom: Math.max(prev.y0, prev.y1),
+            }
+            if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) {
+              const nodes = hitNodesInRect(rect)
+              if (nodes.length > 0) {
+                callbacks.onTargetsChange(nodes.map(id => {
+                  const node = snapshot.canvas.nodes.find(n => n.id === id)
+                  const label = node !== undefined ? String(node.props.label ?? node.props.title ?? id) : id
+                  return { kind: 'node', id, label } as const
+                }))
+              } else {
+                callbacks.onTargetsChange([])
+              }
+            }
+          }
+          return null
+        })
+      } else if (mode === 'text') {
+        const hits = hitText()
+        if (hits.length > 0) {
+          const excerpt = hits.map(h => h.text).join(' ').slice(0, 120)
+          callbacks.onTargetsChange([{ kind: 'text', excerpt }])
+        }
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') { setLocked(null); setMarquee(null); callbacks.onTargetsChange([]) }
+      if (e.key === 'Enter' && (e.target === document.body || e.target === container)) callbacks.onSave()
+    }
+    container.addEventListener('pointermove', onPointerMove)
+    container.addEventListener('pointerdown', onPointerDown)
+    container.addEventListener('pointerup', onPointerUp)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      container.removeEventListener('pointermove', onPointerMove)
+      container.removeEventListener('pointerdown', onPointerDown)
+      container.removeEventListener('pointerup', onPointerUp)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, snapshot.canvasId, snapshot.revision, containerRef.current])
+
+  // 光标语义
+  const cursor = mode === 'marquee' ? 'crosshair' : mode === 'text' ? 'text' : 'default'
+
+  return (
+    <>
+      {/* 光标样式注入容器 */}
+      <style>{`[data-openloop-canvas-workbench] [data-openloop-canvas]{ cursor: ${cursor}; }`}</style>
+      <div data-openloop-canvas-pin-layer style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20 }}>
+        {/* hover 高亮（元素级）+ DevTools 式 tooltip */}
+        {hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? (
+          <HighlightEl surface={surfaceRef.current} hit={hovered} borderStyle="outline" nodeType={snapshot.canvas.nodes.find(n => n.id === hovered.nodeId)?.type} />
+        ) : null}
+        {/* 锁定高亮 */}
+        {locked !== null ? (
+          <HighlightEl surface={surfaceRef.current} hit={locked} borderStyle="solid" nodeType={snapshot.canvas.nodes.find(n => n.id === locked.nodeId)?.type} />
+        ) : null}
+        {/* 框选矩形 */}
+        {marquee !== null ? (
+          <div style={{
+            position: 'fixed',
+            left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1),
+            width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0),
+            border: `1.5px dashed ${ACCENT}`, background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)',
+            pointerEvents: 'none', zIndex: 50,
+          }} />
+        ) : null}
+        {/* 已存注释 badges（node 级定位） */}
+        {[...annotationsByNode.entries()].map(([nodeId, list]) => (
+          <NodeBadgeAnchor key={nodeId} surface={surfaceRef.current} nodeId={nodeId}>
+            {list.map(({ ann, n }) => (
+              <PinBadge key={ann.id} n={n} annotation={ann}
+                onEdit={() => callbacks.onEditAnnotation(ann)}
+                onDelete={() => callbacks.onDeleteAnnotation(ann)}
+                onHover={callbacks.onFocusNode} />
+            ))}
+          </NodeBadgeAnchor>
+        ))}
+      </div>
+    </>
+  )
+}
+
+/** 从 ancestor 到 el 的 CSS 路径（tag.firstClass > tag > ...） */
+function domPathWithin(ancestor: Element, el: Element): string {
+  const parts: string[] = []
+  let cur: Element | null = el
+  while (cur !== null && cur !== ancestor) {
+    const tag = cur.tagName.toLowerCase()
+    const cls = (cur.getAttribute('class') ?? '').trim().split(/\s+/)[0]
+    parts.unshift(cls !== undefined && cls.length > 0 ? `${tag}.${CSS.escape(cls)}` : tag)
+    cur = cur.parentElement
+  }
+  return parts.join(' > ')
+}
+
+/** badge 锚点：包一层 node 元素尺寸的 absolute 容器，角标钉在右上 */
+function NodeBadgeAnchor({ surface, nodeId, children }: { surface: HTMLElement | null; nodeId: string; children: ReactNode }): ReactNode {
   if (surface === null) return null
   const el = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(nodeId)}"]`)
   if (el === null) return null
   const box = surface.getBoundingClientRect()
   const r = el.getBoundingClientRect()
   return (
+    <div style={{ position: 'absolute', left: r.left - box.left, top: r.top - box.top, width: r.width, height: r.height, pointerEvents: 'none', zIndex: 35 }}>
+      <div style={{ position: 'absolute', right: 0, top: 0, pointerEvents: 'auto' }}>{children}</div>
+    </div>
+  )
+}
+
+/** 元素级高亮框 + DevTools 式 tooltip（type tag · 宽×高） */
+function HighlightEl({ surface, hit, borderStyle, nodeType }: {
+  surface: HTMLElement | null
+  hit: ElementHit
+  borderStyle: 'outline' | 'solid'
+  nodeType: string | undefined
+}): ReactNode {
+  if (surface === null) return null
+  const nodeEl = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`)
+  if (nodeEl === null) return null
+  let el: Element = nodeEl
+  if (hit.domPath.length > 0) {
+    try { el = nodeEl.querySelector(hit.domPath) ?? nodeEl } catch { el = nodeEl }
+  }
+  const box = surface.getBoundingClientRect()
+  const r = el.getBoundingClientRect()
+  if (r.width === 0 && r.height === 0) return null
+  const tooltip = `${nodeType ?? ''} ${hit.tag} · ${Math.round(r.width)}×${Math.round(r.height)}`.trim()
+  return (
     <>
-      {/* DevTools 式底色高亮 + 边框 */}
       <div style={{
-        position: 'absolute', left: r.left - box.left - 3, top: r.top - box.top - 3, width: r.width + 6, height: r.height + 6,
-        border: borderStyle === 'outline' ? `1.5px solid ${ACCENT}` : `2px solid ${ACCENT}`, borderRadius: 6, pointerEvents: 'none', zIndex: 30,
+        position: 'absolute', left: r.left - box.left - 2, top: r.top - box.top - 2, width: r.width + 4, height: r.height + 4,
+        border: borderStyle === 'outline' ? `1.5px solid ${ACCENT}` : `2px solid ${ACCENT}`, borderRadius: 5, pointerEvents: 'none', zIndex: 30,
         background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)',
         boxShadow: borderStyle === 'solid' ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : 'none',
       }} />
-      {/* 元素信息 tooltip（DevTools 检查器风格：type #id · 宽×高） */}
-      {tooltip !== undefined ? (
-        <div style={{
-          position: 'absolute', left: r.left - box.left - 3, top: Math.max(2, r.top - box.top - 22), zIndex: 31,
-          fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: 1,
-          padding: '3px 7px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
-          color: '#fff', background: 'var(--dsw-alias-state-business-primary, #4176e6)',
-          boxShadow: '0 2px 6px rgba(0,0,0,.2)',
-        }}>
-          {tooltip} · {Math.round(r.width)}×{Math.round(r.height)}
-        </div>
-      ) : null}
+      <div style={{
+        position: 'absolute', left: r.left - box.left - 2, top: Math.max(2, r.top - box.top - 22), zIndex: 31,
+        fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: 1,
+        padding: '3px 7px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
+        color: '#fff', background: 'var(--dsw-alias-state-business-primary, #4176e6)',
+        boxShadow: '0 2px 6px rgba(0,0,0,.2)',
+      }}>
+        {tooltip}
+      </div>
     </>
-  )
-}
-
-function PinBadge({ surface, nodeId, anns, onEdit, onDelete }: { surface: HTMLElement | null; nodeId: string; anns: CanvasAnnotation[]; onEdit: (a: CanvasAnnotation) => void; onDelete: (a: CanvasAnnotation) => void }): ReactNode {
-  const [hover, setHover] = useState(false)
-  if (surface === null) return null
-  const el = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(nodeId)}"]`)
-  if (el === null) return null
-  const box = surface.getBoundingClientRect()
-  const r = el.getBoundingClientRect()
-  return (
-    <div style={{ position: 'absolute', left: r.right - box.left - 10, top: r.top - box.top - 8, zIndex: 35 }}
-      onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 17, height: 17, padding: '0 4px', borderRadius: 999, fontSize: 10, fontWeight: 700, color: '#fff', background: ACCENT, boxShadow: '0 2px 8px rgba(0,0,0,.2)', cursor: 'pointer' }}>{anns.length}</span>
-      {hover ? (
-        <div style={{ position: 'absolute', right: 0, top: 20, zIndex: 55, width: 260, display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 9, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))', boxShadow: '0 8px 26px rgba(0,0,0,.2)', userSelect: 'text' }}>
-          {anns.map(a => (
-            <div key={a.id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11, lineHeight: 1.5 }}>
-              <span style={{ flex: 1, minWidth: 0 }}>{a.note}</span>
-              <button type="button" onClick={() => onEdit(a)} title="编辑" style={{ border: 0, background: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--dsw-alias-label-caption, #888)', padding: 0 }}>✎</button>
-              <button type="button" onClick={() => onDelete(a)} title="删除" style={{ border: 0, background: 'none', cursor: 'pointer', fontSize: 11, color: 'var(--dsw-alias-label-caption, #888)', padding: 0 }}>🗑</button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
   )
 }

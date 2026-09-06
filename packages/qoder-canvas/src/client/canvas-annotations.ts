@@ -8,6 +8,20 @@
 
 export type AnnotationTarget =
   | { readonly kind: 'node'; readonly id: string; readonly label: string }
+  | {
+      /** S7 元素级点选（对齐 workbuddy/DevTools 精度）：选中 node 内部的具体 DOM 元素 */
+      readonly kind: 'element'
+      /** 所属画布节点 id（badge 定位/DSL 注入用） */
+      readonly id: string
+      /** 人类可读摘要（tag + 文本节选） */
+      readonly label: string
+      /** 元素标签名（小写，如 span/div/path） */
+      readonly tag: string
+      /** 从 [data-canvas-node] 到该元素的 CSS 路径（如 `div > span.delta`） */
+      readonly domPath: string
+      /** 元素文本节选（前 40 字符，可空） */
+      readonly text?: string | undefined
+    }
   | { readonly kind: 'text'; readonly excerpt: string }
 
 export interface CanvasAnnotation {
@@ -76,14 +90,18 @@ export function formatAnnotationDraft(
   const nodes = snapshot.canvas.nodes ?? []
   const blocks: string[] = []
   for (const t of targets) {
-    if (t.kind === 'node') {
+    if (t.kind === 'node' || t.kind === 'element') {
       const idx = nodes.findIndex(n => n.id === t.id)
       const node = idx >= 0 ? nodes[idx] : undefined
+      // 元素级：额外带 element（DOM 路径）+ tag + text——Agent 知道用户指的是节点内哪个子元素
+      const elementAttrs = t.kind === 'element'
+        ? ` element="${t.domPath}" tag="${t.tag}"${t.text !== undefined && t.text.length > 0 ? ` text="${t.text.replace(/"/g, '&quot;')}"` : ''}`
+        : ''
       if (node !== undefined) {
-        blocks.push(`<target type="${node.type}" id="${node.id}" path="nodes[${idx}]">\n${JSON.stringify(node, null, 2)}\n</target>`)
+        blocks.push(`<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`)
       } else {
         // 节点不在当前快照（快照迭代后被删）——降级为 id 引用
-        blocks.push(`<target id="${t.id}" note="not found in current revision">${t.label}</target>`)
+        blocks.push(`<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`)
       }
     } else {
       blocks.push(`<target type="text">"${t.excerpt}"</target>`)

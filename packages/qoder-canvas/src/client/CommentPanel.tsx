@@ -57,7 +57,7 @@ export function CommentPanel({ targets, note, setNote, onRemoveTarget, onSave, o
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {targets.map((t, i) => (
               <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, padding: '1.5px 7px', borderRadius: 5, background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)', color: ACCENT, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {t.kind === 'node' ? `${t.id} ${t.label}` : `文本 "${t.excerpt}"`}
+                {t.kind === 'text' ? `文本 "${t.excerpt}"` : t.label}
                 <button type="button" onClick={() => onRemoveTarget(i)} style={{ border: 0, background: 'none', cursor: 'pointer', padding: 0, color: 'inherit', fontSize: 11, lineHeight: 1 }}>×</button>
               </span>
             ))}
