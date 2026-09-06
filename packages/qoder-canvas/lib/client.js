@@ -77,6 +77,431 @@ window.__ModuleLoader__.load({
 			}) });
 		}
 		//#endregion
+		//#region src/client/probe.ts
+		/**
+		* 探针源码。注意：这是【要在 iframe 里 eval 的字符串】，写法约束：
+		* - 不用 TS 语法、不用可选链（保守 ES2018）——srcdoc 里直接执行
+		* - 不引用任何 import/外部变量；window.parent 是唯一出口
+		* - html 里的用户脚本可能随后执行，探针脚本放 <head> 最前（buildProbeDocument 拼接序）
+		*/
+		const PROBE_SOURCE = `(function () {
+  'use strict';
+  var token = null;
+  var mode = 'off';
+  function send(msg) {
+    try { window.parent.postMessage(Object.assign({ token: token, __openloopProbe: true }, msg), '*'); } catch (e) {}
+  }
+  function domPath(el) {
+    var parts = [];
+    var cur = el;
+    while (cur && cur !== document.body) {
+      var tag = cur.tagName ? cur.tagName.toLowerCase() : 'node';
+      var cls = (cur.getAttribute && cur.getAttribute('class')) || '';
+      cls = cls.trim().split(/\\s+/)[0];
+      var part = cls ? tag + '.' + cls : tag;
+      var parent = cur.parentElement;
+      if (parent) {
+        var same = [];
+        for (var i = 0; i < parent.children.length; i++) if (parent.children[i].tagName === cur.tagName) same.push(parent.children[i]);
+        if (same.length > 1) part += ':nth-of-type(' + (same.indexOf(cur) + 1) + ')';
+      }
+      parts.unshift(part);
+      cur = cur.parentElement;
+    }
+    return parts.join(' > ');
+  }
+  function rectOf(el) {
+    var r = el.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  }
+  function hitOf(el) {
+    var text = (el.textContent || '').trim();
+    var snippet = '';
+    try { snippet = el.outerHTML || ''; } catch (e) {}
+    if (snippet.length > 600) snippet = snippet.slice(0, 600);
+    return {
+      domPath: domPath(el),
+      tag: el.tagName ? el.tagName.toLowerCase() : 'node',
+      text: text ? text.slice(0, 40) : undefined,
+      snippet: snippet,
+      rect: rectOf(el)
+    };
+  }
+  function hitAt(x, y) {
+    var stack = document.elementsFromPoint(x, y);
+    for (var i = 0; i < stack.length; i++) {
+      var el = stack[i];
+      if (el === document.documentElement || el === document.body) continue;
+      return hitOf(el);
+    }
+    return null;
+  }
+  function leafHitsIn(rect) {
+    var out = [];
+    var walk = function (el) {
+      for (var i = 0; i < el.children.length; i++) {
+        var child = el.children[i];
+        if (child.children.length === 0) {
+          var r = child.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0 && !(r.right < rect.left || r.left > rect.right || r.bottom < rect.top || r.top > rect.bottom)) {
+            out.push(hitOf(child));
+          }
+        } else {
+          walk(child);
+        }
+      }
+    };
+    walk(document.body || document.documentElement);
+    return out;
+  }
+  function selectionInfo() {
+    var sel = window.getSelection && window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+    var range = sel.getRangeAt(0);
+    var node = range.startContainer;
+    while (node && node.nodeType !== 1) node = node.parentNode;
+    if (!node) return null;
+    return { excerpt: String(sel.toString()).slice(0, 120), domPath: domPath(node) };
+  }
+  // 模式转发：父页面切换选区模式（text 模式 iframe 放行原生划选，其他模式父层透明捕获层接管）
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || d.__openloopProbe !== true || typeof d.t !== 'string') return;
+    if (d.t === 'init') {
+      token = d.token;
+      mode = d.mode || 'off';
+      send({ t: 'ready', height: document.documentElement.scrollHeight });
+    } else if (d.t === 'mode') {
+      mode = d.mode;
+    } else if (d.t === 'hit') {
+      send({ t: 'hit-result', reqId: d.reqId, hit: hitAt(d.x, d.y) });
+    } else if (d.t === 'marquee') {
+      send({ t: 'marquee-result', reqId: d.reqId, hits: leafHitsIn(d.rect) });
+    } else if (d.t === 'ping') {
+      send({ t: 'pong', reqId: d.reqId });
+    }
+  }, false);
+  // 划字上报：text 模式下 iframe 内原生 selection 变化即上报（父层无捕获层）
+  document.addEventListener('selectionchange', function () {
+    if (mode !== 'text' || !token) return;
+    var info = selectionInfo();
+    if (info) send({ t: 'selection', excerpt: info.excerpt, domPath: info.domPath });
+  });
+  // 高度自适应：内容变化上报（ResizeObserver 兜底 scroll 监听）
+  var lastH = -1;
+  var reportH = function () {
+    if (!token) return;
+    var h = document.documentElement.scrollHeight;
+    if (h !== lastH) { lastH = h; send({ t: 'height', height: h }); }
+  };
+  if (window.ResizeObserver) {
+    try { new ResizeObserver(reportH).observe(document.documentElement); } catch (e) {}
+  }
+  window.addEventListener('load', reportH);
+  setTimeout(reportH, 200);
+  // 握手拉模式（真机教训 2026-09-06：父侧 init 可能在探针挂监听前发出而丢失——
+  // 探针脚本一执行就发 hello，父侧收到后（重）发 init，确保 token 必达）
+  send({ t: 'hello', height: document.documentElement.scrollHeight });
+})();`;
+		/**
+		* 组装 iframe 文档（srcdoc）：探针在最前 + Agent HTML。
+		* - Agent HTML 可能是 fragment（无 <html>）也可能是完整文档——fragment 包一层基础骨架
+		* - 探针脚本放 <head> 首位：先于 Agent 脚本初始化（token 就绪前探针静默）
+		* - <\/script> 转义：Agent HTML 若含字面 <\/script> 会在字符串拼接中截断脚本——
+		*   JSON.stringify 注入变量 + innerHTML 之外的安全路径（本函数只做拼接，转义责任在
+		*   fragment 分支的 script 内联处理：source 作为字符串变量注入，不直接拼进脚本区）
+		*/
+		function buildProbeDocument(source) {
+			const wrapped = /<html[\s>]|<!doctype/i.test(source) ? source : `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;font-family:inherit}</style></head><body>${source}</body></html>`;
+			const probeTag = `<script>${PROBE_SOURCE}<\/script>`;
+			if (/<head[^>]*>/i.test(wrapped)) return wrapped.replace(/<head[^>]*>/i, (m) => `${m}${probeTag}`);
+			return probeTag + wrapped;
+		}
+		//#endregion
+		//#region src/client/html-bridge.ts
+		const READY_TIMEOUT_MS = 800;
+		let reqSeq = 1;
+		const registry = /* @__PURE__ */ new Map();
+		const listeners$1 = /* @__PURE__ */ new Set();
+		function emit$1() {
+			for (const l of listeners$1) l();
+		}
+		function randomToken() {
+			return `p_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+		}
+		/** 全局 message 监听（模块级一次；HtmlNode 的注册驱动它） */
+		if (typeof window !== "undefined") window.addEventListener("message", (ev) => {
+			const d = ev.data;
+			if (d === null || typeof d !== "object" || d["__openloopProbe"] !== true) return;
+			for (const rec of registry.values()) {
+				if (rec.token !== d["token"] || rec.frame.contentWindow !== ev.source) continue;
+				const t = d["t"];
+				if (t === "hello") rec.frame.contentWindow?.postMessage({
+					__openloopProbe: true,
+					t: "init",
+					token: rec.token
+				}, "*");
+				else if (t === "ready") {
+					rec.ready = true;
+					rec.degraded = false;
+					const h = d["height"];
+					if (typeof h === "number" && h > 0) rec.height = h;
+					emit$1();
+				} else if (t === "height") {
+					const h = d["height"];
+					if (typeof h === "number" && h > 0 && Math.abs(h - rec.height) > 2) {
+						rec.height = h;
+						emit$1();
+					}
+				} else if (t === "hit-result" || t === "marquee-result") {
+					const reqId = d["reqId"];
+					if (typeof reqId === "number") {
+						const resolver = rec.pending.get(reqId);
+						if (resolver !== void 0) {
+							rec.pending.delete(reqId);
+							resolver(t === "hit-result" ? d["hit"] : d["hits"]);
+						}
+					}
+				}
+				if (t === "selection") for (const sel of selectionListeners) sel(rec.nodeId, {
+					excerpt: String(d["excerpt"] ?? ""),
+					domPath: String(d["domPath"] ?? "")
+				});
+				return;
+			}
+		});
+		const selectionListeners = /* @__PURE__ */ new Set();
+		/** 划字订阅（PinLayer text 模式挂） */
+		function onProbeSelection(fn) {
+			selectionListeners.add(fn);
+			return () => {
+				selectionListeners.delete(fn);
+			};
+		}
+		/** 注册/重注册一个 html 节点的 iframe（HtmlNode onload 调用；重渲染自动覆盖旧记录） */
+		function registerProbeFrame(nodeId, frame) {
+			const token = randomToken();
+			const rec = {
+				nodeId,
+				frame,
+				token,
+				ready: false,
+				degraded: false,
+				height: 0,
+				mountedAt: Date.now(),
+				pending: /* @__PURE__ */ new Map()
+			};
+			registry.set(nodeId, rec);
+			frame.contentWindow?.postMessage({
+				__openloopProbe: true,
+				t: "init",
+				token
+			}, "*");
+			setTimeout(() => {
+				if (rec.ready === false && registry.get(nodeId) === rec) {
+					rec.degraded = true;
+					emit$1();
+				}
+			}, READY_TIMEOUT_MS);
+			emit$1();
+		}
+		/** 卸载（HtmlNode unmount；版本重渲染先卸后挂） */
+		function unregisterProbeFrame(nodeId) {
+			const rec = registry.get(nodeId);
+			if (rec !== void 0) {
+				for (const resolve of rec.pending.values()) resolve(null);
+				registry.delete(nodeId);
+			}
+			emit$1();
+		}
+		/** 模式广播（PinLayer mode 变化时对全部 frame 补发——含未 ready 的，探针 init 后生效） */
+		function broadcastProbeMode(mode) {
+			for (const rec of registry.values()) rec.frame.contentWindow?.postMessage({
+				__openloopProbe: true,
+				t: "mode",
+				token: rec.token,
+				mode
+			}, "*");
+		}
+		/** 订阅 bridge 状态（ready/degraded/height 变化——HtmlNode 高度 + PinLayer 路由用） */
+		function onBridgeChange(fn) {
+			listeners$1.add(fn);
+			return () => {
+				listeners$1.delete(fn);
+			};
+		}
+		/** 找全部 html 节点中坐标命中的 frame（跨节点查询——PinLayer hitElement 用） */
+		function frameAtAny(clientX, clientY) {
+			for (const rec of registry.values()) {
+				const r = rec.frame.getBoundingClientRect();
+				if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return rec;
+			}
+			return null;
+		}
+		/** 全部 frame 记录（框选扫描用） */
+		function allFrameRecords() {
+			return [...registry.values()];
+		}
+		/** 诊断暴露（真机调试用；生产无害——只读。挂 window 便于控制台排查） */
+		function bridgeDebug() {
+			const out = [];
+			for (const r of registry.values()) out.push({
+				nodeId: r.nodeId,
+				ready: r.ready,
+				degraded: r.degraded,
+				token: r.token.slice(0, 6),
+				height: r.height,
+				pending: r.pending.size
+			});
+			return out;
+		}
+		if (typeof window !== "undefined") window.__openloopBridgeDebug = bridgeDebug;
+		/** iframe 内容坐标（父页面 client 坐标 → iframe 视口坐标） */
+		function toFrameCoords(rec, clientX, clientY) {
+			const r = rec.frame.getBoundingClientRect();
+			return {
+				x: clientX - r.left,
+				y: clientY - r.top
+			};
+		}
+		/** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级） */
+		function probeHitAt(rec, x, y, timeoutMs = 120) {
+			if (!rec.ready || rec.degraded) return Promise.resolve(null);
+			return new Promise((resolve) => {
+				const reqId = reqSeq++;
+				const timer = setTimeout(() => {
+					rec.pending.delete(reqId);
+					resolve(null);
+				}, timeoutMs);
+				rec.pending.set(reqId, (hit) => {
+					clearTimeout(timer);
+					resolve(hit);
+				});
+				rec.frame.contentWindow?.postMessage({
+					__openloopProbe: true,
+					t: "hit",
+					token: rec.token,
+					reqId,
+					x,
+					y
+				}, "*");
+			});
+		}
+		/** 框选查询（同上；返回叶子元素命中数组） */
+		function probeMarqueeIn(rec, rect, timeoutMs = 200) {
+			if (!rec.ready || rec.degraded) return Promise.resolve([]);
+			return new Promise((resolve) => {
+				const reqId = reqSeq++;
+				const timer = setTimeout(() => {
+					rec.pending.delete(reqId);
+					resolve([]);
+				}, timeoutMs);
+				rec.pending.set(reqId, (hits) => {
+					clearTimeout(timer);
+					resolve(Array.isArray(hits) ? hits : []);
+				});
+				rec.frame.contentWindow?.postMessage({
+					__openloopProbe: true,
+					t: "marquee",
+					token: rec.token,
+					reqId,
+					rect
+				}, "*");
+			});
+		}
+		/** iframe 内容高度（自适应；degraded 时 0 = iframe 用固定高度兜底） */
+		function probeHeight(nodeId) {
+			return registry.get(nodeId)?.height ?? 0;
+		}
+		/**
+		* 坐标换算（纯函数，单测覆盖）：探针 rect（iframe 视口）→ 父页面画布容器坐标。
+		* iframe 本身不滚动（高度自适应），故只加 iframe 在容器内的偏移。
+		*/
+		function frameRectToContainer(frame, container, r) {
+			const fb = frame.getBoundingClientRect();
+			const cb = container.getBoundingClientRect();
+			return {
+				left: fb.left - cb.left + r.x,
+				top: fb.top - cb.top + r.y,
+				width: r.w,
+				height: r.h
+			};
+		}
+		//#endregion
+		//#region src/client/HtmlNode.tsx
+		/**
+		* HtmlNode：html 节点的 iframe 沙箱渲染器（0.9.0 增强档）。
+		*
+		* - srcdoc = buildProbeDocument(source)：探针自动注入（skill/Agent HTML 零配合）
+		* - sandbox="allow-scripts"（opaque origin；html-artifact 先例）+ referrerPolicy
+		* - 高度自适应：bridge 高度（探针 ResizeObserver 上报）clamp [120, 640]，
+		*   超上限 iframe 内部滚动（frameRectToContainer 假设 iframe 不滚——超上限时
+		*   探针 rect 含内部滚动偏移，父层高亮换算仍正确：getBoundingClientRect 本身
+		*   是视口坐标，滚动只影响内容可见性不影响 rect 换算基）
+		* - onload → registerProbeFrame（版本重渲染自动覆盖旧记录）
+		* - 降级态（探针超时未 ready）：显示提示条 + 固定高度 320（节点级标注仍可用）
+		*/
+		const MIN_H = 120;
+		const MAX_H = 640;
+		function HtmlNode({ nodeId, props }) {
+			const [height, setHeight] = (0, react.useState)(240);
+			const source = typeof props.source === "string" ? props.source : "";
+			const title = typeof props.title === "string" ? props.title : "";
+			(0, react.useEffect)(() => {
+				const update = () => {
+					const h = probeHeight(nodeId);
+					if (h > 0) setHeight(Math.min(Math.max(h, MIN_H), MAX_H));
+				};
+				update();
+				return onBridgeChange(update);
+			}, [nodeId]);
+			const frameRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				const f = frameRef.current;
+				if (f === null) return;
+				const doc = buildProbeDocument(source);
+				f.setAttribute("sandbox", "allow-scripts");
+				f.setAttribute("referrerpolicy", "no-referrer");
+				f.setAttribute("srcdoc", doc);
+			}, [source]);
+			(0, react.useEffect)(() => {
+				const register = () => {
+					if (frameRef.current !== null) registerProbeFrame(nodeId, frameRef.current);
+				};
+				register();
+				const t = setTimeout(register, 400);
+				return () => {
+					clearTimeout(t);
+					unregisterProbeFrame(nodeId);
+				};
+			}, [nodeId, source]);
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				style: {
+					border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
+					borderRadius: 10,
+					overflow: "hidden",
+					background: "#fff",
+					display: "flex",
+					flexDirection: "column",
+					minWidth: 0
+				},
+				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
+					ref: frameRef,
+					title: title.length > 0 ? title : `html-${nodeId}`,
+					onLoad: () => {
+						if (frameRef.current !== null) registerProbeFrame(nodeId, frameRef.current);
+					},
+					style: {
+						width: "100%",
+						height,
+						border: 0,
+						display: "block",
+						background: "#fff"
+					}
+				})
+			});
+		}
+		//#endregion
 		//#region src/client/CanvasSurface.tsx
 		const surface = {
 			width: "100%",
@@ -549,6 +974,10 @@ window.__ModuleLoader__.load({
 					children: null
 				});
 				case "panel": return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: nodeBase() });
+				case "html": return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HtmlNode, {
+					nodeId: node.id,
+					props
+				});
 				default: return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 					style: nodeBase(),
 					children: ["未知节点 ", node.type]
@@ -1069,8 +1498,27 @@ window.__ModuleLoader__.load({
 			const [marqueeHits, setMarqueeHits] = (0, react.useState)([]);
 			const marqueeActive = (0, react.useRef)(false);
 			const marqueeStart = (0, react.useRef)(null);
+			/** iframe hover 预取竞态序号（旧异步响应丢弃） */
+			const hoverIframeSeq = (0, react.useRef)(0);
+			/** 最新 targets（异步 iframe 框选合并时读取——避免闭包旧值） */
+			const targetsRef = (0, react.useRef)([]);
+			targetsRef.current = targets;
 			const surfaceRef = (0, react.useRef)(null);
 			surfaceRef.current = containerRef.current;
+			(0, react.useEffect)(() => {
+				broadcastProbeMode(mode === "text" ? "text" : "off");
+			}, [mode]);
+			(0, react.useEffect)(() => {
+				if (mode !== "text") return;
+				return onProbeSelection((nodeId, info) => {
+					if (info.excerpt.length === 0) return;
+					callbacks.onTargetsChange([{
+						kind: "text",
+						excerpt: info.excerpt,
+						nodeId
+					}]);
+				});
+			}, [mode]);
 			const annotationsByNode = /* @__PURE__ */ new Map();
 			callbacks.annotations.forEach((ann, i) => {
 				const t = ann.targets[0];
@@ -1084,9 +1532,9 @@ window.__ModuleLoader__.load({
 				}
 			});
 			/**
-			* 元素级命中（S7 核心）：elementsFromPoint 取最深层属于画布的元素。
-			* - 跳过 pin 层自身（badges/高亮——高亮是 pointer-events:none 本不会被返回，badge 需要跳过）
-			* - 返回元素 + 所属 nodeId + domPath
+			* 元素级命中（S7 核心 + 0.9.0 iframe 扩展）：
+			* 外层 DOM 命中（elementsFromPoint）优先；未命中且坐标落在 html 节点 iframe 上时
+			* 返回 iframe 占位命中（同步）；探针细粒度命中走 hover 预取缓存（异步，见 onPointerMove）。
 			*/
 			const hitElement = (x, y) => {
 				const surface = surfaceRef.current;
@@ -1098,6 +1546,11 @@ window.__ModuleLoader__.load({
 					if (nodeEl === null || !surface.contains(nodeEl)) continue;
 					const nodeId = nodeEl.getAttribute("data-canvas-node");
 					if (nodeId === null || nodeId.length === 0) continue;
+					if (el.tagName === "IFRAME") return {
+						nodeId,
+						domPath: "",
+						tag: "iframe"
+					};
 					if (el === nodeEl) return {
 						nodeId,
 						domPath: "",
@@ -1113,6 +1566,30 @@ window.__ModuleLoader__.load({
 					};
 				}
 				return null;
+			};
+			/**
+			* iframe 探针命中（异步）：坐标落在 html 节点 iframe → 查探针。
+			* point/marquee 两查询；命中返回带 iframeHit 的 ElementHit（nodeId 归属 html 节点）。
+			*/
+			const hitIframeAt = async (x, y) => {
+				const surface = surfaceRef.current;
+				if (surface === null) return null;
+				const rec = frameAtAny(x, y);
+				if (rec === null || !surface.contains(rec.frame)) return null;
+				const coords = toFrameCoords(rec, x, y);
+				const hit = await probeHitAt(rec, coords.x, coords.y);
+				if (hit === null) return {
+					nodeId: rec.nodeId,
+					domPath: "",
+					tag: "iframe"
+				};
+				return {
+					nodeId: rec.nodeId,
+					domPath: hit.domPath,
+					tag: hit.tag,
+					text: hit.text,
+					iframeHit: hit
+				};
 			};
 			/**
 			* 框选命中（S8.1 元素级深化，用户拍板）：
@@ -1219,8 +1696,19 @@ window.__ModuleLoader__.load({
 						setHovered(null);
 						return;
 					}
-					if (mode === "point" && !marqueeActive.current) setHovered(hitElement(e.clientX, e.clientY));
-					else if (marqueeActive.current) {
+					if (mode === "point" && !marqueeActive.current) {
+						const domHit = hitElement(e.clientX, e.clientY);
+						if (domHit !== null && domHit.tag === "iframe") {
+							const seq = ++hoverIframeSeq.current;
+							setHovered(domHit);
+							hitIframeAt(e.clientX, e.clientY).then((h) => {
+								if (seq === hoverIframeSeq.current && h !== null) setHovered(h);
+							});
+						} else {
+							hoverIframeSeq.current++;
+							setHovered(domHit);
+						}
+					} else if (marqueeActive.current) {
 						setMarquee((prev) => prev !== null ? {
 							...prev,
 							x1: e.clientX,
@@ -1267,26 +1755,45 @@ window.__ModuleLoader__.load({
 					}
 					if (mode === "point" && !marqueeActive.current) {
 						const hit = hitElement(e.clientX, e.clientY);
-						if (hit !== null) {
-							setLocked(hit);
-							const node = snapshot.canvas.nodes.find((n) => n.id === hit.nodeId);
-							const type = node?.type ?? hit.nodeId;
-							if (hit.domPath.length === 0) {
-								const label = node !== void 0 ? String(node.props.label ?? node.props.title ?? hit.nodeId) : hit.nodeId;
+						const lockAndEmit = (h) => {
+							setLocked(h);
+							const node = snapshot.canvas.nodes.find((n) => n.id === h.nodeId);
+							const type = node?.type ?? h.nodeId;
+							if (h.iframeHit !== void 0) {
+								callbacks.onTargetsChange([{
+									kind: "html-element",
+									id: h.nodeId,
+									label: `html ${h.tag}${h.text !== void 0 ? ` "${h.text.slice(0, 20)}"` : ""}`,
+									tag: h.tag,
+									domPath: h.domPath,
+									text: h.text,
+									snippet: h.iframeHit.snippet
+								}]);
+								return;
+							}
+							if (h.domPath.length === 0) {
+								const label = node !== void 0 ? String(node.props.label ?? node.props.title ?? h.nodeId) : h.nodeId;
 								callbacks.onTargetsChange([{
 									kind: "node",
-									id: hit.nodeId,
+									id: h.nodeId,
 									label
 								}]);
 							} else callbacks.onTargetsChange([{
 								kind: "element",
-								id: hit.nodeId,
-								label: `${type} ${hit.tag}${hit.text !== void 0 ? ` "${hit.text.slice(0, 20)}"` : ""}`,
-								tag: hit.tag,
-								domPath: hit.domPath,
-								text: hit.text
+								id: h.nodeId,
+								label: `${type} ${h.tag}${h.text !== void 0 ? ` "${h.text.slice(0, 20)}"` : ""}`,
+								tag: h.tag,
+								domPath: h.domPath,
+								text: h.text
 							}]);
-						} else {
+						};
+						if (hit !== null && hit.tag === "iframe") {
+							lockAndEmit(hit);
+							hitIframeAt(e.clientX, e.clientY).then((h) => {
+								if (h !== null) lockAndEmit(h);
+							});
+						} else if (hit !== null) lockAndEmit(hit);
+						else {
 							setLocked(null);
 							callbacks.onTargetsChange([]);
 						}
@@ -1302,7 +1809,36 @@ window.__ModuleLoader__.load({
 									top: Math.min(prev.y0, prev.y1),
 									bottom: Math.max(prev.y0, prev.y1)
 								};
-								if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) callbacks.onTargetsChange(hitMarquee(rect));
+								if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) {
+									callbacks.onTargetsChange(hitMarquee(rect));
+									(async () => {
+										const surface = surfaceRef.current;
+										if (surface === null) return;
+										for (const rec of allFrameRecords()) {
+											const fr = rec.frame.getBoundingClientRect();
+											if (fr.width === 0 || !surface.contains(rec.frame)) continue;
+											const probeRect = {
+												left: Math.max(rect.left, fr.left) - fr.left,
+												right: Math.min(rect.right, fr.right) - fr.left,
+												top: Math.max(rect.top, fr.top) - fr.top,
+												bottom: Math.min(rect.bottom, fr.bottom) - fr.top
+											};
+											if (probeRect.right - probeRect.left <= 4 || probeRect.bottom - probeRect.top <= 4) continue;
+											const hits = await probeMarqueeIn(rec, probeRect);
+											if (hits.length === 0) continue;
+											const htmlTargets = hits.map((h) => ({
+												kind: "html-element",
+												id: rec.nodeId,
+												label: `html ${h.tag}${h.text !== void 0 && h.text.length > 0 ? ` "${h.text.slice(0, 20)}"` : ""}`,
+												tag: h.tag,
+												domPath: h.domPath,
+												text: h.text,
+												snippet: h.snippet
+											}));
+											callbacks.onTargetsChange([...targetsRef.current, ...htmlTargets]);
+										}
+									})();
+								}
 							}
 							return null;
 						});
@@ -1360,24 +1896,37 @@ window.__ModuleLoader__.load({
 						nodeType: snapshot.canvas.nodes.find((n) => n.id === hovered.nodeId)?.type
 					}) : null,
 					targets.map((t) => {
-						if (t.kind !== "node" && t.kind !== "element") return null;
-						const hit = t.kind === "element" ? {
-							nodeId: t.id,
-							domPath: t.domPath,
-							tag: t.tag,
-							text: t.text
-						} : {
-							nodeId: t.id,
-							domPath: "",
-							tag: "div"
-						};
-						return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
+						if (t.kind === "node" || t.kind === "element") {
+							const hit = t.kind === "element" ? {
+								nodeId: t.id,
+								domPath: t.domPath,
+								tag: t.tag,
+								text: t.text
+							} : {
+								nodeId: t.id,
+								domPath: "",
+								tag: "div"
+							};
+							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
+								surface: surfaceRef.current,
+								hit,
+								borderStyle: "solid",
+								nodeType: snapshot.canvas.nodes.find((n) => n.id === t.id)?.type,
+								showTooltip: targets.length === 1
+							}, `sel-${t.id}-${t.kind === "element" ? t.domPath : "root"}`);
+						}
+						if (t.kind === "html-element") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
 							surface: surfaceRef.current,
-							hit,
+							hit: {
+								nodeId: t.id,
+								domPath: "",
+								tag: "iframe"
+							},
 							borderStyle: "solid",
-							nodeType: snapshot.canvas.nodes.find((n) => n.id === t.id)?.type,
+							nodeType: "html",
 							showTooltip: targets.length === 1
-						}, `sel-${t.id}-${t.kind === "element" ? t.domPath : "root"}`);
+						}, `sel-${t.id}-${t.domPath}`);
+						return null;
 					}),
 					marqueeHits.map((h) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
 						surface: surfaceRef.current,
@@ -1463,19 +2012,36 @@ window.__ModuleLoader__.load({
 				})
 			});
 		}
-		/** 元素级高亮框 + DevTools 式 tooltip（type tag · 宽×高；showTooltip=false 时只画框） */
+		/**
+		* 元素级高亮框 + DevTools 式 tooltip（showTooltip=false 时只画框）。
+		* 0.9.0：iframe 命中（iframeHit 携带探针 rect）直接按换算坐标画——不经 DOM 回查
+		* （iframe 内元素父层 querySelector 不可达）；domPath 命中照旧回查。
+		*/
 		function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }) {
 			if (surface === null) return null;
-			const nodeEl = surface.querySelector(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`);
-			if (nodeEl === null) return null;
-			let el = nodeEl;
-			if (hit.domPath.length > 0) try {
-				el = nodeEl.querySelector(hit.domPath) ?? nodeEl;
-			} catch {
-				el = nodeEl;
-			}
 			const box = surface.getBoundingClientRect();
-			const r = el.getBoundingClientRect();
+			let r = null;
+			if (hit.iframeHit !== void 0) {
+				const frameEl = surface.querySelector(`[data-canvas-node="${CSS.escape(hit.nodeId)}"] iframe`);
+				if (frameEl === null) return null;
+				r = frameRectToContainer(frameEl, surface, hit.iframeHit.rect);
+			} else {
+				const nodeEl = surface.querySelector(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`);
+				if (nodeEl === null) return null;
+				let el = nodeEl;
+				if (hit.domPath.length > 0) try {
+					el = nodeEl.querySelector(hit.domPath) ?? nodeEl;
+				} catch {
+					el = nodeEl;
+				}
+				const er = el.getBoundingClientRect();
+				r = {
+					left: er.left,
+					top: er.top,
+					width: er.width,
+					height: er.height
+				};
+			}
 			if (r.width === 0 && r.height === 0) return null;
 			const tooltip = `${nodeType ?? ""} ${hit.tag} · ${Math.round(r.width)}×${Math.round(r.height)}`.trim();
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
@@ -1920,8 +2486,9 @@ window.__ModuleLoader__.load({
 		function removeAnnotation(canvasId, id) {
 			writeAll(canvasId, readAll(canvasId).filter((a) => a.id !== id));
 		}
-		/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位） */
+		/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位；html-element 带 snippet） */
 		function formatTargetBlock(t, nodes) {
+			if (t.kind === "html-element") return formatHtmlElementTarget(t, nodes);
 			if (t.kind === "node" || t.kind === "element") {
 				const idx = nodes.findIndex((n) => n.id === t.id);
 				const node = idx >= 0 ? nodes[idx] : void 0;
@@ -1931,6 +2498,18 @@ window.__ModuleLoader__.load({
 			}
 			const idx = t.nodeId !== void 0 ? nodes.findIndex((n) => n.id === t.nodeId) : -1;
 			return `<target type="text"${idx >= 0 ? ` in="nodes[${idx}]"` : t.nodeId !== void 0 ? ` in="${t.nodeId}"` : ""}>"${t.excerpt}"</target>`;
+		}
+		/** html-element target 块（0.9.0 增强档）：snippet 是 Agent 定位修改的主线索 */
+		function formatHtmlElementTarget(t, nodes) {
+			const idx = nodes.findIndex((n) => n.id === t.id);
+			const pathAttr = idx >= 0 ? `nodes[${idx}]` : t.id;
+			const textAttr = t.text !== void 0 && t.text.length > 0 ? ` text="${escapeAttr(t.text)}"` : "";
+			const snippet = t.snippet.length > 0 && /[[@\d]/.test(t.snippet[0] ?? "") ? `\n${t.snippet}` : t.snippet;
+			return `<target type="html" id="${t.id}" path="${pathAttr}" element="${escapeAttr(t.domPath)}" tag="${t.tag}"${textAttr}>\n${snippet}\n</target>\n定位说明：该元素在 html 节点 ${pathAttr} 的 source 内，无结构化路径——请以上方源码片段做文本匹配定位，修改后重发完整 source`;
+		}
+		/** 属性值转义（防注入破坏 XML 结构） */
+		function escapeAttr(s) {
+			return s.replace(/"/g, "&quot;").replace(/\n/g, " ");
 		}
 		/**
 		* 同画布多条注释合并注入（S7.1）：共享一个定位头，逐条编号。

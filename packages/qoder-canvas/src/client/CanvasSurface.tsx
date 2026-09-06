@@ -6,6 +6,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { CanvasNode, CanvasSnapshot } from '../dsl.ts'
 import { renderMarkdownLines } from './markdown.tsx'
+import { HtmlNode } from './HtmlNode.tsx'
 
 // ---- 通用样式 ----
 
@@ -278,6 +279,7 @@ function NodeRenderer({ node, onAction }: { node: CanvasNode; onAction: ((node: 
     case 'link': return <LinkNode props={props} />
     case 'section': return <SectionNode node={node}>{null}</SectionNode>
     case 'panel': return <div style={nodeBase()} /> // 占位：v0.1 不支持嵌套
+    case 'html': return <HtmlNode nodeId={node.id} props={props} />
     default: return <div style={nodeBase()}>未知节点 {node.type}</div>
   }
 }

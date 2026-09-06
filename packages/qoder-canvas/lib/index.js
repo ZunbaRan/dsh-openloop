@@ -182,6 +182,21 @@ const NODE_REGISTRY = {
 				required: true
 			}
 		}
+	},
+	html: {
+		type: "html",
+		description: "自由 HTML 块（iframe 沙箱渲染，支持脚本；元素级标注经探针桥）。用于富排版/演示/设计稿——baoyu-design 等设计 skill 的产物放这里；结构化内容仍用专用节点",
+		props: {
+			source: {
+				kind: "html-source",
+				maxBytes: 102400,
+				required: true
+			},
+			title: {
+				kind: "string",
+				maxLength: 120
+			}
+		}
 	}
 };
 const LAYOUTS = [
@@ -399,6 +414,19 @@ function checkProp(path, value, rule) {
 			}
 			return;
 		}
+		case "html-source": {
+			if (value === void 0) {
+				if (rule.required === true) fail(path, "is required");
+				return;
+			}
+			if (typeof value !== "string") {
+				fail(path, "must be a string (complete HTML document or fragment)", "html string");
+				return;
+			}
+			const bytes = byteSize(value);
+			if (bytes > rule.maxBytes) fail(path, `size ${bytes}B exceeds max ${rule.maxBytes}B; inline scripts/styles count — move large assets to http(s) URLs`);
+			return;
+		}
 	}
 }
 function checkHref(path, href) {
@@ -457,7 +485,7 @@ function validateInner(value) {
 			fail(path, "must be an object");
 			continue;
 		}
-		if (byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`);
+		if (!(n["type"] === "html") && byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`);
 		const id = n["id"];
 		if (typeof id !== "string" || !ID_RE.test(id)) fail(`${path}.id`, "must match [a-zA-Z0-9_-]{1,32}");
 		else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`);
@@ -876,11 +904,11 @@ function apply(ctx) {
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
-		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those nodes (match path/nodes[i]) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards.",
+		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, rich designs). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL, or HTML source snippets for html nodes); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices, landing-page-quality designs. MIXED COMPOSITION: use structured node types (stat-card/chart/table/…) for data content; use the html node for rich/free layouts — it renders arbitrary HTML/CSS/JS in a sandboxed iframe with full element-level annotation support (users can click/marquee/text-select INSIDE it; annotated elements come back with their source snippet — locate by text-matching the snippet and re-emit the full source). If a design/PPT/typography skill is available, its HTML output belongs in an html node. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those (match path/nodes[i] or the snippet) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards.",
 		parameters: {
 			document: {
 				type: "json",
-				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 10 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder). (* = required). Limits: whole document ≤256KB. Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
+				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 11 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder); html: { source*: string — complete HTML document or fragment ≤100KB, rendered in a sandboxed iframe WITH element-level annotation (use for rich layouts/design decks/PPT; inline JS allowed; reference external assets by http(s) URL), title?: string≤120 }. (* = required). Limits: whole document ≤256KB (html node source ≤100KB). Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
 			},
 			canvasId: {
 				type: "string",

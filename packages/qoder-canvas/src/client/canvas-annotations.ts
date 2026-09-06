@@ -28,6 +28,19 @@ export type AnnotationTarget =
       /** 划选文本所属的节点 id（S7.1 增强：Agent 不再只靠文本猜位置） */
       readonly nodeId?: string | undefined
     }
+  | {
+      /** 0.9.0 增强档：html 节点 iframe 内的元素命中（探针回传） */
+      readonly kind: 'html-element'
+      /** 所属 html 节点 id */
+      readonly id: string
+      readonly label: string
+      /** iframe 内 CSS 路径（探针生成，带 :nth-of-type） */
+      readonly domPath: string
+      readonly tag: string
+      readonly text?: string | undefined
+      /** 命中元素 outerHTML 截断（~600 字符）——Agent 按源码片段文本匹配定位修改 */
+      readonly snippet: string
+    }
 
 export interface CanvasAnnotation {
   readonly id: string
@@ -89,8 +102,11 @@ export function removeAnnotation(canvasId: string, id: string): void {
  */
 type SnapshotLike = { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[] } }
 
-/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位） */
+/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位；html-element 带 snippet） */
 function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[]): string {
+  if (t.kind === 'html-element') {
+    return formatHtmlElementTarget(t, nodes)
+  }
   if (t.kind === 'node' || t.kind === 'element') {
     const idx = nodes.findIndex(n => n.id === t.id)
     const node = idx >= 0 ? nodes[idx] : undefined
@@ -108,6 +124,21 @@ function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; ty
   const idx = t.nodeId !== undefined ? nodes.findIndex(n => n.id === t.nodeId) : -1
   const inAttr = idx >= 0 ? ` in="nodes[${idx}]"` : t.nodeId !== undefined ? ` in="${t.nodeId}"` : ''
   return `<target type="text"${inAttr}>"${t.excerpt}"</target>`
+}
+
+/** html-element target 块（0.9.0 增强档）：snippet 是 Agent 定位修改的主线索 */
+function formatHtmlElementTarget(t: Extract<AnnotationTarget, { kind: 'html-element' }>, nodes: readonly { id: string; type: string }[]): string {
+  const idx = nodes.findIndex(n => n.id === t.id)
+  const pathAttr = idx >= 0 ? `nodes[${idx}]` : t.id
+  const textAttr = t.text !== undefined && t.text.length > 0 ? ` text="${escapeAttr(t.text)}"` : ''
+  // snippet 首字符防御：防 [ / @ / 1) 等触发 Lexical composer 魔法转换——起头补换行
+  const snippet = t.snippet.length > 0 && /[[@\d]/.test(t.snippet[0] ?? '') ? `\n${t.snippet}` : t.snippet
+  return `<target type="html" id="${t.id}" path="${pathAttr}" element="${escapeAttr(t.domPath)}" tag="${t.tag}"${textAttr}>\n${snippet}\n</target>\n定位说明：该元素在 html 节点 ${pathAttr} 的 source 内，无结构化路径——请以上方源码片段做文本匹配定位，修改后重发完整 source`
+}
+
+/** 属性值转义（防注入破坏 XML 结构） */
+function escapeAttr(s: string): string {
+  return s.replace(/"/g, '&quot;').replace(/\n/g, ' ')
 }
 
 export function formatAnnotationDraft(
