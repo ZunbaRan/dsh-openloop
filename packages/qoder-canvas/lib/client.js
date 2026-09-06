@@ -882,12 +882,12 @@ window.__ModuleLoader__.load({
 					background: hover ? "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))" : "transparent",
 					cursor: "pointer",
 					lineHeight: 1,
-					opacity: hover || open ? 1 : .55,
+					opacity: hover ? 1 : .55,
 					transition: "opacity .15s ease, background .15s ease",
-					display: "flex",
+					display: open ? "none" : "flex",
 					alignItems: "center",
 					justifyContent: "center",
-					color: open ? "var(--dsw-alias-state-business-primary, #4176e6)" : "var(--dsw-alias-label-secondary, inherit)"
+					color: "var(--dsw-alias-label-secondary, inherit)"
 				},
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
 					width: "15",
@@ -899,13 +899,23 @@ window.__ModuleLoader__.load({
 					strokeLinecap: "round",
 					strokeLinejoin: "round",
 					"aria-hidden": "true",
-					children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
-						x: "3",
-						y: "3",
-						width: "18",
-						height: "18",
-						rx: "2.5"
-					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 9h18M9 9v12" })]
+					children: [
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("rect", {
+							x: "3.5",
+							y: "3.5",
+							width: "17",
+							height: "17",
+							rx: "2.5"
+						}),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3.5 12h17M12 3.5v17" }),
+						/* @__PURE__ */ (0, react_jsx_runtime.jsx)("circle", {
+							cx: "12",
+							cy: "12",
+							r: "1.2",
+							fill: "currentColor",
+							stroke: "none"
+						})
+					]
 				})
 			});
 		}
@@ -2731,20 +2741,38 @@ window.__ModuleLoader__.load({
 									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 										type: "button",
 										onClick: () => setRevMenuOpen((v) => !v),
-										title: "版本历史",
+										title: `版本历史 · ${snapshot.canvasId}@r${snapshot.revision}`,
 										style: {
+											display: "inline-flex",
+											alignItems: "center",
+											gap: 4,
 											fontSize: 10,
-											fontFamily: "ui-monospace, Menlo, monospace",
 											color: "var(--dsw-alias-label-caption, #888)",
 											background: "none",
 											border: revMenuOpen ? `1px solid ${ACCENT}` : "1px solid transparent",
 											borderRadius: 5,
 											padding: "2px 6px",
-											cursor: "pointer"
+											cursor: "pointer",
+											fontFamily: "inherit"
 										},
 										children: [
-											snapshot.canvasId,
-											"@r",
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+												width: "11",
+												height: "11",
+												viewBox: "0 0 24 24",
+												fill: "none",
+												stroke: "currentColor",
+												strokeWidth: "2",
+												strokeLinecap: "round",
+												strokeLinejoin: "round",
+												"aria-hidden": "true",
+												children: [
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 12a9 9 3 0 9-9 9.75 9.75 0 0 1-6.74 2.74L3 8" }),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M3 3v5h5" }),
+													/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M12 7v5l4 2" })
+												]
+											}),
+											"版本 r",
 											snapshot.revision,
 											" ▾"
 										]
@@ -2931,8 +2959,8 @@ window.__ModuleLoader__.load({
 									style: {
 										position: "absolute",
 										right: 12,
-										top: 12,
-										zIndex: 55,
+										top: 0,
+										zIndex: 65,
 										width: 270,
 										maxHeight: "min(420px, calc(100% - 24px))",
 										overflow: "auto",

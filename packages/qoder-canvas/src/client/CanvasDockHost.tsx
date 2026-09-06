@@ -158,22 +158,27 @@ export function CanvasToggle({ open, onToggle }: { open: boolean; onToggle: () =
       title={open ? '收起画布工作台' : '展开画布工作台'}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      // S8.2 修复 zIndex 视觉冲突：canvas 展开时 toggle 隐藏——panel 内部 header 的
+      // 「收起」按钮接管关闭动作（dock 标准模式：toggle 是「打开入口」不是「状态指示器」，
+      // 展开后继续显示会与画布区叠层、视觉撕裂）
       style={{
         position: 'fixed', top: 38, right, zIndex: 2147483045,
         width: 28, height: 28, padding: 0, borderRadius: '50%',
         border: 'none',
         background: hover ? 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))' : 'transparent',
         cursor: 'pointer', lineHeight: 1,
-        opacity: hover || open ? 1 : 0.55,
+        opacity: hover ? 1 : 0.55,
         transition: 'opacity .15s ease, background .15s ease',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: open ? 'var(--dsw-alias-state-business-primary, #4176e6)' : 'var(--dsw-alias-label-secondary, inherit)',
+        display: open ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'var(--dsw-alias-label-secondary, inherit)',
       }}
     >
-      {/* canvas 图标：画板（调色板简化——矩形+内部分区） */}
+      {/* canvas 图标：画板（矩形 + 2x2 grid + 右下角点——更明确的「可绘制画布」语义，
+         * 替代之前「矩形+十字」的弱画板感；尺寸/描边色对齐 better-sidebar 同款 toggle 簇） */}
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="3" width="18" height="18" rx="2.5" />
-        <path d="M3 9h18M9 9v12" />
+        <rect x="3.5" y="3.5" width="17" height="17" rx="2.5" />
+        <path d="M3.5 12h17M12 3.5v17" />
+        <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
       </svg>
     </button>
   )

@@ -219,12 +219,18 @@ export function CanvasWorkbench(): ReactNode {
             {/* 目录按钮（M4：工作区画布清单，点击切换） */}
             <button type="button" onClick={() => { setCatalogOpen(v => !v); if (!catalogOpen) void refreshCatalog() }} title="工作区画布目录"
               style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, border: catalogOpen ? `1px solid ${ACCENT}` : '1px solid transparent', cursor: 'pointer', background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', color: catalogOpen ? ACCENT : 'var(--dsw-alias-label-secondary, inherit)', fontFamily: 'inherit' }}>目录</button>
-            {/* 版本标识（M4：可点开版本菜单，切换历史 revision） */}
+            {/* 版本切换（M4：显式「版本 r2」标识 + history 图标——之前 cv_xxx@r2 太工程化，
+                 * 用户看不出这是版本切换；完整 cvId 放 hover tooltip） */}
             {snapshot !== null ? (
               <span style={{ position: 'relative' }}>
-                <button type="button" onClick={() => setRevMenuOpen(v => !v)} title="版本历史"
-                  style={{ fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--dsw-alias-label-caption, #888)', background: 'none', border: revMenuOpen ? `1px solid ${ACCENT}` : '1px solid transparent', borderRadius: 5, padding: '2px 6px', cursor: 'pointer' }}>
-                  {snapshot.canvasId}@r{snapshot.revision} ▾
+                <button type="button" onClick={() => setRevMenuOpen(v => !v)}
+                  title={`版本历史 · ${snapshot.canvasId}@r${snapshot.revision}`}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--dsw-alias-label-caption, #888)', background: 'none', border: revMenuOpen ? `1px solid ${ACCENT}` : '1px solid transparent', borderRadius: 5, padding: '2px 6px', cursor: 'pointer', fontFamily: 'inherit' }}>
+                  {/* history 图标（clock-counter-clockwise SVG） */}
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 12a9 9 3 0 9-9 9.75 9.75 0 0 1-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" />
+                  </svg>
+                  版本 r{snapshot.revision} ▾
                 </button>
                 {revMenuOpen ? (() => {
                   const item = catalogItems.find(c => c.canvasId === snapshot.canvasId)
@@ -284,9 +290,11 @@ export function CanvasWorkbench(): ReactNode {
 
               {/* 画布区：铺满 + 注释面板悬浮窗 */}
               <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 14, position: 'relative' }} ref={canvasAreaRef}>
-                {/* 工作区目录（M4：悬浮列表，点击切换画布） */}
+                {/* 工作区目录（M4：悬浮列表，点击切换画布。
+                 * top:0 贴 toolbar 下沿——之前 top:12 在画布区内下沉 + toolbar 与画布区间距让目录显得「悬空」靠下。
+                 * zIndex 65 保证在画布卡片之上、toolbar 之下也能被看见） */}
                 {catalogOpen ? (
-                  <div style={{ position: 'absolute', right: 12, top: 12, zIndex: 55, width: 270, maxHeight: 'min(420px, calc(100% - 24px))', overflow: 'auto', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))', boxShadow: '0 12px 36px rgba(0,0,0,.26)' }}>
+                  <div style={{ position: 'absolute', right: 12, top: 0, zIndex: 65, width: 270, maxHeight: 'min(420px, calc(100% - 24px))', overflow: 'auto', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))', boxShadow: '0 12px 36px rgba(0,0,0,.26)' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.1))', background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))' }}>
                       <span style={{ fontSize: 11, fontWeight: 600, flex: 1 }}>工作区画布（{catalogItems.length}）</span>
                       <button type="button" onClick={() => setCatalogOpen(false)} style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', fontSize: 13, lineHeight: 1, color: 'var(--dsw-alias-label-caption, #888)', fontFamily: 'inherit' }}>×</button>
