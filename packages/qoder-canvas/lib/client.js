@@ -1139,7 +1139,17 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				const container = containerRef.current;
 				if (container === null) return;
+				/**
+				* 悬浮注释面板内的交互完全豁免（真机教训 2026-09-06：面板在画布容器内，
+				* 面板上的点击会冒泡到容器触发点选——点 textarea/保存按钮时穿透命中
+				* 画布元素或把 targets 重置为空，导致「评论了但什么都没保存」）
+				*/
+				const inFloatPanel = (e) => e.target instanceof Element && e.target.closest("[data-annotation-float]") !== null;
 				const onPointerMove = (e) => {
+					if (inFloatPanel(e)) {
+						setHovered(null);
+						return;
+					}
 					if (mode === "point" && !marqueeActive.current) setHovered(hitElement(e.clientX, e.clientY));
 					else if (marqueeActive.current) setMarquee((prev) => prev !== null ? {
 						...prev,
@@ -1148,6 +1158,7 @@ window.__ModuleLoader__.load({
 					} : null);
 				};
 				const onPointerDown = (e) => {
+					if (inFloatPanel(e)) return;
 					if (mode === "marquee" && e.button === 0) {
 						marqueeActive.current = true;
 						setMarquee({
@@ -1161,6 +1172,11 @@ window.__ModuleLoader__.load({
 					}
 				};
 				const onPointerUp = (e) => {
+					if (inFloatPanel(e)) {
+						marqueeActive.current = false;
+						setMarquee(null);
+						return;
+					}
 					if (mode === "point" && !marqueeActive.current) {
 						const hit = hitElement(e.clientX, e.clientY);
 						if (hit !== null) {
@@ -1292,14 +1308,26 @@ window.__ModuleLoader__.load({
 				]
 			})] });
 		}
-		/** 从 ancestor 到 el 的 CSS 路径（tag.firstClass > tag > ...） */
+		/**
+		* 从 ancestor 到 el 的 CSS 路径（tag.firstClass > tag:nth-of-type(n) > ...）。
+		* 真机教训（2026-09-06）：无 class 的元素（table 的 td、stat-card 的子 div）
+		* 若不带序号，`nodeEl.querySelector(domPath)` 永远命中【第一个】匹配——
+		* 高亮框永远钉在第一格/第一个子元素上，用户以为「只能选第一格」。
+		* 加 :nth-of-type 保证回查唯一命中自己。
+		*/
 		function domPathWithin(ancestor, el) {
 			const parts = [];
 			let cur = el;
 			while (cur !== null && cur !== ancestor) {
 				const tag = cur.tagName.toLowerCase();
 				const cls = (cur.getAttribute("class") ?? "").trim().split(/\s+/)[0];
-				parts.unshift(cls !== void 0 && cls.length > 0 ? `${tag}.${CSS.escape(cls)}` : tag);
+				let part = cls !== void 0 && cls.length > 0 ? `${tag}.${CSS.escape(cls)}` : tag;
+				const parent = cur.parentElement;
+				if (parent !== null) {
+					const sameTag = [...parent.children].filter((c) => c.tagName === cur.tagName);
+					if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(cur) + 1})`;
+				}
+				parts.unshift(part);
 				cur = cur.parentElement;
 			}
 			return parts.join(" > ");
