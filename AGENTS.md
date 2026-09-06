@@ -55,6 +55,19 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 2. **面板预览代码 1:1 搬进 dock 必崩**：panels 的 iframe 预览作用域只有 presets，`TileGrid`/`tileUrl`/widgetRuntime 全不存在；且 panels 契约包对 widget 是 external——bundle 里 `widgetContract_1.default` 是 undefined，`.default.safeParse` 直接 TypeError。**修复：作用域用 `LINK_SCOPE`（契约 + TileGrid + tileUrl），iframe html 预校验字符串字面量、契约 parse 加防御**（undefined 走兜底不抛）。教训：跨包搬运行时代码必须核对目标作用域 + external 依赖在目标 bundle 的真实形态。
 3. **Panels 类实例在 render 期间新建 → 每次渲染全量卸载重建**：`TileGrid` 原来每次渲染都 `new Panels(document.createElement('div'))` + `setDocument`，即使 tiles 没变也全部 dispose→重建，点击后 DOM 闪烁。**修复：`useRef` 持久化 Panels 实例，未初始化时同步建一次（无闪烁窗口），之后 `setTiles` 增量更新；dispose 走 effect cleanup 防 StrictMode 双重挂载泄漏**。
 
+## qoder-canvas 标注迭代踩坑（2026-09-06 实测，勿再犯）
+
+元素 pin 标注（点选/框选/划字 → 评注 → 结构化注入 composer）从 S3 做到 0.6.1 才顺滑，以下每条都付过真实代价：
+
+1. **CSS 路径回查必须带 `:nth-of-type`，否则高亮框永远钉在第一个匹配元素**。无 class 的元素（table 的 td、stat-card 的子 div）domPath 形如 `table > tbody > tr > td`，`nodeEl.querySelector(domPath)` 永远命中第一个——**命中逻辑（elementsFromPoint）是对的，是高亮框画错位置**，用户看到的是「只能选第一格」。教训：「生成选择器 → 回查定位」的模式，选择器必须唯一命中自己；排查时把「命中」和「渲染」两段分开验证（静态 elementsFromPoint 探测正常 → 排除遮挡 → 必是渲染路径错）。
+2. **容器级原生事件监听器，必须对内部浮层豁免**。悬浮评论面板渲染在画布滚动容器**内部**，面板上的 pointerdown/up 冒泡到容器的原生监听器触发点选——点保存按钮时 pointerup 先把 targets 重置为空，`saveAnnotation` 拿到空 targets 直接 return，表象是「评论了但什么都没发生」。修复：`e.target.closest('[data-annotation-float]')` 豁免。教训：浮层和监听同挂一个容器时，穿透不是「点到了下层元素」这么简单——它会篡改交互状态机。
+3. **Lexical composer 的 markdown 插件会把 `[...]` 误识别为 link 语法**。注入草稿的头部 `[画布标注 · xxx]` 被吃掉、评注顺序错乱。教训：注入 composer 的文本避免 `[` 开头的行。
+4. **标注是给 Agent 消费的结构化上下文，不是给人看的文本标签**（产品认知坑，用户原话「如果只是输入这几个字，我有必要做这么费劲的功能吗」）。`▸ rate 成功率` 这种标签对 Agent 零信息量；有效注入 = `canvasId@revision + <target type id path="nodes[i]" element="..." tag text>{节点完整 DSL 源码}</target>`——Agent 能直接定位 document 里改哪段。Qoder 叫「注释即 API 文档」。
+5. **用户确认过的方案不许走捷径**（执行纪律）：确认了「composer 胶囊」方案，执行时偷懒做成「文本铺进输入框」，被用户当场指出「你明明跟我确认过，但是却完全没有执行」。形态级需求（布局/交互范式）必须在交付前对着确认记录逐条自检。
+6. **两列常驻分栏被推翻**：用户的设计直觉是「画布铺满、面板悬浮窗（可拖拽/可关）」。不要自作主张用常驻右栏挤占主内容区。
+7. **`!== undefined` 挡不住 `null`**：全局桥函数（`__openloopCanvasUpdate`）被测试脚本传 null 直接崩。对外暴露的 window 桥一律 `!= null` 宽松判空。
+8. **排查方法论：干净探测实例 + 真实环境对比**。3085（同 profile、无历史数据）上 hover 链路完全正常，3080（用户真实会话）异常——环境差异定位法能快速把「代码 bug」和「环境/数据因素」分开；本次是代码 bug，但探测实例提供的「正常基准」是反推渲染路径的前提。
+
 ## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
 
 1. **bsb 占位被双重计数**：0.1.1 时代 app 不认识 `--dsh-sidebar-width`，dock 的挤压规则 `#root { margin-right: bsb+dock }` 代办 bsb 占位；**0.1.2 的 frame 已原生以 `padding-right: bsb宽度` 承担**（实测 `0px 448px 0px 0px` 随 bsb 开合变化）——两道规则同读一个变量，bsb 宽被减两遍，聊天区 \(1280-448\times2-56=328\)px + 中间 448 空白。**修复（0.9.23）：margin 只管 dock 自己，bsb 交给 frame 原生 padding**。教训：**内核升级后必须重验「共存插件的占位由谁承担」——我们代办的布局职责可能被原生接管**。
