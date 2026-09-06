@@ -71,6 +71,11 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 10. **多行 `insertText` 在 DSH Lexical 覆写里行为畸形**：第一行总跑到文档末尾。修复：逐行插入（单行 insertText + insertParagraph）。教训：对覆写过的 execCommand，只信单行原语。
 11. **注入文本避开 Lexical 的魔法字符**：`[`（link 语法）、行首 `1)`（有序列表）、`@`（mention 弹窗）。分隔符用 `·`，编号用 `#1`（`#` 后不跟空格不触发 heading）。
 12. **验证 composer 类功能必须「新建会话」**：DSH 持久化 composer 草稿，实验残留会污染后续验证（读到的大杂烩无法归因）；断言发送内容用 `[data-chat-flow-kind="user"]` 最后一条，不要用全文 textContent 定位（历史消息干扰）。
+13. **静默降级会掩盖真坏（M4 落盘三连修教训）**：storage 从 S4 起从未落盘，但 save 失败被 catch 吞 + list() 空实现 + 读端点 404 静默降级三重掩盖，渲染全靠 meta 内嵌快照照常——**「降级兜底」必须有诊断暴露面**（本次加 /diag 端点才定位到）。落地纪律：每个静默 catch 的降级路径都要留可观测钩子。
+14. **0.1.2 webServer API**：`register({kind:'exact'|'prefix', path, handler})` 原生 Node handler（自己解析 URL/读 body/写 res），`ws.get/post` 已死；**注入回调参数是 ctx，服务在 `routeCtx.webServer` 属性上**（直接当服务用是 0.1.1 旧形态，静默 return）。
+15. **0.1.2 fs API**：`resolve` **async** 返回 FsTarget（opaque），readText/writeText/listDir 收 target 不收路径字符串；listDir 是清单正道（无注册表状态漂移）。
+16. **sandbox workspace-write 白名单只有 `policy.workspaceRoot` + /tmp**（DSH_HOME 不在内）；宿主级数据落 DSH_HOME 的写必须用 **per-call policy** `{mode:'workspace-write', workspaceRoot: <目标根>}` 传给 writeText 第 5 参。相对路径会被 resolve 到**进程 cwd**（非会话工作区）——存储根一律绝对路径。
+17. **dsh plugin add 在实例运行中可能 pnpm 锁竞争失败**（remove 成功 add 失败 = 插件裸奔）：装包前先 kill 实例；装完 grep 包内容确认版本再起。
 
 ## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
 
