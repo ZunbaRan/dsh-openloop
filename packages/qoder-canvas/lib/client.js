@@ -925,6 +925,21 @@ window.__ModuleLoader__.load({
 		* targets 气泡 → 评注 → 结构化草稿（canvas-annotations.ts）。
 		*/
 		const ACCENT$3 = "var(--dsw-alias-state-business-primary, #4176e6)";
+		/** AnnotationTarget → ElementHit（text 类无定位返回 null） */
+		function targetToHit(t) {
+			if (t.kind === "node") return {
+				nodeId: t.id,
+				domPath: "",
+				tag: "div"
+			};
+			if (t.kind === "element") return {
+				nodeId: t.id,
+				domPath: t.domPath,
+				tag: t.tag,
+				text: t.text
+			};
+			return null;
+		}
 		/** 已存注释的编号角标（点击弹操作卡） */
 		function PinBadge({ n, annotation, onEdit, onDelete, onHover }) {
 			const [cardOpen, setCardOpen] = (0, react.useState)(false);
@@ -1040,7 +1055,7 @@ window.__ModuleLoader__.load({
 			const [hovered, setHovered] = (0, react.useState)(null);
 			const [locked, setLocked] = (0, react.useState)(null);
 			const [marquee, setMarquee] = (0, react.useState)(null);
-			/** 框选拖拽中实时命中的 nodeIds（Figma 式即时反馈） */
+			/** 框选拖拽中实时命中的元素（Figma 式即时反馈，元素级） */
 			const [marqueeHits, setMarqueeHits] = (0, react.useState)([]);
 			const marqueeActive = (0, react.useRef)(false);
 			const marqueeStart = (0, react.useRef)(null);
@@ -1089,17 +1104,58 @@ window.__ModuleLoader__.load({
 				}
 				return null;
 			};
-			/** 命中矩形内的全部 node（框选保持 node 级——用户拍板框选暂不深化） */
-			const hitNodesInRect = (rect) => {
+			/**
+			* 框选命中（S8.1 元素级深化，用户拍板）：
+			* - node 与矩形相交面积占比 ≥ 0.5 → 选整个 node（node 级）
+			*   （旧逻辑要求完全包含——大卡片框不住，用户「框了都没选到」）
+			* - 占比不足 → 深入 node 内部，收集与矩形相交的【叶子元素】（element 级）
+			*   （如只框住 table 第一列 → 选中该列的若干 td，而不是整个 table）
+			*/
+			const hitMarquee = (rect) => {
 				const surface = surfaceRef.current;
 				if (surface === null) return [];
+				const intersects = (r) => !(r.right < rect.left || r.left > rect.right || r.bottom < rect.top || r.top > rect.bottom);
+				const intersectArea = (r) => {
+					const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left);
+					const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top);
+					return w > 0 && h > 0 ? w * h : 0;
+				};
 				const out = [];
-				for (const el of surface.querySelectorAll("[data-canvas-node]")) {
-					const r = el.getBoundingClientRect();
-					if (r.left >= rect.left && r.right <= rect.right && r.top >= rect.top && r.bottom <= rect.bottom) {
-						const id = el.getAttribute("data-canvas-node");
-						if (id !== null) out.push(id);
+				for (const nodeEl of surface.querySelectorAll("[data-canvas-node]")) {
+					const nodeId = nodeEl.getAttribute("data-canvas-node");
+					if (nodeId === null || nodeId.length === 0) continue;
+					const nr = nodeEl.getBoundingClientRect();
+					if (!intersects(nr)) continue;
+					const node = snapshot.canvas.nodes.find((n) => n.id === nodeId);
+					const type = node?.type ?? nodeId;
+					const label = node !== void 0 ? String(node.props.label ?? node.props.title ?? nodeId) : nodeId;
+					if ((nr.width * nr.height > 0 ? intersectArea(nr) / (nr.width * nr.height) : 0) >= .5) {
+						out.push({
+							kind: "node",
+							id: nodeId,
+							label
+						});
+						continue;
 					}
+					const walk = (el) => {
+						for (const child of el.children) if (child.children.length === 0) {
+							const cr = child.getBoundingClientRect();
+							if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
+								const domPath = domPathWithin(nodeEl, child);
+								const text = (child.textContent ?? "").trim();
+								const tag = child.tagName.toLowerCase();
+								out.push({
+									kind: "element",
+									id: nodeId,
+									label: `${type} ${tag}${text.length > 0 ? ` "${text.slice(0, 20)}"` : ""}`,
+									tag,
+									domPath,
+									text: text.length > 0 ? text.slice(0, 40) : void 0
+								});
+							}
+						} else walk(child);
+					};
+					walk(nodeEl);
 				}
 				return out;
 			};
@@ -1168,7 +1224,7 @@ window.__ModuleLoader__.load({
 								top: Math.min(start.y, e.clientY),
 								bottom: Math.max(start.y, e.clientY)
 							};
-							setMarqueeHits(hitNodesInRect(rect));
+							setMarqueeHits(hitMarquee(rect).map(targetToHit).filter((h) => h !== null));
 						}
 					}
 				};
@@ -1236,18 +1292,7 @@ window.__ModuleLoader__.load({
 									top: Math.min(prev.y0, prev.y1),
 									bottom: Math.max(prev.y0, prev.y1)
 								};
-								if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) {
-									const nodes = hitNodesInRect(rect);
-									if (nodes.length > 0) callbacks.onTargetsChange(nodes.map((id) => {
-										const node = snapshot.canvas.nodes.find((n) => n.id === id);
-										return {
-											kind: "node",
-											id,
-											label: node !== void 0 ? String(node.props.label ?? node.props.title ?? id) : id
-										};
-									}));
-									else callbacks.onTargetsChange([]);
-								}
+								if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) callbacks.onTargetsChange(hitMarquee(rect));
 							}
 							return null;
 						});
@@ -1324,17 +1369,13 @@ window.__ModuleLoader__.load({
 							showTooltip: targets.length === 1
 						}, `sel-${t.id}-${t.kind === "element" ? t.domPath : "root"}`);
 					}),
-					marqueeHits.map((id) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
+					marqueeHits.map((h) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
 						surface: surfaceRef.current,
-						hit: {
-							nodeId: id,
-							domPath: "",
-							tag: "div"
-						},
+						hit: h,
 						borderStyle: "outline",
 						nodeType: void 0,
 						showTooltip: false
-					}, `mq-${id}`)),
+					}, `mq-${h.nodeId}-${h.domPath}`)),
 					marquee !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", { style: {
 						position: "fixed",
 						left: Math.min(marquee.x0, marquee.x1),

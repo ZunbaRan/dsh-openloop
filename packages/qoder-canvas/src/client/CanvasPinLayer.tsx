@@ -50,6 +50,13 @@ interface ElementHit {
 
 const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
 
+/** AnnotationTarget → ElementHit（text 类无定位返回 null） */
+function targetToHit(t: AnnotationTarget): ElementHit | null {
+  if (t.kind === 'node') return { nodeId: t.id, domPath: '', tag: 'div' }
+  if (t.kind === 'element') return { nodeId: t.id, domPath: t.domPath, tag: t.tag, text: t.text }
+  return null
+}
+
 /** 已存注释的编号角标（点击弹操作卡） */
 function PinBadge({ n, annotation, onEdit, onDelete, onHover }: {
   readonly n: number
@@ -106,8 +113,8 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
   const [hovered, setHovered] = useState<ElementHit | null>(null)
   const [locked, setLocked] = useState<ElementHit | null>(null)
   const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
-  /** 框选拖拽中实时命中的 nodeIds（Figma 式即时反馈） */
-  const [marqueeHits, setMarqueeHits] = useState<string[]>([])
+  /** 框选拖拽中实时命中的元素（Figma 式即时反馈，元素级） */
+  const [marqueeHits, setMarqueeHits] = useState<ElementHit[]>([])
   const marqueeActive = useRef(false)
   const marqueeStart = useRef<{ x: number; y: number } | null>(null)
   const surfaceRef = useRef<HTMLElement | null>(null)
@@ -155,17 +162,61 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
     return null
   }
 
-  /** 命中矩形内的全部 node（框选保持 node 级——用户拍板框选暂不深化） */
-  const hitNodesInRect = (rect: { left: number; top: number; right: number; bottom: number }): string[] => {
+  /**
+   * 框选命中（S8.1 元素级深化，用户拍板）：
+   * - node 与矩形相交面积占比 ≥ 0.5 → 选整个 node（node 级）
+   *   （旧逻辑要求完全包含——大卡片框不住，用户「框了都没选到」）
+   * - 占比不足 → 深入 node 内部，收集与矩形相交的【叶子元素】（element 级）
+   *   （如只框住 table 第一列 → 选中该列的若干 td，而不是整个 table）
+   */
+  const hitMarquee = (rect: { left: number; top: number; right: number; bottom: number }): AnnotationTarget[] => {
     const surface = surfaceRef.current
     if (surface === null) return []
-    const out: string[] = []
-    for (const el of surface.querySelectorAll('[data-canvas-node]')) {
-      const r = el.getBoundingClientRect()
-      if (r.left >= rect.left && r.right <= rect.right && r.top >= rect.top && r.bottom <= rect.bottom) {
-        const id = el.getAttribute('data-canvas-node')
-        if (id !== null) out.push(id)
+    const intersects = (r: DOMRect): boolean =>
+      !(r.right < rect.left || r.left > rect.right || r.bottom < rect.top || r.top > rect.bottom)
+    const intersectArea = (r: DOMRect): number => {
+      const w = Math.min(r.right, rect.right) - Math.max(r.left, rect.left)
+      const h = Math.min(r.bottom, rect.bottom) - Math.max(r.top, rect.top)
+      return w > 0 && h > 0 ? w * h : 0
+    }
+    const out: AnnotationTarget[] = []
+    for (const nodeEl of surface.querySelectorAll('[data-canvas-node]')) {
+      const nodeId = nodeEl.getAttribute('data-canvas-node')
+      if (nodeId === null || nodeId.length === 0) continue
+      const nr = nodeEl.getBoundingClientRect()
+      if (!intersects(nr)) continue
+      const node = snapshot.canvas.nodes.find(n => n.id === nodeId)
+      const type = node?.type ?? nodeId
+      const label = node !== undefined ? String(node.props.label ?? node.props.title ?? nodeId) : nodeId
+      const ratio = nr.width * nr.height > 0 ? intersectArea(nr) / (nr.width * nr.height) : 0
+      if (ratio >= 0.5) {
+        out.push({ kind: 'node', id: nodeId, label })
+        continue
       }
+      // 元素级：收集相交的叶子元素（无 element 子节点——td/span/叶子 div/svg path 等）
+      const walk = (el: Element): void => {
+        for (const child of el.children) {
+          if (child.children.length === 0) {
+            const cr = child.getBoundingClientRect()
+            if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
+              const domPath = domPathWithin(nodeEl, child)
+              const text = (child.textContent ?? '').trim()
+              const tag = child.tagName.toLowerCase()
+              out.push({
+                kind: 'element',
+                id: nodeId,
+                label: `${type} ${tag}${text.length > 0 ? ` "${text.slice(0, 20)}"` : ''}`,
+                tag,
+                domPath,
+                text: text.length > 0 ? text.slice(0, 40) : undefined,
+              })
+            }
+          } else {
+            walk(child)
+          }
+        }
+      }
+      walk(nodeEl)
     }
     return out
   }
@@ -225,14 +276,14 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         setHovered(hitElement(e.clientX, e.clientY))
       } else if (marqueeActive.current) {
         setMarquee(prev => prev !== null ? { ...prev, x1: e.clientX, y1: e.clientY } : null)
-        // 实时反馈：矩形内 node 即时亮框（用 ref 起点算，避免 state 闭包旧值）
+        // 实时反馈：矩形命中元素即时亮框（用 ref 起点算，避免 state 闭包旧值；元素级）
         const start = marqueeStart.current
         if (start !== null) {
           const rect = {
             left: Math.min(start.x, e.clientX), right: Math.max(start.x, e.clientX),
             top: Math.min(start.y, e.clientY), bottom: Math.max(start.y, e.clientY),
           }
-          setMarqueeHits(hitNodesInRect(rect))
+          setMarqueeHits(hitMarquee(rect).map(targetToHit).filter((h): h is ElementHit => h !== null))
         }
       }
     }
@@ -284,16 +335,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
               top: Math.min(prev.y0, prev.y1), bottom: Math.max(prev.y0, prev.y1),
             }
             if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) {
-              const nodes = hitNodesInRect(rect)
-              if (nodes.length > 0) {
-                callbacks.onTargetsChange(nodes.map(id => {
-                  const node = snapshot.canvas.nodes.find(n => n.id === id)
-                  const label = node !== undefined ? String(node.props.label ?? node.props.title ?? id) : id
-                  return { kind: 'node', id, label } as const
-                }))
-              } else {
-                callbacks.onTargetsChange([])
-              }
+              callbacks.onTargetsChange(hitMarquee(rect))
             }
           }
           return null
@@ -350,10 +392,10 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
               showTooltip={targets.length === 1} />
           )
         })}
-        {/* 框选拖拽中的实时命中高亮（outline，无 tooltip） */}
-        {marqueeHits.map(id => (
-          <HighlightEl key={`mq-${id}`} surface={surfaceRef.current}
-            hit={{ nodeId: id, domPath: '', tag: 'div' }} borderStyle="outline"
+        {/* 框选拖拽中的实时命中高亮（outline，无 tooltip；元素级 domPath 定位） */}
+        {marqueeHits.map(h => (
+          <HighlightEl key={`mq-${h.nodeId}-${h.domPath}`} surface={surfaceRef.current}
+            hit={h} borderStyle="outline"
             nodeType={undefined} showTooltip={false} />
         ))}
         {/* 框选矩形 */}
