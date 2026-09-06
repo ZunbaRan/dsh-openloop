@@ -76,6 +76,10 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 15. **0.1.2 fs API**：`resolve` **async** 返回 FsTarget（opaque），readText/writeText/listDir 收 target 不收路径字符串；listDir 是清单正道（无注册表状态漂移）。
 16. **sandbox workspace-write 白名单只有 `policy.workspaceRoot` + /tmp**（DSH_HOME 不在内）；宿主级数据落 DSH_HOME 的写必须用 **per-call policy** `{mode:'workspace-write', workspaceRoot: <目标根>}` 传给 writeText 第 5 参。相对路径会被 resolve 到**进程 cwd**（非会话工作区）——存储根一律绝对路径。
 17. **dsh plugin add 在实例运行中可能 pnpm 锁竞争失败**（remove 成功 add 失败 = 插件裸奔）：装包前先 kill 实例；装完 grep 包内容确认版本再起。
+18. **React iframe 的三个时序坑（0.9.0 探针桥真机三连修）**：① onLoad 错过——srcDoc prop 生效可先于 onload 监听绑定，注册逻辑不能只依赖 onLoad（effect 主动注册 + 延迟二兜底）；② 属性批量应用——React 按 JSX 顺序设 srcDoc/sandbox，srcdoc 先生效会触发一次无沙箱 load，脚本行为不可预期（ref 手动序贯：先 sandbox 后 srcdoc）；③ elementsFromPoint 遇 IFRAME 后 continue 会命中其父容器 div——想走 iframe 专属路径必须 return 占位，不能用 continue。
+19. **iframe 握手用拉模式（hello→init→ready）**：父侧 init 可能在探针挂 message 监听前发出而丢失（srcdoc 渲染时序不可控）——探针脚本执行末尾主动发 hello（无 token），父侧收到后（重）发 init，token 必达。
+20. **自动化测试的事件容器选择器勿用 `div[style*="overflow: auto"]` 字符串匹配**（inline style 会被 React 重排为 `overflow: auto;` 或合并其它属性，匹配漂移）——用 getComputedStyle 逐级向上找 overflow==='auto'。
+21. **树摇对模块级副作用 if 块不彻底**（挂 window 的诊断函数可能被摇掉而监听器保留）——诊断暴露不要依赖「无引用的顶层副作用」，改挂在被引用的导出链上或独立 entry。
 
 ## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
 
