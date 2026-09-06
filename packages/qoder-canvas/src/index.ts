@@ -34,6 +34,8 @@ function argsOf(args: CanvasArgs): { document: unknown; canvasId: string | undef
 /** 模块级：最近一次写入的 workspaceKey（S4 端点默认 workspace 判定——
  *  工作台与写画布的会话同 cwd，读端点缺省用它定位隔离键） */
 let lastWorkspaceKey = '_no-cwd'
+/** 诊断：最近一次 save 失败原因（M4 排查用；成功则清空） */
+let lastSaveError: string | null = null
 
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx: Context, exec: { agent?: { session?: unknown } | null; signal?: unknown }): CanvasStorage {
@@ -66,10 +68,11 @@ export function apply(ctx: Context): void {
   setupCanvasReadEndpoint(ctx, {
     origin: originOf,
     storageFor: (workspaceKey) => new CanvasStorage({ fs: (ctx as unknown as { fs: import('./storage.ts').FsLike }).fs, workspaceKey: workspaceKey === '_no-cwd' ? lastWorkspaceKey : workspaceKey }),
+    diag: () => ({ lastSaveError, lastWorkspaceKey }),
   })
   ctx.tools.register(defineTool({
     name: 'canvas',
-    description: 'Render a visual canvas panel (dashboard-style layout of stat cards, charts, tables, callouts, action buttons) in the conversation. Use for: analysis reports, deployment/QA dashboards, structured findings. Iterate the same canvas by passing canvasId from the previous result. Prefer this over raw HTML for structured data views; prefer show_widget for tiny single-metric cards.',
+    description: 'Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those nodes (match path/nodes[i]) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user\'s current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards.',
     parameters: {
       document: { type: 'json', description: 'REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { "title": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), "layout": "grid"|"flow"|"split-h"|"split-v" (REQUIRED), "nodes": array (REQUIRED, 1-32 items, each { "id": [a-zA-Z0-9_-]{1,32} unique, "type": one of the 10 below, "props": EXACTLY the listed fields — no others }), "edges": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: "default"|"success"|"warn"|"error"|"info" }; chart: { chart*: "line"|"bar"|"pie"|"area", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: "info"|"success"|"warn"|"error", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: "http(s)://…" only }; panel: {} (placeholder). (* = required). Limits: whole document ≤256KB. Example: { "title": "Deploys", "layout": "grid", "nodes": [{ "id": "n1", "type": "stat-card", "props": { "label": "Deploys 24h", "value": "142", "delta": 12, "tone": "success" } }, { "id": "n2", "type": "chart", "props": { "chart": "line", "series": [{ "name": "ok", "points": [{ "x": 1, "y": 8 }] }] } }] }' },
       canvasId: { type: 'string', description: 'Existing canvas id (cv_xxxxxxxx) to iterate; omit to create new.' },
@@ -93,7 +96,10 @@ export function apply(ctx: Context): void {
       if (list) {
         const items = await storage.list()
         if (items.length === 0) return { text: 'No canvases in this workspace yet. Create one by calling canvas with a document.' }
-        return { text: items.map((i: { canvasId: string; revision: number; title: string }) => `${i.canvasId} (r${i.revision}) — ${i.title}`).join('\n') }
+        return { text: items.map((i: { canvasId: string; revision: number; title: string; revisions?: readonly number[] }) => {
+          const revs = i.revisions !== undefined && i.revisions.length > 1 ? ` [versions: ${i.revisions.join(',')}]` : ''
+          return `${i.canvasId} (r${i.revision}) — ${i.title}${revs}`
+        }).join('\n') }
       }
       // canvasId / load 校验
       const targetId = canvasId ?? load
@@ -125,8 +131,10 @@ export function apply(ctx: Context): void {
       const snapshot: CanvasSnapshot = { kind: 'qoder-canvas', version: 1, canvasId: finalId, revision, canvas: validated }
       try {
         await storage.save(snapshot, exec.signal)
+        lastSaveError = null
       } catch (error) {
-        // 存储失败不阻断渲染（meta 内嵌快照，卡片仍可用）——但日志明示
+        // 存储失败不阻断渲染（meta 内嵌快照，卡片仍可用）——记录诊断 + 日志
+        lastSaveError = error instanceof Error ? `${error.message} :: ${String(error.stack ?? '').slice(0, 400)}` : String(error)
         ctx.logger?.warn?.(`qoder-canvas storage save failed: ${String(error)}`)
       }
       // JsonValue 兼容：snapshot 整体作为 meta 载荷（presentationMeta 通道直通）

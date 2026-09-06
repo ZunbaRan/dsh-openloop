@@ -12,7 +12,7 @@ import { CanvasDockHost, CanvasToggle, CANVAS_DEFAULT_WIDTH, clampCanvasWidth } 
 import { CanvasSurface } from './CanvasSurface.tsx'
 import { CanvasPinLayer, type PinMode } from './CanvasPinLayer.tsx'
 import { CommentPanel } from './CommentPanel.tsx'
-import { AnnotationCapsuleBar, pushCapsuleDraft, registerCanvasSnapshot } from './annotation-capsule.tsx'
+import { AnnotationCapsuleBar, pushCapsuleDraft, registerCanvasSnapshot, setCurrentCanvasRef } from './annotation-capsule.tsx'
 import { reportAnnotation } from './composer-bridge.ts'
 import { addAnnotation, listAnnotations, removeAnnotation, updateAnnotationNote, type AnnotationTarget, type CanvasAnnotation } from './canvas-annotations.ts'
 import type { CanvasSnapshot } from '../dsl.ts'
@@ -26,6 +26,9 @@ function readWidth(): number {
 function readOpen(): boolean {
   try { return localStorage.getItem(OPEN_KEY) === '1' } catch { return false }
 }
+
+/** 工作区目录条目（GET /qoder-canvas/list） */
+interface CanvasListItem { canvasId: string; title: string; revision: number; revisions: readonly number[]; updatedAt: string }
 
 declare global {
   interface Window { __openloopCanvasOpen?: (canvasId: string, snapshot?: CanvasSnapshot) => void }
@@ -52,6 +55,10 @@ export function CanvasWorkbench(): ReactNode {
   const [toast, setToast] = useState<string | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null)
+  /** 工作区目录（M4） */
+  const [catalogOpen, setCatalogOpen] = useState(false)
+  const [catalogItems, setCatalogItems] = useState<CanvasListItem[]>([])
+  const [revMenuOpen, setRevMenuOpen] = useState(false)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ dx: number; dy: number } | null>(null)
 
@@ -107,6 +114,56 @@ export function CanvasWorkbench(): ReactNode {
     } catch { /* 端点不存在（headless）——保底快照即可 */ }
   }
 
+  /** M4 工作区目录：拉清单（列表端点；失败静默） */
+  const refreshCatalog = async (): Promise<void> => {
+    try {
+      const res = await fetch('/qoder-canvas/list')
+      if (!res.ok) return
+      const body = await res.json() as { items?: CanvasListItem[] }
+      if (Array.isArray(body.items)) setCatalogItems(body.items)
+    } catch { /* headless / 端点未注入 */ }
+  }
+
+  /** M4 切换画布（目录点击）：拉指定 canvas 最新快照 + 注释跟随 */
+  const openCanvas = async (canvasId: string): Promise<void> => {
+    setSnapshot(null)
+    setAnnotations([])
+    setTargets([])
+    try {
+      const res = await fetch(`/qoder-canvas/canvas/${canvasId}`)
+      if (res.ok) {
+        const snap = await res.json() as CanvasSnapshot
+        if (snap?.kind === 'qoder-canvas' && snap.canvasId === canvasId) {
+          setSnapshot(snap)
+          registerCanvasSnapshot(snap)
+        }
+      }
+    } catch { /* 端点不可用——目录本身来自端点，一般不会走到 */ }
+    setAnnotations(listAnnotations(canvasId))
+    setCatalogOpen(false)
+  }
+
+  /** M4 版本切换：读指定 rev 快照（标注按 canvasId 共享，天然跨版本） */
+  const openRevision = async (canvasId: string, rev: number): Promise<void> => {
+    if (snapshot !== null && snapshot.canvasId === canvasId && snapshot.revision === rev) { setRevMenuOpen(false); return }
+    try {
+      const res = await fetch(`/qoder-canvas/canvas/${canvasId}?rev=${rev}`)
+      if (!res.ok) { setRevMenuOpen(false); return }
+      const snap = await res.json() as CanvasSnapshot
+      if (snap?.kind === 'qoder-canvas' && snap.canvasId === canvasId && snap.revision === rev) {
+        setSnapshot(snap)
+        registerCanvasSnapshot(snap)
+        setTargets([])
+      }
+    } catch { /* 网络异常——保持当前版本 */ }
+    setRevMenuOpen(false)
+  }
+
+  // M4 引用注入桥：dock 开着时暴露「当前画布 + 版本」给 capsule（发送时轻量引用）
+  useEffect(() => {
+    setCurrentCanvasRef(snapshot !== null && open ? { canvasId: snapshot.canvasId, revision: snapshot.revision, title: snapshot.canvas.title } : null)
+  }, [snapshot, open])
+
   const saveAnnotation = (): void => {
     if (snapshot === null || note.trim().length === 0 || targets.length === 0) return
     const trimmed = note.trim()
@@ -159,8 +216,31 @@ export function CanvasWorkbench(): ReactNode {
             <span style={{ fontSize: 13, fontWeight: 650, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {snapshot !== null ? snapshot.canvas.title : '画布工作台'}
             </span>
+            {/* 目录按钮（M4：工作区画布清单，点击切换） */}
+            <button type="button" onClick={() => { setCatalogOpen(v => !v); if (!catalogOpen) void refreshCatalog() }} title="工作区画布目录"
+              style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, border: catalogOpen ? `1px solid ${ACCENT}` : '1px solid transparent', cursor: 'pointer', background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', color: catalogOpen ? ACCENT : 'var(--dsw-alias-label-secondary, inherit)', fontFamily: 'inherit' }}>目录</button>
+            {/* 版本标识（M4：可点开版本菜单，切换历史 revision） */}
             {snapshot !== null ? (
-              <span style={{ fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--dsw-alias-label-caption, #888)' }}>{snapshot.canvasId}@r{snapshot.revision}</span>
+              <span style={{ position: 'relative' }}>
+                <button type="button" onClick={() => setRevMenuOpen(v => !v)} title="版本历史"
+                  style={{ fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--dsw-alias-label-caption, #888)', background: 'none', border: revMenuOpen ? `1px solid ${ACCENT}` : '1px solid transparent', borderRadius: 5, padding: '2px 6px', cursor: 'pointer' }}>
+                  {snapshot.canvasId}@r{snapshot.revision} ▾
+                </button>
+                {revMenuOpen ? (() => {
+                  const item = catalogItems.find(c => c.canvasId === snapshot.canvasId)
+                  const revs = item !== undefined && item.revisions.length > 0 ? item.revisions : [snapshot.revision]
+                  return (
+                    <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 60, minWidth: 120, borderRadius: 8, padding: '4px', background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))', boxShadow: '0 8px 24px rgba(0,0,0,.2)' }}>
+                      {[...revs].reverse().map(r => (
+                        <button key={r} type="button" onClick={() => { void openRevision(snapshot.canvasId, r) }}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', fontSize: 10.5, padding: '4px 8px', borderRadius: 5, border: 0, cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', background: r === snapshot.revision ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)' : 'none', color: r === snapshot.revision ? ACCENT : 'inherit' }}>
+                          r{r}{r === snapshot.revision ? ' · 当前' : ''}
+                        </button>
+                      ))}
+                    </div>
+                  )
+                })() : null}
+              </span>
             ) : null}
             {snapshot !== null ? (
               <button type="button" onClick={() => setPanelOpen(v => !v)} title="评论面板（悬浮窗）"
@@ -204,6 +284,31 @@ export function CanvasWorkbench(): ReactNode {
 
               {/* 画布区：铺满 + 注释面板悬浮窗 */}
               <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 14, position: 'relative' }} ref={canvasAreaRef}>
+                {/* 工作区目录（M4：悬浮列表，点击切换画布） */}
+                {catalogOpen ? (
+                  <div style={{ position: 'absolute', right: 12, top: 12, zIndex: 55, width: 270, maxHeight: 'min(420px, calc(100% - 24px))', overflow: 'auto', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))', boxShadow: '0 12px 36px rgba(0,0,0,.26)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.1))', background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, flex: 1 }}>工作区画布（{catalogItems.length}）</span>
+                      <button type="button" onClick={() => setCatalogOpen(false)} style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', fontSize: 13, lineHeight: 1, color: 'var(--dsw-alias-label-caption, #888)', fontFamily: 'inherit' }}>×</button>
+                    </div>
+                    {catalogItems.length === 0 ? (
+                      <div style={{ padding: '20px 14px', fontSize: 11, color: 'var(--dsw-alias-label-caption, #888)', textAlign: 'center' }}>
+                        还没有画布产物<br /><span style={{ fontSize: 10 }}>让 Agent 用 canvas 工具生成第一个（历史画布首次续编后入册）</span>
+                      </div>
+                    ) : catalogItems.map(item => (
+                      <button key={item.canvasId} type="button" onClick={() => { void openCanvas(item.canvasId) }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.06))', cursor: 'pointer', background: snapshot?.canvasId === item.canvasId ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)' : 'none', fontFamily: 'inherit' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'inherit' }}>{item.title}</span>
+                          {item.revisions.length > 1 ? <span style={{ fontSize: 9.5, color: ACCENT, fontWeight: 600 }}>r{item.revision} · {item.revisions.length}版</span> : <span style={{ fontSize: 9.5, color: 'var(--dsw-alias-label-caption, #999)' }}>r{item.revision}</span>}
+                        </div>
+                        <div style={{ fontSize: 9.5, color: 'var(--dsw-alias-label-caption, #999)', marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                          {item.canvasId}{item.updatedAt.length > 0 ? ` · ${new Date(item.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <CanvasSurface snapshot={snapshot} />
                 <CanvasPinLayer
                   snapshot={snapshot}

@@ -2,16 +2,32 @@ import { describe, expect, it } from 'vitest'
 import { CanvasStorage, workspaceKeyOf } from '../src/storage.ts'
 import type { CanvasSnapshot } from '../src/dsl.ts'
 
-/** 内存 FsLike 模拟（seam 注入，对齐 openloop 测试形态） */
+/** 内存 FsLike 模拟（seam 注入，对齐 0.1.2 真实 API：async resolve + target + listDir） */
 function memFs() {
   const files = new Map<string, string>()
   const written: { path: string; policy: unknown }[] = []
   const fs = {
-    resolve: (path: string) => path,
-    readText: async (path: string) => files.get(path) ?? null,
-    writeText: async (path: string, content: string, _encoding?: unknown, _signal?: unknown, policy?: unknown) => {
-      files.set(path, content)
-      written.push({ path, policy })
+    resolve: async (path: string) => ({ targetKey: path }),
+    readText: async (target: { targetKey?: string }) => {
+      const p = target.targetKey ?? ''
+      const v = files.get(p)
+      if (v === undefined) throw new Error('ENOENT')
+      return v
+    },
+    writeText: async (target: { targetKey?: string }, content: string, _encoding?: unknown, _signal?: unknown, policy?: unknown) => {
+      files.set(target.targetKey ?? '', content)
+      written.push({ path: target.targetKey ?? '', policy })
+    },
+    listDir: async (target: { targetKey?: string }) => {
+      const dir = (target.targetKey ?? '').replace(/\/$/, '')
+      const children = new Set<string>()
+      for (const key of files.keys()) {
+        if (!key.startsWith(`${dir}/`)) continue
+        const rest = key.slice(dir.length + 1)
+        const first = rest.split('/')[0] ?? ''
+        if (first.length > 0) children.add(rest.includes('/') ? first : rest)
+      }
+      return [...children].map(name => ({ name, type: files.has(`${dir}/${name}`) ? 'file' as const : 'directory' as const }))
     },
   }
   return { fs, files, written }
@@ -51,6 +67,42 @@ describe('CanvasStorage', () => {
     await store.save(snap('cv_aaaa1111', 1))
     await store.save(snap('cv_aaaa1111', 3))
     expect((await store.latest('cv_aaaa1111'))?.revision).toBe(3)
+  })
+
+  it('list(): listDir scan — entries with accumulated revisions', async () => {
+    const { fs } = memFs()
+    const store = new CanvasStorage({ fs, workspaceKey: 'ws1' })
+    await store.save(snap('cv_aaaa1111', 1))
+    await store.save(snap('cv_aaaa1111', 2))
+    await store.save(snap('cv_bbbb2222', 1))
+    const items = await store.list()
+    expect(items).toHaveLength(2)
+    const a = items.find(i => i.canvasId === 'cv_aaaa1111')
+    expect(a?.revision).toBe(2)
+    expect(a?.revisions).toEqual([1, 2])
+    expect(a?.title).toBe('t-2') // 标题跟最新
+    const b = items.find(i => i.canvasId === 'cv_bbbb2222')
+    expect(b?.revisions).toEqual([1])
+  })
+
+  it('list(): corrupt revision file is skipped, others survive', async () => {
+    const { fs, files } = memFs()
+    const store = new CanvasStorage({ fs, workspaceKey: 'ws1' })
+    await store.save(snap('cv_aaaa1111', 1))
+    await store.save(snap('cv_bbbb2222', 1))
+    files.set('qoder-canvas/ws1/cv_bbbb2222/1.json', '{broken json')
+    const items = await store.list()
+    expect(items.map(i => i.canvasId)).toEqual(['cv_aaaa1111'])
+  })
+
+  it('list(): workspace isolation via listDir', async () => {
+    const { fs } = memFs()
+    const storeA = new CanvasStorage({ fs, workspaceKey: 'wsA' })
+    const storeB = new CanvasStorage({ fs, workspaceKey: 'wsB' })
+    await storeA.save(snap('cv_aaaa1111', 1))
+    await storeB.save(snap('cv_bbbb2222', 1))
+    expect((await storeA.list()).map(i => i.canvasId)).toEqual(['cv_aaaa1111'])
+    expect((await storeB.list()).map(i => i.canvasId)).toEqual(['cv_bbbb2222'])
   })
 
   it('workspace isolation: same id in different workspace invisible', async () => {

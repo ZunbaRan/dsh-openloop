@@ -531,16 +531,41 @@ var CanvasStorage = class {
 		this.workspaceKey = options.workspaceKey;
 		this.rootDir = options.rootDir ?? DEFAULT_ROOT;
 	}
-	pathFor(canvasId, rev) {
-		return this.fs.resolve(`${this.rootDir}/${this.workspaceKey}/${canvasId}/${rev}.json`);
+	async targetFor(canvasId, rev) {
+		try {
+			return await this.fs.resolve(`${this.rootDir}/${this.workspaceKey}/${canvasId}/${rev}.json`);
+		} catch {
+			return null;
+		}
 	}
 	async save(snapshot, signal) {
-		const path = this.pathFor(snapshot.canvasId, snapshot.revision);
-		if (path === null) throw new Error("qoder-canvas storage: fs.resolve returned null");
-		await this.fs.writeText(path, JSON.stringify(snapshot), void 0, signal, this.policy);
+		const target = await this.targetFor(snapshot.canvasId, snapshot.revision);
+		if (target === null) throw new Error("qoder-canvas storage: fs.resolve failed");
+		await this.fs.writeText(target, JSON.stringify(snapshot), void 0, signal, this.policy);
 	}
-	/** 读最新快照（扫描 rev 递减；v0.1 不存索引文件，快照数 ≤ 轮数，线性可接受） */
+	/** 目录列举（listDir 可用时；canvasId 目录内的 rev 文件名） */
+	async revisionsOfDir(canvasId) {
+		if (typeof this.fs.listDir !== "function") return null;
+		try {
+			const dir = await this.fs.resolve(`${this.rootDir}/${this.workspaceKey}/${canvasId}`);
+			const entries = await this.fs.listDir(dir);
+			const revs = [];
+			for (const e of entries) {
+				const m = /^(\d+)\.json$/.exec(e.name);
+				if (e.type === "file" && m !== null) revs.push(Number(m[1]));
+			}
+			return revs;
+		} catch {
+			return null;
+		}
+	}
+	/** 读最新快照（listDir 优先；降级线性扫描——listDir 不可用的桩环境） */
 	async latest(canvasId) {
+		const revs = await this.revisionsOfDir(canvasId);
+		if (revs !== null && revs.length > 0) {
+			const max = Math.max(...revs);
+			return await this.read(canvasId, max);
+		}
 		for (let rev = 999; rev >= 1; rev -= 1) {
 			const snap = await this.read(canvasId, rev);
 			if (snap !== null) return snap;
@@ -549,10 +574,14 @@ var CanvasStorage = class {
 	}
 	async read(canvasId, revision) {
 		if (!Number.isInteger(revision) || revision < 1 || revision > 999) return null;
-		const path = this.pathFor(canvasId, revision);
-		if (path === null) return null;
-		const raw = await this.fs.readText(path);
-		if (raw === null) return null;
+		const target = await this.targetFor(canvasId, revision);
+		if (target === null) return null;
+		let raw;
+		try {
+			raw = await this.fs.readText(target);
+		} catch {
+			return null;
+		}
 		try {
 			const parsed = JSON.parse(raw);
 			if (parsed?.kind !== "qoder-canvas" || parsed.canvasId !== canvasId || parsed.revision !== revision) return null;
@@ -561,21 +590,64 @@ var CanvasStorage = class {
 			return null;
 		}
 	}
-	/** 画布清单（list 参数）：扫 workspace 目录下全部 canvasId 取各自最新 rev */
+	/**
+	* 画布清单（工作区目录/工具 list 参数）：listDir 扫 workspace 根，
+	* 每个 cv_* 目录列 rev 文件，读最新 rev 拿标题。listDir 不可用（旧桩）返回空。
+	*/
 	async list() {
-		return [];
+		if (typeof this.fs.listDir !== "function") return [];
+		let entries;
+		try {
+			const wsDir = await this.fs.resolve(`${this.rootDir}/${this.workspaceKey}`);
+			entries = await this.fs.listDir(wsDir);
+		} catch {
+			return [];
+		}
+		const out = [];
+		for (const e of entries) {
+			if (e.type !== "directory" || !/^cv_[a-z0-9]{8}$/.test(e.name)) continue;
+			const revs = await this.revisionsOfDir(e.name) ?? [];
+			if (revs.length === 0) continue;
+			const latestSnap = await this.read(e.name, Math.max(...revs));
+			if (latestSnap === null) continue;
+			out.push({
+				canvasId: e.name,
+				title: latestSnap.canvas.title,
+				revision: latestSnap.revision,
+				revisions: [...revs].sort((a, b) => a - b),
+				updatedAt: ""
+			});
+		}
+		return out;
 	}
 };
 //#endregion
 //#region src/annotate.ts
 const RATE_LIMIT_PER_MINUTE = 60;
+async function readBody(req, maxBytes = 65536) {
+	const chunks = [];
+	let total = 0;
+	for await (const chunk of req) {
+		total += chunk.byteLength;
+		if (total > maxBytes) throw new Error("request body too large");
+		chunks.push(chunk);
+	}
+	return Buffer.concat(chunks).toString("utf8");
+}
+function json$1(res, status, body) {
+	res.setHeader("Content-Type", "application/json");
+	res.setHeader("Cache-Control", "no-store");
+	res.statusCode = status;
+	res.end(JSON.stringify(body));
+}
 function setupAnnotateAudit(ctx, opts) {
 	const injectFn = ctx.inject;
 	if (typeof injectFn !== "function") return;
 	ctx.effect(() => {
 		let disposed = false;
-		injectFn.call(ctx, ["webServer"], (ws) => {
-			if (disposed || ws === void 0 || typeof ws.post !== "function") return;
+		injectFn.call(ctx, ["webServer"], (routeCtx) => {
+			const ws = routeCtx?.webServer;
+			if (disposed || ws === void 0 || typeof ws.register !== "function") return;
 			const hits = /* @__PURE__ */ new Map();
 			const rateLimited = (key) => {
 				const now = Date.now();
@@ -585,36 +657,53 @@ function setupAnnotateAudit(ctx, opts) {
 				hits.set(key, window);
 				return false;
 			};
-			ws.post("/qoder-canvas/annotate", async (req) => {
-				const origin = req.request.origin ?? "";
-				const referer = req.request.referer ?? "";
-				if (!(origin === opts.origin() || origin.length === 0 && (referer.startsWith(opts.origin()) || referer.length === 0))) return {
-					status: 403,
-					body: { error: "forbidden origin" }
-				};
-				const body = req.body;
-				if (typeof body?.canvasId !== "string" || !/^cv_[a-z0-9]{8}$/.test(body.canvasId) || typeof body?.note !== "string" || body.note.length === 0 || body.note.length > 2e3 || !Array.isArray(body?.targets) || body.targets.length > 32 || !body.targets.every((t) => typeof t === "string" && t.length <= 32)) return {
-					status: 400,
-					body: { error: "invalid annotation payload" }
-				};
-				if (rateLimited(body.canvasId)) return {
-					status: 429,
-					body: { error: "rate limited" }
-				};
-				const line = JSON.stringify({
-					at: (/* @__PURE__ */ new Date()).toISOString(),
-					canvasId: body.canvasId,
-					revision: typeof body.revision === "number" ? body.revision : null,
-					targets: body.targets,
-					note: body.note
-				});
-				try {
-					opts.writeLog(line);
-				} catch {}
-				return {
-					status: 200,
-					body: { ok: true }
-				};
+			ws.register({
+				kind: "exact",
+				path: "/qoder-canvas/annotate",
+				handler: async (req, res) => {
+					const h = (k) => {
+						const v = req.headers[k];
+						return typeof v === "string" ? v : Array.isArray(v) ? v[0] ?? "" : "";
+					};
+					const origin = h("origin");
+					const host = h("host");
+					let allowed = false;
+					if (origin.length > 0) try {
+						allowed = new URL(origin).host === host;
+					} catch {
+						allowed = false;
+					}
+					if (!allowed) {
+						json$1(res, 403, { error: "forbidden origin" });
+						return;
+					}
+					let body = null;
+					try {
+						body = JSON.parse(await readBody(req));
+					} catch {
+						json$1(res, 400, { error: "invalid json body" });
+						return;
+					}
+					if (typeof body?.canvasId !== "string" || !/^cv_[a-z0-9]{8}$/.test(body.canvasId) || typeof body?.note !== "string" || body.note.length === 0 || body.note.length > 2e3 || !Array.isArray(body?.targets) || body.targets.length > 32 || !body.targets.every((t) => typeof t === "string" && t.length <= 32)) {
+						json$1(res, 400, { error: "invalid annotation payload" });
+						return;
+					}
+					if (rateLimited(body.canvasId)) {
+						json$1(res, 429, { error: "rate limited" });
+						return;
+					}
+					const line = JSON.stringify({
+						at: (/* @__PURE__ */ new Date()).toISOString(),
+						canvasId: body.canvasId,
+						revision: typeof body.revision === "number" ? body.revision : null,
+						targets: body.targets,
+						note: body.note
+					});
+					try {
+						opts.writeLog(line);
+					} catch {}
+					json$1(res, 200, { ok: true });
+				}
 			});
 		});
 		return () => {
@@ -624,35 +713,89 @@ function setupAnnotateAudit(ctx, opts) {
 }
 //#endregion
 //#region src/read.ts
+function json(res, status, body) {
+	res.setHeader("Content-Type", "application/json");
+	res.setHeader("Cache-Control", "no-store");
+	res.statusCode = status;
+	res.end(JSON.stringify(body));
+}
 function setupCanvasReadEndpoint(ctx, opts) {
 	const injectFn = ctx.inject;
 	if (typeof injectFn !== "function") return;
 	ctx.effect(() => {
 		let disposed = false;
-		injectFn.call(ctx, ["webServer"], (ws) => {
-			if (disposed || ws === void 0 || typeof ws.get !== "function") return;
-			ws.get("/qoder-canvas/canvas/:id", async (req) => {
-				const origin = req.request.origin ?? "";
-				const referer = req.request.referer ?? "";
-				if (!(origin === opts.origin() || origin.length === 0 && (referer.startsWith(opts.origin()) || referer.length === 0))) return {
-					status: 403,
-					body: { error: "forbidden origin" }
+		injectFn.call(ctx, ["webServer"], (routeCtx) => {
+			const ws = routeCtx?.webServer;
+			if (disposed || ws === void 0 || typeof ws.register !== "function") return;
+			const allowed = (req) => {
+				const h = (k) => {
+					const v = req.headers[k];
+					return typeof v === "string" ? v : Array.isArray(v) ? v[0] ?? "" : "";
 				};
-				const id = req.params.id;
-				if (typeof id !== "string" || !/^cv_[a-z0-9]{8}$/.test(id)) return {
-					status: 400,
-					body: { error: "malformed canvas id" }
-				};
-				const wsKey = req.params.workspaceKey;
-				const snapshot = await opts.storageFor(typeof wsKey === "string" && wsKey.length > 0 ? wsKey : "_no-cwd").latest(id);
-				if (snapshot === null) return {
-					status: 404,
-					body: { error: "canvas not found" }
-				};
-				return {
-					status: 200,
-					body: snapshot
-				};
+				const origin = h("origin");
+				if (origin.length === 0) return true;
+				const host = h("host");
+				try {
+					return new URL(origin).host === host;
+				} catch {
+					return false;
+				}
+			};
+			ws.register({
+				kind: "prefix",
+				path: "/qoder-canvas/canvas",
+				handler: async (req, res) => {
+					if (!allowed(req)) {
+						json(res, 403, { error: "forbidden origin" });
+						return;
+					}
+					const url = new URL(req.url ?? "/", "http://loopback.invalid");
+					const id = url.pathname.replace(/^\/qoder-canvas\/canvas\/?/, "");
+					if (!/^cv_[a-z0-9]{8}$/.test(id)) {
+						json(res, 400, { error: "malformed canvas id" });
+						return;
+					}
+					const wsKey = url.searchParams.get("workspaceKey");
+					const storage = opts.storageFor(wsKey !== null && wsKey.length > 0 ? wsKey : "_no-cwd");
+					const revRaw = url.searchParams.get("rev");
+					const snapshot = revRaw !== null && /^\d+$/.test(revRaw) ? await storage.read(id, Number(revRaw)) : await storage.latest(id);
+					if (snapshot === null) {
+						json(res, 404, { error: "canvas not found" });
+						return;
+					}
+					json(res, 200, snapshot);
+				}
+			});
+			ws.register({
+				kind: "exact",
+				path: "/qoder-canvas/diag",
+				handler: async (req, res) => {
+					try {
+						if (!allowed(req)) {
+							json(res, 403, { error: "forbidden origin" });
+							return;
+						}
+						json(res, 200, opts.diag !== void 0 ? opts.diag() : { diag: "unavailable" });
+					} catch (error) {
+						json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+					}
+				}
+			});
+			ws.register({
+				kind: "exact",
+				path: "/qoder-canvas/list",
+				handler: async (req, res) => {
+					try {
+						if (!allowed(req)) {
+							json(res, 403, { error: "forbidden origin" });
+							return;
+						}
+						const wsKey = new URL(req.url ?? "/", "http://loopback.invalid").searchParams.get("workspaceKey");
+						json(res, 200, { items: await opts.storageFor(wsKey !== null && wsKey.length > 0 ? wsKey : "_no-cwd").list() });
+					} catch (error) {
+						json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+					}
+				}
 			});
 		});
 		return () => {
@@ -678,6 +821,8 @@ function argsOf(args) {
 /** 模块级：最近一次写入的 workspaceKey（S4 端点默认 workspace 判定——
 *  工作台与写画布的会话同 cwd，读端点缺省用它定位隔离键） */
 let lastWorkspaceKey = "_no-cwd";
+/** 诊断：最近一次 save 失败原因（M4 排查用；成功则清空） */
+let lastSaveError = null;
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx, exec) {
 	const agent = exec.agent;
@@ -711,11 +856,15 @@ function apply(ctx) {
 		storageFor: (workspaceKey) => new CanvasStorage({
 			fs: ctx.fs,
 			workspaceKey: workspaceKey === "_no-cwd" ? lastWorkspaceKey : workspaceKey
+		}),
+		diag: () => ({
+			lastSaveError,
+			lastWorkspaceKey
 		})
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
-		description: "Render a visual canvas panel (dashboard-style layout of stat cards, charts, tables, callouts, action buttons) in the conversation. Use for: analysis reports, deployment/QA dashboards, structured findings. Iterate the same canvas by passing canvasId from the previous result. Prefer this over raw HTML for structured data views; prefer show_widget for tiny single-metric cards.",
+		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those nodes (match path/nodes[i]) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards.",
 		parameters: {
 			document: {
 				type: "json",
@@ -752,7 +901,10 @@ function apply(ctx) {
 			if (list) {
 				const items = await storage.list();
 				if (items.length === 0) return { text: "No canvases in this workspace yet. Create one by calling canvas with a document." };
-				return { text: items.map((i) => `${i.canvasId} (r${i.revision}) — ${i.title}`).join("\n") };
+				return { text: items.map((i) => {
+					const revs = i.revisions !== void 0 && i.revisions.length > 1 ? ` [versions: ${i.revisions.join(",")}]` : "";
+					return `${i.canvasId} (r${i.revision}) — ${i.title}${revs}`;
+				}).join("\n") };
 			}
 			const targetId = canvasId ?? load;
 			if (targetId !== void 0 && !isValidCanvasId(targetId)) return { __error: `canvasId "${targetId}" is malformed; expected cv_ + 8 chars (e.g. cv_7f3k2a9q). Use the exact id from the previous canvas result.` };
@@ -779,7 +931,9 @@ function apply(ctx) {
 			};
 			try {
 				await storage.save(snapshot, exec.signal);
+				lastSaveError = null;
 			} catch (error) {
+				lastSaveError = error instanceof Error ? `${error.message} :: ${String(error.stack ?? "").slice(0, 400)}` : String(error);
 				ctx.logger?.warn?.(`qoder-canvas storage save failed: ${String(error)}`);
 			}
 			return JSON.parse(JSON.stringify({ snapshot }));

@@ -96,14 +96,22 @@ declare function generateCanvasId(rand?: () => number): string;
 declare function validateCanvasDocument(value: unknown): CanvasDocument;
 //#endregion
 //#region src/storage.d.ts
+/** 结构化路径身份（真实 FsTarget 的最小形态；宽松声明兼容测试桩） */
+interface FsTargetLike {
+  readonly targetKey?: string;
+}
+interface FsDirEntryLike {
+  readonly name: string;
+  readonly type: 'file' | 'directory' | 'other';
+}
 interface FsLike {
-  /** 相对路径解析（cwd 回退链），返回绝对路径或 null */
-  resolve(path: string, options?: {
+  resolve(path: string, opts?: {
     cwd?: string;
-  }): string | null;
-  readText(path: string): Promise<string | null>;
-  /** dsh-fs 形态：writeText(path, content, encoding?, signal?, policy?) */
-  writeText(path: string, content: string, encoding?: unknown, signal?: unknown, policy?: unknown): Promise<void>;
+  }): Promise<FsTargetLike>;
+  readText(target: FsTargetLike, signal?: unknown): Promise<string>;
+  /** dsh-fs 形态：writeText(target, content, expected?, signal?, sandboxPolicy?) */
+  writeText(target: FsTargetLike, content: string, expected?: unknown, signal?: unknown, policy?: unknown): Promise<unknown>;
+  listDir?(target: FsTargetLike, signal?: unknown): Promise<readonly FsDirEntryLike[]>;
 }
 interface StorageOptions {
   readonly fs: FsLike;
@@ -114,6 +122,17 @@ interface StorageOptions {
   /** 存储根（默认 'qoder-canvas'，测试可注入） */
   readonly rootDir?: string;
 }
+/** 画布清单条目（工作区目录 + 版本管理 UI 的数据源） */
+interface CanvasIndexEntry {
+  readonly canvasId: string;
+  readonly title: string;
+  /** 最新 revision */
+  readonly revision: number;
+  /** 全部历史版本号（升序，含最新） */
+  readonly revisions: readonly number[];
+  /** 最近一次写入时间（ISO；listDir 无 mtime 时为空串，UI 自行容错） */
+  readonly updatedAt: string;
+}
 /** workspace 路径 → 隔离键（与 dsh 会话编码同风格：路径分隔符转下划线） */
 declare function workspaceKeyOf(cwd: string | undefined): string;
 declare class CanvasStorage {
@@ -122,17 +141,18 @@ declare class CanvasStorage {
   private readonly workspaceKey;
   private readonly rootDir;
   constructor(options: StorageOptions);
-  private pathFor;
+  private targetFor;
   save(snapshot: CanvasSnapshot, signal?: unknown): Promise<void>;
-  /** 读最新快照（扫描 rev 递减；v0.1 不存索引文件，快照数 ≤ 轮数，线性可接受） */
+  /** 目录列举（listDir 可用时；canvasId 目录内的 rev 文件名） */
+  private revisionsOfDir;
+  /** 读最新快照（listDir 优先；降级线性扫描——listDir 不可用的桩环境） */
   latest(canvasId: string): Promise<CanvasSnapshot | null>;
   read(canvasId: string, revision: number): Promise<CanvasSnapshot | null>;
-  /** 画布清单（list 参数）：扫 workspace 目录下全部 canvasId 取各自最新 rev */
-  list(): Promise<readonly {
-    canvasId: string;
-    title: string;
-    revision: number;
-  }[]>;
+  /**
+   * 画布清单（工作区目录/工具 list 参数）：listDir 扫 workspace 根，
+   * 每个 cv_* 目录列 rev 文件，读最新 rev 拿标题。listDir 不可用（旧桩）返回空。
+   */
+  list(): Promise<readonly CanvasIndexEntry[]>;
 }
 //#endregion
 //#region src/index.d.ts
@@ -140,4 +160,4 @@ declare const name = "openloop-qoder-canvas";
 declare const inject: string[];
 declare function apply(ctx: Context): void;
 //#endregion
-export { CanvasDocument, CanvasLayout, CanvasNode, CanvasSnapshot, CanvasStorage, CanvasValidationError, FsLike, LAYOUTS, LIMITS, NODE_REGISTRY, NodeDefinition, NodePropRule, StorageOptions, apply, generateCanvasId, inject, isValidCanvasId, name, validateCanvasDocument, workspaceKeyOf };
+export { CanvasDocument, CanvasIndexEntry, CanvasLayout, CanvasNode, CanvasSnapshot, CanvasStorage, CanvasValidationError, FsDirEntryLike, FsLike, FsTargetLike, LAYOUTS, LIMITS, NODE_REGISTRY, NodeDefinition, NodePropRule, StorageOptions, apply, generateCanvasId, inject, isValidCanvasId, name, validateCanvasDocument, workspaceKeyOf };

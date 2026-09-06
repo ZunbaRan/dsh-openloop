@@ -41,8 +41,31 @@ export function registerCanvasSnapshot(snap: CanvasSnapshot): void {
   latestSnapshots.set(snap.canvasId, snap)
 }
 
+// ---------------------------------------------------------------------------
+// 当前画布引用（M4：dock 开着 = 发送消息默认携带引用；无标注时轻量引用行）
+// ---------------------------------------------------------------------------
+
+export interface CurrentCanvasRef {
+  readonly canvasId: string
+  readonly revision: number
+  readonly title: string
+}
+
+let currentCanvas: CurrentCanvasRef | null = null
+
+export function setCurrentCanvasRef(ref: CurrentCanvasRef | null): void {
+  currentCanvas = ref
+}
+
 function flushDraftsIntoComposer(): void {
-  if (drafts.length === 0) return
+  if (drafts.length === 0) {
+    // M4：dock 开着但无标注——轻量引用行（Agent 知道当前开着哪个画布哪个版本；
+    // 版本也有信息量：用户可能就是对着旧版本在提问）
+    if (currentCanvas !== null) {
+      injectComposerDraft(`当前画布 · ${currentCanvas.title} ${currentCanvas.canvasId} · r${currentCanvas.revision}`)
+    }
+    return
+  }
   // 同画布多条注释合并注入（共享一个定位头，逐条 #n 编号）
   const byCanvas = new Map<string, CanvasAnnotation[]>()
   for (const ann of drafts) {
@@ -162,7 +185,8 @@ export function AnnotationCapsuleBar(): ReactNode {
       }, 80)
     }
     const onKeydown = (e: KeyboardEvent): void => {
-      if (drafts.length === 0 || resendRef.current) return
+      if (resendRef.current) return
+      if (drafts.length === 0 && currentCanvas === null) return
       if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
       const input = findComposerInput()
       if (input === null || !input.contains(e.target as Node)) return
@@ -172,7 +196,8 @@ export function AnnotationCapsuleBar(): ReactNode {
       tryFlushAndResend(input)
     }
     const onClick = (e: MouseEvent): void => {
-      if (drafts.length === 0 || resendRef.current) return
+      if (resendRef.current) return
+      if (drafts.length === 0 && currentCanvas === null) return
       const input = findComposerInput()
       if (input === null) return
       const frame = findComposerFrame(input)

@@ -2016,8 +2016,15 @@ window.__ModuleLoader__.load({
 		function registerCanvasSnapshot(snap) {
 			latestSnapshots.set(snap.canvasId, snap);
 		}
+		let currentCanvas = null;
+		function setCurrentCanvasRef(ref) {
+			currentCanvas = ref;
+		}
 		function flushDraftsIntoComposer() {
-			if (drafts.length === 0) return;
+			if (drafts.length === 0) {
+				if (currentCanvas !== null) injectComposerDraft(`当前画布 · ${currentCanvas.title} ${currentCanvas.canvasId} · r${currentCanvas.revision}`);
+				return;
+			}
 			const byCanvas = /* @__PURE__ */ new Map();
 			for (const ann of drafts) {
 				const list = byCanvas.get(ann.canvasId) ?? [];
@@ -2123,7 +2130,8 @@ window.__ModuleLoader__.load({
 					}, 80);
 				};
 				const onKeydown = (e) => {
-					if (drafts.length === 0 || resendRef.current) return;
+					if (resendRef.current) return;
+					if (drafts.length === 0 && currentCanvas === null) return;
 					if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
 					const input = findComposerInput();
 					if (input === null || !input.contains(e.target)) return;
@@ -2133,7 +2141,8 @@ window.__ModuleLoader__.load({
 					tryFlushAndResend(input);
 				};
 				const onClick = (e) => {
-					if (drafts.length === 0 || resendRef.current) return;
+					if (resendRef.current) return;
+					if (drafts.length === 0 && currentCanvas === null) return;
 					const input = findComposerInput();
 					if (input === null) return;
 					const sendBtn = findSendButton(findComposerFrame(input));
@@ -2487,6 +2496,10 @@ window.__ModuleLoader__.load({
 			const [toast, setToast] = (0, react.useState)(null);
 			const [panelOpen, setPanelOpen] = (0, react.useState)(false);
 			const [panelPos, setPanelPos] = (0, react.useState)(null);
+			/** 工作区目录（M4） */
+			const [catalogOpen, setCatalogOpen] = (0, react.useState)(false);
+			const [catalogItems, setCatalogItems] = (0, react.useState)([]);
+			const [revMenuOpen, setRevMenuOpen] = (0, react.useState)(false);
 			const canvasAreaRef = (0, react.useRef)(null);
 			const dragRef = (0, react.useRef)(null);
 			const persistOpen = (v) => {
@@ -2548,6 +2561,61 @@ window.__ModuleLoader__.load({
 					});
 				} catch {}
 			};
+			/** M4 工作区目录：拉清单（列表端点；失败静默） */
+			const refreshCatalog = async () => {
+				try {
+					const res = await fetch("/qoder-canvas/list");
+					if (!res.ok) return;
+					const body = await res.json();
+					if (Array.isArray(body.items)) setCatalogItems(body.items);
+				} catch {}
+			};
+			/** M4 切换画布（目录点击）：拉指定 canvas 最新快照 + 注释跟随 */
+			const openCanvas = async (canvasId) => {
+				setSnapshot(null);
+				setAnnotations([]);
+				setTargets([]);
+				try {
+					const res = await fetch(`/qoder-canvas/canvas/${canvasId}`);
+					if (res.ok) {
+						const snap = await res.json();
+						if (snap?.kind === "qoder-canvas" && snap.canvasId === canvasId) {
+							setSnapshot(snap);
+							registerCanvasSnapshot(snap);
+						}
+					}
+				} catch {}
+				setAnnotations(listAnnotations(canvasId));
+				setCatalogOpen(false);
+			};
+			/** M4 版本切换：读指定 rev 快照（标注按 canvasId 共享，天然跨版本） */
+			const openRevision = async (canvasId, rev) => {
+				if (snapshot !== null && snapshot.canvasId === canvasId && snapshot.revision === rev) {
+					setRevMenuOpen(false);
+					return;
+				}
+				try {
+					const res = await fetch(`/qoder-canvas/canvas/${canvasId}?rev=${rev}`);
+					if (!res.ok) {
+						setRevMenuOpen(false);
+						return;
+					}
+					const snap = await res.json();
+					if (snap?.kind === "qoder-canvas" && snap.canvasId === canvasId && snap.revision === rev) {
+						setSnapshot(snap);
+						registerCanvasSnapshot(snap);
+						setTargets([]);
+					}
+				} catch {}
+				setRevMenuOpen(false);
+			};
+			(0, react.useEffect)(() => {
+				setCurrentCanvasRef(snapshot !== null && open ? {
+					canvasId: snapshot.canvasId,
+					revision: snapshot.revision,
+					title: snapshot.canvas.title
+				} : null);
+			}, [snapshot, open]);
 			const saveAnnotation = () => {
 				if (snapshot === null || note.trim().length === 0 || targets.length === 0) return;
 				const trimmed = note.trim();
@@ -2639,17 +2707,90 @@ window.__ModuleLoader__.load({
 									},
 									children: snapshot !== null ? snapshot.canvas.title : "画布工作台"
 								}),
-								snapshot !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									style: {
-										fontSize: 10,
-										fontFamily: "ui-monospace, Menlo, monospace",
-										color: "var(--dsw-alias-label-caption, #888)"
+								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+									type: "button",
+									onClick: () => {
+										setCatalogOpen((v) => !v);
+										if (!catalogOpen) refreshCatalog();
 									},
-									children: [
-										snapshot.canvasId,
-										"@r",
-										snapshot.revision
-									]
+									title: "工作区画布目录",
+									style: {
+										fontSize: 11,
+										padding: "3px 9px",
+										borderRadius: 6,
+										border: catalogOpen ? `1px solid ${ACCENT}` : "1px solid transparent",
+										cursor: "pointer",
+										background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
+										color: catalogOpen ? ACCENT : "var(--dsw-alias-label-secondary, inherit)",
+										fontFamily: "inherit"
+									},
+									children: "目录"
+								}),
+								snapshot !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+									style: { position: "relative" },
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										type: "button",
+										onClick: () => setRevMenuOpen((v) => !v),
+										title: "版本历史",
+										style: {
+											fontSize: 10,
+											fontFamily: "ui-monospace, Menlo, monospace",
+											color: "var(--dsw-alias-label-caption, #888)",
+											background: "none",
+											border: revMenuOpen ? `1px solid ${ACCENT}` : "1px solid transparent",
+											borderRadius: 5,
+											padding: "2px 6px",
+											cursor: "pointer"
+										},
+										children: [
+											snapshot.canvasId,
+											"@r",
+											snapshot.revision,
+											" ▾"
+										]
+									}), revMenuOpen ? (() => {
+										const item = catalogItems.find((c) => c.canvasId === snapshot.canvasId);
+										const revs = item !== void 0 && item.revisions.length > 0 ? item.revisions : [snapshot.revision];
+										return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+											style: {
+												position: "absolute",
+												right: 0,
+												top: "100%",
+												marginTop: 4,
+												zIndex: 60,
+												minWidth: 120,
+												borderRadius: 8,
+												padding: "4px",
+												background: "var(--dsw-alias-bg-layer-1, #fff)",
+												border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))",
+												boxShadow: "0 8px 24px rgba(0,0,0,.2)"
+											},
+											children: [...revs].reverse().map((r) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+												type: "button",
+												onClick: () => {
+													openRevision(snapshot.canvasId, r);
+												},
+												style: {
+													display: "block",
+													width: "100%",
+													textAlign: "left",
+													fontSize: 10.5,
+													padding: "4px 8px",
+													borderRadius: 5,
+													border: 0,
+													cursor: "pointer",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													background: r === snapshot.revision ? "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)" : "none",
+													color: r === snapshot.revision ? ACCENT : "inherit"
+												},
+												children: [
+													"r",
+													r,
+													r === snapshot.revision ? " · 当前" : ""
+												]
+											}, r))
+										});
+									})() : null]
 								}) : null,
 								snapshot !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 									type: "button",
@@ -2786,6 +2927,140 @@ window.__ModuleLoader__.load({
 							},
 							ref: canvasAreaRef,
 							children: [
+								catalogOpen ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+									style: {
+										position: "absolute",
+										right: 12,
+										top: 12,
+										zIndex: 55,
+										width: 270,
+										maxHeight: "min(420px, calc(100% - 24px))",
+										overflow: "auto",
+										borderRadius: 12,
+										background: "var(--dsw-alias-bg-layer-1, #fff)",
+										border: "1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))",
+										boxShadow: "0 12px 36px rgba(0,0,0,.26)"
+									},
+									children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										style: {
+											display: "flex",
+											alignItems: "center",
+											gap: 6,
+											padding: "8px 12px",
+											borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.1))",
+											background: "var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))"
+										},
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+											style: {
+												fontSize: 11,
+												fontWeight: 600,
+												flex: 1
+											},
+											children: [
+												"工作区画布（",
+												catalogItems.length,
+												"）"
+											]
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											type: "button",
+											onClick: () => setCatalogOpen(false),
+											style: {
+												border: 0,
+												background: "none",
+												padding: 0,
+												cursor: "pointer",
+												fontSize: 13,
+												lineHeight: 1,
+												color: "var(--dsw-alias-label-caption, #888)",
+												fontFamily: "inherit"
+											},
+											children: "×"
+										})]
+									}), catalogItems.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+										style: {
+											padding: "20px 14px",
+											fontSize: 11,
+											color: "var(--dsw-alias-label-caption, #888)",
+											textAlign: "center"
+										},
+										children: [
+											"还没有画布产物",
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("br", {}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												style: { fontSize: 10 },
+												children: "让 Agent 用 canvas 工具生成第一个（历史画布首次续编后入册）"
+											})
+										]
+									}) : catalogItems.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+										type: "button",
+										onClick: () => {
+											openCanvas(item.canvasId);
+										},
+										style: {
+											display: "block",
+											width: "100%",
+											textAlign: "left",
+											padding: "8px 12px",
+											border: 0,
+											borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.06))",
+											cursor: "pointer",
+											background: snapshot?.canvasId === item.canvasId ? "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)" : "none",
+											fontFamily: "inherit"
+										},
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											style: {
+												display: "flex",
+												alignItems: "center",
+												gap: 6
+											},
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+												style: {
+													fontSize: 11.5,
+													fontWeight: 600,
+													flex: 1,
+													minWidth: 0,
+													overflow: "hidden",
+													textOverflow: "ellipsis",
+													whiteSpace: "nowrap",
+													color: "inherit"
+												},
+												children: item.title
+											}), item.revisions.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												style: {
+													fontSize: 9.5,
+													color: ACCENT,
+													fontWeight: 600
+												},
+												children: [
+													"r",
+													item.revision,
+													" · ",
+													item.revisions.length,
+													"版"
+												]
+											}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												style: {
+													fontSize: 9.5,
+													color: "var(--dsw-alias-label-caption, #999)"
+												},
+												children: ["r", item.revision]
+											})]
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+											style: {
+												fontSize: 9.5,
+												color: "var(--dsw-alias-label-caption, #999)",
+												marginTop: 2,
+												fontFamily: "ui-monospace, Menlo, monospace"
+											},
+											children: [item.canvasId, item.updatedAt.length > 0 ? ` · ${new Date(item.updatedAt).toLocaleString("zh-CN", {
+												month: "numeric",
+												day: "numeric",
+												hour: "2-digit",
+												minute: "2-digit"
+											})}` : ""]
+										})]
+									}, item.canvasId))]
+								}) : null,
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasSurface, { snapshot }),
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)(CanvasPinLayer, {
 									snapshot,
