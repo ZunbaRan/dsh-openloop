@@ -119,7 +119,7 @@ interface StorageOptions {
   readonly policy?: unknown;
   /** workspace 隔离键（session cwd 编码） */
   readonly workspaceKey: string;
-  /** 存储根（默认 'qoder-canvas'，测试可注入） */
+  /** 存储根（默认 $DSH_HOME/data/qoder-canvas 绝对路径；测试可注入相对路径） */
   readonly rootDir?: string;
 }
 /** 画布清单条目（工作区目录 + 版本管理 UI 的数据源） */
@@ -133,6 +133,13 @@ interface CanvasIndexEntry {
   /** 最近一次写入时间（ISO；listDir 无 mtime 时为空串，UI 自行容错） */
   readonly updatedAt: string;
 }
+/**
+ * 存储根（M4 落盘修复，2026-09-06 实证）：绝对路径 $DSH_HOME/data/qoder-canvas。
+ * 真机教训：相对路径（'qoder-canvas/...'）被 sandbox resolve 到【进程 cwd】
+ * （非会话工作区），workspace-write 模式直接 file access denied——save 从
+ * S4 起从未落盘。DSH_HOME 语义与 app 包 resolveDshHome 一致。
+ */
+declare function resolveStorageRoot(): string;
 /** workspace 路径 → 隔离键（与 dsh 会话编码同风格：路径分隔符转下划线） */
 declare function workspaceKeyOf(cwd: string | undefined): string;
 declare class CanvasStorage {
@@ -160,4 +167,4 @@ declare const name = "openloop-qoder-canvas";
 declare const inject: string[];
 declare function apply(ctx: Context): void;
 //#endregion
-export { CanvasDocument, CanvasIndexEntry, CanvasLayout, CanvasNode, CanvasSnapshot, CanvasStorage, CanvasValidationError, FsDirEntryLike, FsLike, FsTargetLike, LAYOUTS, LIMITS, NODE_REGISTRY, NodeDefinition, NodePropRule, StorageOptions, apply, generateCanvasId, inject, isValidCanvasId, name, validateCanvasDocument, workspaceKeyOf };
+export { CanvasDocument, CanvasIndexEntry, CanvasLayout, CanvasNode, CanvasSnapshot, CanvasStorage, CanvasValidationError, FsDirEntryLike, FsLike, FsTargetLike, LAYOUTS, LIMITS, NODE_REGISTRY, NodeDefinition, NodePropRule, StorageOptions, apply, generateCanvasId, inject, isValidCanvasId, name, resolveStorageRoot, validateCanvasDocument, workspaceKeyOf };

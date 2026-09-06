@@ -7,7 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { CanvasValidationError, generateCanvasId, isValidCanvasId, validateCanvasDocument, type CanvasSnapshot } from './dsl.ts'
-import { CanvasStorage, workspaceKeyOf, type FsLike } from './storage.ts'
+import { CanvasStorage, workspaceKeyOf, resolveStorageRoot, type FsLike } from './storage.ts'
 import { setupAnnotateAudit } from './annotate.ts'
 import { setupCanvasReadEndpoint } from './read.ts'
 
@@ -43,7 +43,10 @@ function storageOf(ctx: Context, exec: { agent?: { session?: unknown } | null; s
   const session = agent?.session as { header?: { cwd?: unknown } } | undefined
   const cwdRaw = session?.header?.cwd
   const cwd = typeof cwdRaw === 'string' ? cwdRaw : undefined
-  const policy = (ctx as unknown as { get?: (name: string) => { resolve(input: unknown): unknown } | undefined }).get?.('sandboxPolicy')?.resolve({ ...(agent ? { session: agent.session } : {}) })
+  // M4 落盘修复：canvas 是宿主级产物（归 DSH_HOME/data），不属于会话工作区——
+  // session policy（workspaceRoot=会话 cwd）必然拒写。落盘用 per-call policy
+  // 把 workspaceRoot 定到 DSH_HOME/data（sandbox 白名单按 per-call root 判定）。
+  const policy = { mode: 'workspace-write', workspaceRoot: resolveStorageRoot() }
   const fs = (ctx as unknown as { fs: FsLike }).fs
   const wsKey = workspaceKeyOf(cwd)
   lastWorkspaceKey = wsKey

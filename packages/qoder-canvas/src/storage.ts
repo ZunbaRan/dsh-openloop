@@ -13,6 +13,8 @@
  * 让渲染照常，掩盖了落盘缺失）。本版本对齐真实 API，list() 走 listDir 扫描。
  */
 import type { CanvasSnapshot } from './dsl.ts'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
 /** 结构化路径身份（真实 FsTarget 的最小形态；宽松声明兼容测试桩） */
 export interface FsTargetLike {
@@ -38,7 +40,7 @@ export interface StorageOptions {
   readonly policy?: unknown
   /** workspace 隔离键（session cwd 编码） */
   readonly workspaceKey: string
-  /** 存储根（默认 'qoder-canvas'，测试可注入） */
+  /** 存储根（默认 $DSH_HOME/data/qoder-canvas 绝对路径；测试可注入相对路径） */
   readonly rootDir?: string
 }
 
@@ -56,6 +58,16 @@ export interface CanvasIndexEntry {
 
 const DEFAULT_ROOT = 'qoder-canvas'
 
+/**
+ * 存储根（M4 落盘修复，2026-09-06 实证）：绝对路径 $DSH_HOME/data/qoder-canvas。
+ * 真机教训：相对路径（'qoder-canvas/...'）被 sandbox resolve 到【进程 cwd】
+ * （非会话工作区），workspace-write 模式直接 file access denied——save 从
+ * S4 起从未落盘。DSH_HOME 语义与 app 包 resolveDshHome 一致。
+ */
+export function resolveStorageRoot(): string {
+  return join(process.env.DSH_HOME ?? join(homedir(), '.dsh'), 'data', 'qoder-canvas')
+}
+
 /** workspace 路径 → 隔离键（与 dsh 会话编码同风格：路径分隔符转下划线） */
 export function workspaceKeyOf(cwd: string | undefined): string {
   if (cwd === undefined || cwd.length === 0) return '_no-cwd'
@@ -72,7 +84,7 @@ export class CanvasStorage {
     this.fs = options.fs
     this.policy = options.policy
     this.workspaceKey = options.workspaceKey
-    this.rootDir = options.rootDir ?? DEFAULT_ROOT
+    this.rootDir = options.rootDir ?? resolveStorageRoot()
   }
 
   private async targetFor(canvasId: string, rev: number): Promise<FsTargetLike | null> {

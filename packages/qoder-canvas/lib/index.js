@@ -1,4 +1,6 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
+import { homedir } from "node:os";
+import { join } from "node:path";
 //#region src/dsl.ts
 /** v0.1 仪表盘节点集（10 节点） */
 const NODE_REGISTRY = {
@@ -514,7 +516,15 @@ function validateInner(value) {
 }
 //#endregion
 //#region src/storage.ts
-const DEFAULT_ROOT = "qoder-canvas";
+/**
+* 存储根（M4 落盘修复，2026-09-06 实证）：绝对路径 $DSH_HOME/data/qoder-canvas。
+* 真机教训：相对路径（'qoder-canvas/...'）被 sandbox resolve 到【进程 cwd】
+* （非会话工作区），workspace-write 模式直接 file access denied——save 从
+* S4 起从未落盘。DSH_HOME 语义与 app 包 resolveDshHome 一致。
+*/
+function resolveStorageRoot() {
+	return join(process.env.DSH_HOME ?? join(homedir(), ".dsh"), "data", "qoder-canvas");
+}
 /** workspace 路径 → 隔离键（与 dsh 会话编码同风格：路径分隔符转下划线） */
 function workspaceKeyOf(cwd) {
 	if (cwd === void 0 || cwd.length === 0) return "_no-cwd";
@@ -529,7 +539,7 @@ var CanvasStorage = class {
 		this.fs = options.fs;
 		this.policy = options.policy;
 		this.workspaceKey = options.workspaceKey;
-		this.rootDir = options.rootDir ?? DEFAULT_ROOT;
+		this.rootDir = options.rootDir ?? resolveStorageRoot();
 	}
 	async targetFor(canvasId, rev) {
 		try {
@@ -825,10 +835,12 @@ let lastWorkspaceKey = "_no-cwd";
 let lastSaveError = null;
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx, exec) {
-	const agent = exec.agent;
-	const cwdRaw = (agent?.session)?.header?.cwd;
+	const cwdRaw = (exec.agent?.session)?.header?.cwd;
 	const cwd = typeof cwdRaw === "string" ? cwdRaw : void 0;
-	const policy = ctx.get?.("sandboxPolicy")?.resolve({ ...agent ? { session: agent.session } : {} });
+	const policy = {
+		mode: "workspace-write",
+		workspaceRoot: resolveStorageRoot()
+	};
 	const fs = ctx.fs;
 	const wsKey = workspaceKeyOf(cwd);
 	lastWorkspaceKey = wsKey;
@@ -954,4 +966,4 @@ function apply(ctx) {
 	}));
 }
 //#endregion
-export { CanvasStorage, CanvasValidationError, LAYOUTS, LIMITS, NODE_REGISTRY, apply, generateCanvasId, inject, isValidCanvasId, name, validateCanvasDocument, workspaceKeyOf };
+export { CanvasStorage, CanvasValidationError, LAYOUTS, LIMITS, NODE_REGISTRY, apply, generateCanvasId, inject, isValidCanvasId, name, resolveStorageRoot, validateCanvasDocument, workspaceKeyOf };
