@@ -67,6 +67,10 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 6. **两列常驻分栏被推翻**：用户的设计直觉是「画布铺满、面板悬浮窗（可拖拽/可关）」。不要自作主张用常驻右栏挤占主内容区。
 7. **`!== undefined` 挡不住 `null`**：全局桥函数（`__openloopCanvasUpdate`）被测试脚本传 null 直接崩。对外暴露的 window 桥一律 `!= null` 宽松判空。
 8. **排查方法论：干净探测实例 + 真实环境对比**。3085（同 profile、无历史数据）上 hover 链路完全正常，3080（用户真实会话）异常——环境差异定位法能快速把「代码 bug」和「环境/数据因素」分开；本次是代码 bug，但探测实例提供的「正常基准」是反推渲染路径的前提。
+9. **composer 注入 ↔ DSH 发送存在竞态（S7.1 真机实证）**：document capture 里 `execCommand insertText` 注入后，DSH 的 Enter handler 同步读 model 时**注入还没生效**（Lexical 写入异步）——只发走用户文本，注入块残留 composer。修复：拦下原事件 → 注入 → 延迟 80ms 程序性 click 发送按钮重发。教训：**凡「注入后立刻发送」的链路，不能假设注入同步生效**。
+10. **多行 `insertText` 在 DSH Lexical 覆写里行为畸形**：第一行总跑到文档末尾。修复：逐行插入（单行 insertText + insertParagraph）。教训：对覆写过的 execCommand，只信单行原语。
+11. **注入文本避开 Lexical 的魔法字符**：`[`（link 语法）、行首 `1)`（有序列表）、`@`（mention 弹窗）。分隔符用 `·`，编号用 `#1`（`#` 后不跟空格不触发 heading）。
+12. **验证 composer 类功能必须「新建会话」**：DSH 持久化 composer 草稿，实验残留会污染后续验证（读到的大杂烩无法归因）；断言发送内容用 `[data-chat-flow-kind="user"]` 最后一条，不要用全文 textContent 定位（历史消息干扰）。
 
 ## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
 
