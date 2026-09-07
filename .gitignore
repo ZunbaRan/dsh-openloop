@@ -16,3 +16,5 @@ _zz_*
 # 本地环境（不入库，防泄漏）
 .env
 .env.*
+.dsh/
+.codebuddy/plans/
