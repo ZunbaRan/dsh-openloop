@@ -87,26 +87,44 @@ export function removeAnnotation(canvasId: string, id: string): void {
  * 每个 node target 带：document 路径（nodes[i]）+ 节点类型 + id + 【完整 DSL 源码片段】
  * ——Agent 拿到后能精确定位 canvas 工具的 document 里改哪一段。
  */
-type SnapshotLike = { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[] } }
+type SnapshotLike = { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>>; children?: readonly unknown[] }[] } }
 
-/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位） */
-function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[]): string {
+/**
+ * 0.11 嵌套寻址：在（可能嵌套的）节点树中递归查找 id。
+ * 命中返回 { path（JSONPath 形如 "nodes[2].children[1].children[0]"）, node }——
+ * Agent 拿路径精确定位 document 里的嵌套位置改哪一段（DSL 复刻的王牌：标注回流
+ * 精确到嵌套子树，这正是 iframe 路线做不到的）。
+ */
+function findNodePath(id: string, nodes: readonly { id: string; children?: readonly unknown[] }[] | undefined, prefix: string): { path: string; node: Record<string, unknown> } | null {
+  if (nodes === undefined) return null
+  for (let i = 0; i < nodes.length; i += 1) {
+    const n = nodes[i] as { id: string; children?: readonly unknown[] }
+    const p = `${prefix}[${i}]`
+    if (n.id === id) return { path: p, node: n as Record<string, unknown> }
+    const child = findNodePath(id, n.children as readonly { id: string; children?: readonly unknown[] }[] | undefined, `${p}.children`)
+    if (child !== null) return child
+  }
+  return null
+}
+
+/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位；0.11 嵌套路径） */
+function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; type: string; props: Readonly<Record<string, unknown>>; children?: readonly unknown[] }[]): string {
   if (t.kind === 'node' || t.kind === 'element') {
-    const idx = nodes.findIndex(n => n.id === t.id)
-    const node = idx >= 0 ? nodes[idx] : undefined
+    const found = findNodePath(t.id, nodes, 'nodes')
+    const node = found?.node as { id: string; type: string } | undefined
     // 元素级：额外带 element（DOM 路径）+ tag + text——Agent 知道用户指的是节点内哪个子元素
     const elementAttrs = t.kind === 'element'
       ? ` element="${t.domPath}" tag="${t.tag}"${t.text !== undefined && t.text.length > 0 ? ` text="${t.text.replace(/"/g, '&quot;')}"` : ''}`
       : ''
-    if (node !== undefined) {
-      return `<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`
+    if (found !== null && node !== undefined) {
+      return `<target type="${node.type}" id="${node.id}" path="${found.path}"${elementAttrs}>\n${JSON.stringify(found.node, null, 2)}\n</target>`
     }
     // 节点不在当前快照（快照迭代后被删）——降级为 id 引用
     return `<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`
   }
-  // 划字：带所属节点定位（S7.1——只给文本 Agent 只能猜它在哪个节点）
-  const idx = t.nodeId !== undefined ? nodes.findIndex(n => n.id === t.nodeId) : -1
-  const inAttr = idx >= 0 ? ` in="nodes[${idx}]"` : t.nodeId !== undefined ? ` in="${t.nodeId}"` : ''
+  // 划字：带所属节点定位（S7.1——只给文本 Agent 只能猜它在哪个节点；0.11 嵌套路径）
+  const found = t.nodeId !== undefined ? findNodePath(t.nodeId, nodes, 'nodes') : null
+  const inAttr = found !== null ? ` in="${found.path}"` : t.nodeId !== undefined ? ` in="${t.nodeId}"` : ''
   return `<target type="text"${inAttr}>"${t.excerpt}"</target>`
 }
 

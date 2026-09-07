@@ -83,3 +83,56 @@ describe('formatAnnotationBatch', () => {
     expect(out).toContain('<target id="deleted" note="not found in current revision">旧节点</target>')
   })
 })
+
+describe('nested design-node addressing (0.11)', () => {
+  const nestedSnap = {
+    canvasId: 'cv_nest1',
+    revision: 1,
+    canvas: {
+      title: '落地页',
+      nodes: [
+        { id: 'hero', type: 'box', props: { style: { gradient: 'ocean' } }, children: [
+          { id: 'hero-inner', type: 'box', props: { style: { padding: 40 } }, children: [
+            { id: 'headline', type: 'text', props: { content: '快十倍', style: { fontSize: 48 } } },
+          ] },
+          { id: 'cta', type: 'text', props: { content: '开始使用' } },
+        ] },
+        { id: 'kpi', type: 'stat-card', props: { label: 'DAU', value: '12.8w' } },
+      ],
+    },
+  }
+
+  it('nested node target outputs deep JSONPath + hit subtree', async () => {
+    const { formatAnnotationBatch } = await import('../src/client/canvas-annotations.ts')
+    const out = formatAnnotationBatch(nestedSnap, [
+      { targets: [{ kind: 'node', id: 'headline', label: 'text' }], note: '标题改小' },
+    ])
+    expect(out).toContain('path="nodes[0].children[0].children[0]"')
+    expect(out).toContain('"content": "快十倍"')
+  })
+
+  it('nested element target keeps domPath + deep path', async () => {
+    const { formatAnnotationBatch } = await import('../src/client/canvas-annotations.ts')
+    const out = formatAnnotationBatch(nestedSnap, [
+      { targets: [{ kind: 'element', id: 'headline', label: 'text div', tag: 'div', domPath: 'div', text: '快十倍' }], note: 'n' },
+    ])
+    expect(out).toContain('path="nodes[0].children[0].children[0]"')
+    expect(out).toContain('element="div"')
+  })
+
+  it('text target in nested node gets nested in= path', async () => {
+    const { formatAnnotationBatch } = await import('../src/client/canvas-annotations.ts')
+    const out = formatAnnotationBatch(nestedSnap, [
+      { targets: [{ kind: 'text', excerpt: '开始使用', nodeId: 'cta' }], note: 'n' },
+    ])
+    expect(out).toContain('in="nodes[0].children[1]"')
+  })
+
+  it('top-level node path stays backward-compatible (nodes[i])', async () => {
+    const { formatAnnotationBatch } = await import('../src/client/canvas-annotations.ts')
+    const out = formatAnnotationBatch(nestedSnap, [
+      { targets: [{ kind: 'node', id: 'kpi', label: 'DAU' }], note: 'n' },
+    ])
+    expect(out).toContain('path="nodes[1]"')
+  })
+})

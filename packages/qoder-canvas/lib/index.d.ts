@@ -12,6 +12,8 @@ interface CanvasNode {
   readonly id: string;
   readonly type: string;
   readonly props: JsonObject;
+  /** 0.11 嵌套：仅设计原语节点（box）支持 children（递归 CanvasNode） */
+  readonly children?: readonly CanvasNode[];
 }
 interface CanvasDocument {
   readonly title: string;
@@ -66,6 +68,17 @@ type NodePropRule = {
   readonly kind: 'context-object';
   readonly maxBytes: number;
   readonly required?: boolean;
+} |
+/** 0.11 设计原语：style 白名单对象（design-system.ts 单一事实源） */
+{
+  readonly kind: 'style';
+  readonly maxProps: number;
+  readonly required?: boolean;
+} |
+/** 0.11 设计原语：动画配置（name 枚举 + duration/delay） */
+{
+  readonly kind: 'animation';
+  readonly required?: boolean;
 };
 interface NodeDefinition {
   readonly type: string;
@@ -85,6 +98,9 @@ declare const LIMITS: {
   readonly maxTableColumns: 12;
   readonly maxTitleLength: 120;
   readonly maxEdges: 64;
+  readonly maxDepth: 6;
+  readonly maxTotalNodes: 128;
+  readonly maxDesignNodeBytes: number;
 };
 declare class CanvasValidationError extends Error {
   constructor(message: string);

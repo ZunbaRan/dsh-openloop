@@ -5,6 +5,260 @@ import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BUNDLED_SKILL_RANK } from "@deepseek-ai/dsh-skill";
+//#region src/design-system.ts
+/** style 白名单（~30 安全属性——对齐计划中的三层语法第二层） */
+const STYLE_WHITELIST = {
+	color: { type: "color" },
+	fontSize: {
+		type: "length",
+		max: 96
+	},
+	fontWeight: {
+		type: "enum",
+		values: [
+			"300",
+			"400",
+			"500",
+			"600",
+			"700",
+			"800"
+		]
+	},
+	textAlign: {
+		type: "enum",
+		values: [
+			"left",
+			"center",
+			"right"
+		]
+	},
+	lineHeight: {
+		type: "number",
+		min: .8,
+		max: 3
+	},
+	letterSpacing: {
+		type: "length",
+		max: 8
+	},
+	fontFamily: {
+		type: "enum",
+		values: [
+			"sans",
+			"serif",
+			"mono"
+		]
+	},
+	textTransform: {
+		type: "enum",
+		values: [
+			"none",
+			"uppercase",
+			"lowercase",
+			"capitalize"
+		]
+	},
+	display: {
+		type: "enum",
+		values: [
+			"flex",
+			"block",
+			"grid"
+		]
+	},
+	flexDirection: {
+		type: "enum",
+		values: ["row", "column"]
+	},
+	justifyContent: {
+		type: "enum",
+		values: [
+			"flex-start",
+			"center",
+			"flex-end",
+			"space-between",
+			"space-around"
+		]
+	},
+	alignItems: {
+		type: "enum",
+		values: [
+			"flex-start",
+			"center",
+			"flex-end",
+			"stretch"
+		]
+	},
+	gap: {
+		type: "length",
+		max: 96
+	},
+	padding: {
+		type: "length",
+		max: 96
+	},
+	margin: {
+		type: "length",
+		max: 48
+	},
+	width: {
+		type: "length",
+		max: 1600
+	},
+	maxWidth: {
+		type: "length",
+		max: 1600
+	},
+	minHeight: {
+		type: "length",
+		max: 800
+	},
+	flex: {
+		type: "enum",
+		values: [
+			"none",
+			"grow",
+			"full"
+		]
+	},
+	flexWrap: {
+		type: "enum",
+		values: ["nowrap", "wrap"]
+	},
+	backgroundColor: { type: "color" },
+	borderRadius: {
+		type: "length",
+		max: 48
+	},
+	borderWidth: {
+		type: "length",
+		max: 8
+	},
+	borderStyle: {
+		type: "enum",
+		values: [
+			"solid",
+			"dashed",
+			"none"
+		]
+	},
+	borderColor: { type: "color" },
+	opacity: {
+		type: "number",
+		min: 0,
+		max: 1
+	},
+	shadow: {
+		type: "enum",
+		values: [
+			"none",
+			"sm",
+			"md",
+			"lg"
+		]
+	},
+	gradient: {
+		type: "enum",
+		values: [
+			"none",
+			"warm",
+			"cool",
+			"sunset",
+			"ocean",
+			"forest"
+		]
+	},
+	tone: {
+		type: "enum",
+		values: [
+			"default",
+			"success",
+			"warn",
+			"error",
+			"info",
+			"muted"
+		]
+	}
+};
+/** 预定义动画枚举（纯 CSS @keyframes，无 JS） */
+const ANIMATIONS = [
+	"none",
+	"fade-in",
+	"slide-up",
+	"slide-down",
+	"scale-in",
+	"pulse",
+	"float"
+];
+/** 内置图标白名单（lucide 风格，DesignNodes 渲染） */
+const ICONS = [
+	"star",
+	"heart",
+	"check",
+	"x",
+	"plus",
+	"arrow-right",
+	"arrow-up",
+	"arrow-down",
+	"zap",
+	"shield",
+	"settings",
+	"search",
+	"bell",
+	"clock",
+	"calendar",
+	"user",
+	"users",
+	"mail",
+	"phone",
+	"home",
+	"globe",
+	"rocket",
+	"target",
+	"trending-up",
+	"trending-down",
+	"layers",
+	"grid",
+	"list",
+	"eye",
+	"lock",
+	"cloud",
+	"database"
+];
+const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0?\.\d+|1|0)\s*)?\)|hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*(,\s*(0?\.\d+|1|0)\s*)?\)?|[a-zA-Z]{3,20})$/;
+const LENGTH_RE = /^(\d{1,4}(\.\d+)?)(px|%|rem)?$/;
+/** 校验单个 style 值（返回错误消息或 null=通过） */
+function checkStyleValue(prop, value) {
+	const rule = STYLE_WHITELIST[prop];
+	if (rule === void 0) return `unknown style property "${prop}"; allowed: ${Object.keys(STYLE_WHITELIST).join(", ")}`;
+	switch (rule.type) {
+		case "color":
+			if (typeof value !== "string" || !COLOR_RE.test(value)) return `"${String(value)}" is not a valid color (use #hex, rgb(), hsl(), or a named color)`;
+			return null;
+		case "length":
+			if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= rule.max) return null;
+			if (typeof value === "string" && LENGTH_RE.test(value)) {
+				const n = parseFloat(value);
+				if (n >= 0 && n <= rule.max) return null;
+			}
+			return `"${String(value)}" must be a length ≤ ${rule.max} (number=px, or "Npx"/"N%"/"Nrem")`;
+		case "number":
+			if (typeof value !== "number" || !Number.isFinite(value) || value < rule.min || value > rule.max) return `"${String(value)}" must be a number in [${rule.min}, ${rule.max}]`;
+			return null;
+		case "enum":
+			if (typeof value !== "string" || !rule.values.includes(value)) return `"${String(value)}" must be one of ${rule.values.join("/")}`;
+			return null;
+	}
+}
+[
+	"@keyframes openloop-fade-in { from { opacity: 0 } to { opacity: 1 } }",
+	"@keyframes openloop-slide-up { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: translateY(0) } }",
+	"@keyframes openloop-slide-down { from { opacity: 0; transform: translateY(-12px) } to { opacity: 1; transform: translateY(0) } }",
+	"@keyframes openloop-scale-in { from { opacity: 0; transform: scale(.96) } to { opacity: 1; transform: scale(1) } }",
+	"@keyframes openloop-pulse { 0%,100% { opacity: 1 } 50% { opacity: .6 } }",
+	"@keyframes openloop-float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-5px) } }"
+].join("\n");
+//#endregion
 //#region src/dsl.ts
 /** v0.1 仪表盘节点集（10 节点） */
 const NODE_REGISTRY = {
@@ -186,6 +440,61 @@ const NODE_REGISTRY = {
 				required: true
 			}
 		}
+	},
+	box: {
+		type: "box",
+		description: "设计容器（可嵌套 children ≤6 层）：布局/间距/背景/边框/阴影/动画",
+		props: {
+			style: {
+				kind: "style",
+				maxProps: 16
+			},
+			animation: { kind: "animation" }
+		}
+	},
+	text: {
+		type: "text",
+		description: "设计文本：字号/字重/颜色/对齐/动画",
+		props: {
+			content: {
+				kind: "string",
+				maxLength: 500,
+				required: true
+			},
+			style: {
+				kind: "style",
+				maxProps: 12
+			},
+			animation: { kind: "animation" }
+		}
+	},
+	icon: {
+		type: "icon",
+		description: "内置 SVG 图标（lucide 风格白名单）",
+		props: {
+			name: {
+				kind: "enum",
+				values: [...ICONS],
+				required: true
+			},
+			size: {
+				kind: "number",
+				min: 12,
+				max: 96
+			},
+			style: {
+				kind: "style",
+				maxProps: 4
+			}
+		}
+	},
+	divider: {
+		type: "divider",
+		description: "分隔线",
+		props: { style: {
+			kind: "style",
+			maxProps: 6
+		} }
 	}
 };
 const LAYOUTS = [
@@ -203,8 +512,13 @@ const LIMITS = {
 	maxTableRows: 100,
 	maxTableColumns: 12,
 	maxTitleLength: 120,
-	maxEdges: 64
+	maxEdges: 64,
+	maxDepth: 6,
+	maxTotalNodes: 128,
+	maxDesignNodeBytes: 32768
 };
+/** 允许 children 的节点类型（仅设计容器） */
+const NESTABLE_TYPES = /* @__PURE__ */ new Set(["box"]);
 var CanvasValidationError = class extends Error {
 	constructor(message) {
 		super(message);
@@ -403,6 +717,41 @@ function checkProp(path, value, rule) {
 			}
 			return;
 		}
+		case "style": {
+			if (value === void 0) {
+				if (rule.required === true) fail(path, "is required");
+				return;
+			}
+			if (!isPlainObject(value)) {
+				fail(path, "must be an object of whitelisted style properties", "{ color, fontSize, padding, … }");
+				return;
+			}
+			const keys = Object.keys(value);
+			if (keys.length > rule.maxProps) fail(path, `${keys.length} props exceeds max ${rule.maxProps}`);
+			for (const k of keys) {
+				const err = checkStyleValue(k, value[k]);
+				if (err !== null) fail(`${path}.${k}`, err);
+			}
+			return;
+		}
+		case "animation": {
+			if (value === void 0) {
+				if (rule.required === true) fail(path, "is required");
+				return;
+			}
+			if (!isPlainObject(value)) {
+				fail(path, "must be an object", "{ name: \"fade-in\"|\"slide-up\"|…, duration?, delay? }");
+				return;
+			}
+			const name = value["name"];
+			if (typeof name !== "string" || !ANIMATIONS.includes(name)) fail(`${path}.name`, `must be one of ${ANIMATIONS.join("/")}`, ANIMATIONS.join(" | "));
+			const duration = value["duration"];
+			if (duration !== void 0 && (typeof duration !== "number" || duration < 0 || duration > 4e3)) fail(`${path}.duration`, "must be a number in [0, 4000] ms");
+			const delay = value["delay"];
+			if (delay !== void 0 && (typeof delay !== "number" || delay < 0 || delay > 4e3)) fail(`${path}.delay`, "must be a number in [0, 4000] ms");
+			for (const k of Object.keys(value)) if (k !== "name" && k !== "duration" && k !== "delay") fail(`${path}.${k}`, `unknown animation field; allowed: name, duration, delay`);
+			return;
+		}
 	}
 }
 function checkHref(path, href) {
@@ -454,37 +803,59 @@ function validateInner(value) {
 	if (nodes.length === 0) fail("nodes", "must contain at least 1 node");
 	if (nodes.length > LIMITS.maxNodes) fail("nodes", `${nodes.length} nodes exceeds max ${LIMITS.maxNodes}`);
 	const seenIds = /* @__PURE__ */ new Set();
-	for (let i = 0; i < nodes.length; i += 1) {
-		const n = nodes[i];
-		const path = `nodes[${i}]`;
+	let totalNodes = 0;
+	/** 0.11 递归节点校验（设计原语嵌套）：深度/总数守卫 + id 全局查重 */
+	const validateNode = (n, path, depth) => {
 		if (!isPlainObject(n)) {
 			fail(path, "must be an object");
-			continue;
+			return;
 		}
-		if (byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`);
+		totalNodes += 1;
+		if (totalNodes > LIMITS.maxTotalNodes) {
+			fail(path, `total node count exceeds max ${LIMITS.maxTotalNodes} (including nested children)`);
+			return;
+		}
+		const byteLimit = NESTABLE_TYPES.has(String(n["type"])) ? LIMITS.maxDesignNodeBytes : LIMITS.maxNodeBytes;
+		if (byteSize(n) > byteLimit) fail(path, `size exceeds max ${byteLimit}B`);
 		const id = n["id"];
 		if (typeof id !== "string" || !ID_RE.test(id)) fail(`${path}.id`, "must match [a-zA-Z0-9_-]{1,32}");
-		else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`);
+		else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}" (ids must be unique across the whole canvas including nested children)`);
 		else seenIds.add(id);
 		const type = n["type"];
 		if (typeof type !== "string") {
 			fail(`${path}.type`, "must be a string");
-			continue;
+			return;
 		}
 		const def = NODE_REGISTRY[type];
 		if (def === void 0) {
 			fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(" | "));
-			continue;
+			return;
 		}
 		const props = n["props"];
 		if (!isPlainObject(props)) {
 			fail(`${path}.props`, "must be an object");
-			continue;
+			return;
 		}
 		for (const [key, rule] of Object.entries(def.props)) checkProp(`${path}.props.${key}`, props[key], rule);
 		if (type === "link" && typeof props["href"] === "string") checkHref(`${path}.props.href`, props["href"]);
 		for (const key of Object.keys(props)) if (!(key in def.props)) fail(`${path}.props.${key}`, `unknown prop for ${type}; allowed: ${Object.keys(def.props).join(", ") || "(none)"}`);
-	}
+		const children = n["children"];
+		if (children !== void 0) {
+			if (!NESTABLE_TYPES.has(type)) {
+				fail(`${path}.children`, `nodes of type "${type}" do not support children; only ${[...NESTABLE_TYPES].join("/")} can nest`);
+				return;
+			}
+			if (!Array.isArray(children)) {
+				fail(`${path}.children`, "must be an array of nodes");
+				return;
+			}
+			if (children.length > LIMITS.maxNodes) fail(`${path}.children`, `${children.length} children exceeds max ${LIMITS.maxNodes}`);
+			if (depth + 1 > LIMITS.maxDepth) fail(`${path}.children`, `nesting depth exceeds max ${LIMITS.maxDepth}`);
+			for (let i = 0; i < children.length; i += 1) validateNode(children[i], `${path}.children[${i}]`, depth + 1);
+		}
+		for (const key of Object.keys(n)) if (key !== "id" && key !== "type" && key !== "props" && key !== "children") fail(`${path}.${key}`, `unknown node field; allowed: id, type, props, children`);
+	};
+	for (let i = 0; i < nodes.length; i += 1) validateNode(nodes[i], `nodes[${i}]`, 1);
 	const edges = value["edges"];
 	const checkedEdges = [];
 	if (edges !== void 0) {
@@ -1074,11 +1445,11 @@ function apply(ctx) {
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
-		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, designs). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those (match path/nodes[i] or the snippet) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards. COMPANION SKILLS (optional, install separately — canvas works fully without them): baoyu-design (polished UI mockups/prototypes), huashu-design (high-fidelity prototypes/slides/PPT), kami (typeset docs/white papers/landing pages), archify (architecture/workflow/sequence diagrams), lieflat-charts (template-driven data-viz charts and reports). When a task needs rich full-page HTML designs, prefer the html_artifact tool (optionally in a detected skill style) — canvas DSL nodes are for structured data content. Install location: $DSH_HOME/skills/<name>/ with a SKILL.md.",
+		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, DESIGNS). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (exact nested node paths + node JSON); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, DESIGN MOCKUPS (landing pages, hero sections, feature grids, pricing cards — via nested design primitives), flow diagrams, PPT-style decks, dashboards. DESIGN PRIMITIVES (v0.11): box/text/icon/divider nodes compose NESTED layouts (box supports children, ≤6 levels) with a whitelisted style subset — use them for rich visual design directly in the canvas (better than artifacts for it: element-level annotation works on every nested node, and users can iterate by annotating). MIX data + design freely: structured info → stat-card/chart/table/…; visual sections → nested box/text/icon compositions. When the user message contains a 画布标注 block, they are pointing at specific nodes (path like nodes[2].children[1]) — edit exactly those and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual/design content; prefer show_widget for tiny single-metric cards.",
 		parameters: {
 			document: {
 				type: "json",
-				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 10 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder). (* = required). Limits: whole document ≤256KB. Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
+				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 14 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder). (* = required). DESIGN PRIMITIVES (v0.11, nestable): box: { style?: object of whitelisted props (color, backgroundColor, fontSize (≤96), fontWeight (300-800), textAlign, lineHeight, letterSpacing, fontFamily (sans/serif/mono), textTransform, display (flex/block/grid), flexDirection (row/column), justifyContent, alignItems, gap/padding (≤96) /margin (≤48) /borderRadius (≤48) /borderWidth (≤8) in px, borderStyle, borderColor, width/maxWidth, minHeight, opacity, flex, flexWrap, shadow (none/sm/md/lg), gradient (none/warm/cool/sunset/ocean/forest), tone), animation?: { name: \"none\"|\"fade-in\"|\"slide-up\"|\"slide-down\"|\"scale-in\"|\"pulse\"|\"float\", duration? (ms ≤4000), delay? (ms) }, children?: array of nodes (NESTING: box only, ≤6 levels, total ≤128 nodes incl. nested, ids unique canvas-wide) }; text: { content*: string≤500, style?, animation? }; icon: { name*: one of star/heart/check/x/plus/arrow-right/arrow-up/arrow-down/zap/shield/settings/search/bell/clock/calendar/user/users/mail/phone/home/globe/rocket/target/trending-up/trending-down/layers/grid/list/eye/lock/cloud/database, size?: 12-96, style? (≤4 props) }; divider: { style? (≤6 props) }. Limits: whole document ≤256KB. Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
 			},
 			canvasId: {
 				type: "string",

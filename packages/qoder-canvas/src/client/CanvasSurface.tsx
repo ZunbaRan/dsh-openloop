@@ -6,6 +6,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { CanvasNode, CanvasSnapshot } from '../dsl.ts'
 import { renderMarkdownLines } from './markdown.tsx'
+import { BoxNode, DividerNode, IconNode, TextNode, DesignKeyframesStyle } from './DesignNodes.tsx'
 
 // ---- 通用样式 ----
 
@@ -267,7 +268,15 @@ function LinkNode({ props }: { props: Record<string, unknown> }): ReactNode {
 
 function NodeRenderer({ node, onAction }: { node: CanvasNode; onAction: ((node: CanvasNode) => void) | undefined }): ReactNode {
   const props = node.props as Record<string, unknown>
+  // 0.11 设计原语：嵌套子节点渲染器（透传 onAction；避免与 DesignNodes 循环 import 的注入式写法）
+  const renderChild = (child: CanvasNode): ReactNode => <NodeRenderer node={child} onAction={onAction} />
   switch (node.type) {
+    // ---- v0.11 设计原语（DSL 复刻 baoyu-design）----
+    case 'box': return <BoxNode node={node} renderChild={renderChild} />
+    case 'text': return <TextNode node={node} />
+    case 'icon': return <IconNode node={node} />
+    case 'divider': return <DividerNode node={node} />
+    // ---- 数据节点（v0.1）----
     case 'stat-card': return <StatCardNode props={props} />
     case 'chart': return <ChartNode props={props} />
     case 'table': return <TableNode props={props} />
@@ -290,6 +299,8 @@ export function CanvasSurface({ snapshot, onAction }: { snapshot: CanvasSnapshot
   const plainNodes = canvas.nodes.filter(n => n.type !== 'section')
   return (
     <section style={surface} data-openloop-canvas={snapshot.canvasId} data-revision={snapshot.revision}>
+      {/* 0.11 设计原语动画 keyframes（全局一份；无动画节点时也无害——纯 CSS 声明） */}
+      <DesignKeyframesStyle />
       <header style={headerStyle}>
         <span style={{ fontSize: 13, fontWeight: 650, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{canvas.title}</span>
         <span style={{ fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--dsw-alias-label-caption, #888)' }}>{snapshot.canvasId}@r{snapshot.revision}</span>
