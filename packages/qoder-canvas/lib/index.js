@@ -1,6 +1,10 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readFile, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { BUNDLED_SKILL_RANK } from "@deepseek-ai/dsh-skill";
 //#region src/dsl.ts
 /** v0.1 仪表盘节点集（10 节点） */
 const NODE_REGISTRY = {
@@ -842,6 +846,135 @@ function setupCanvasReadEndpoint(ctx, opts) {
 	});
 }
 //#endregion
+//#region src/skill.ts
+/**
+* canvas 插件的 skill 通道（0.9.3）：
+*
+* 1. canvasSkillProvider —— 插件内含 skill（canvas 使用哲学 + companion 清单），
+*    artifact 包同款 15 行模板（registerProvider 不依赖 skill-filesystem——
+*    AGENTS.md #22 沉淀：那是 preset 级磁盘扫描器，默认禁用；registry/catalog/skill
+*    工具链路在当前配置下是活的）
+* 2. localSkillsProvider —— 轻量目录扫描（替代被禁的 skill-filesystem）：
+*    扫 $DSH_HOME/skills/<name>/SKILL.md，用户自行 clone 的社区 skill 自动入册。
+*    简化语义：list 每次实扫（无缓存）；frontmatter 只解析单行 name/description/
+*    whenToUse（多行折叠语法不支持——解析失败的 skill 跳过并告警，不炸 provider）
+*/
+const bundledBody = new URL("../assets/canvas-skill.md", import.meta.url);
+const canvasCandidate = {
+	name: "canvas-design",
+	description: "Author canvas panels (dashboards, designs, prototypes, PPT, diagrams) via the canvas tool: mixed DSL nodes + sandboxed html nodes with element-level annotation feedback. Read before authoring rich layouts or iterating user-annotated canvases.",
+	whenToUse: "canvas 工具建布/续编/处理画布标注时；html 节点风格选择时（含 companion skill 路由表）",
+	invocation: {
+		modelInvocable: true,
+		userInvocable: true
+	},
+	provider: "openloop-qoder-canvas-bundled",
+	source: "bundled",
+	resourceBase: {
+		kind: "directory",
+		path: fileURLToPath(new URL("../assets/", import.meta.url))
+	},
+	rank: BUNDLED_SKILL_RANK,
+	locator: bundledBody
+};
+const canvasSkillProvider = {
+	name: canvasCandidate.provider,
+	list: () => Promise.resolve([canvasCandidate]),
+	async get() {
+		return {
+			...canvasCandidate,
+			content: await readFile(bundledBody, "utf8")
+		};
+	}
+};
+const LOCAL_RANK = 100;
+function localSkillsRoot() {
+	return join(process.env.DSH_HOME ?? join(homedir(), ".dsh"), "skills");
+}
+/** 简化 frontmatter 解析：只认单行 `key: value`（多行折叠语法跳过该 skill） */
+function parseFrontmatter(raw) {
+	const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+	if (m === null) return null;
+	let name;
+	let description;
+	let whenToUse;
+	for (const line of (m[1] ?? "").split(/\r?\n/)) {
+		const kv = /^([a-zA-Z-]+):\s*(.+)$/.exec(line.trim());
+		if (kv === null) continue;
+		const val = (kv[2] ?? "").trim().replace(/^['"]|['"]$/g, "");
+		if (val.length === 0) continue;
+		const key = (kv[1] ?? "").toLowerCase();
+		if (key === "name" && name === void 0) name = val;
+		else if (key === "description" && description === void 0) description = val;
+		else if (key === "whentouse" && whenToUse === void 0) whenToUse = val;
+	}
+	if (name === void 0 || description === void 0) return null;
+	return whenToUse !== void 0 ? {
+		name,
+		description,
+		whenToUse
+	} : {
+		name,
+		description
+	};
+}
+/** 提取 frontmatter 之后的正文（skill body 不含 frontmatter） */
+function stripFrontmatter(raw) {
+	const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(raw);
+	return m === null ? raw : raw.slice(m[0].length);
+}
+const localSkillsProvider = {
+	name: "openloop-qoder-canvas-local",
+	list: async (options) => {
+		const root = localSkillsRoot();
+		if (!existsSync(root)) return [];
+		const signal = options.signal;
+		const out = [];
+		let dirs;
+		try {
+			dirs = (await readdir(root, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+		} catch {
+			return [];
+		}
+		for (const dir of dirs) {
+			if (signal?.aborted) break;
+			const skillPath = join(root, dir, "SKILL.md");
+			try {
+				const fm = parseFrontmatter(await readFile(skillPath, "utf8"));
+				if (fm === null) continue;
+				out.push({
+					name: fm.name,
+					description: fm.description.slice(0, 300),
+					...fm.whenToUse !== void 0 ? { whenToUse: fm.whenToUse.slice(0, 200) } : {},
+					invocation: {
+						modelInvocable: true,
+						userInvocable: true
+					},
+					provider: localSkillsProvider.name,
+					source: "bundled",
+					path: skillPath,
+					rank: LOCAL_RANK,
+					locator: { path: skillPath }
+				});
+			} catch {}
+		}
+		return out;
+	},
+	async get(candidate) {
+		const loc = candidate.locator;
+		if (loc === void 0 || typeof loc.path !== "string") return void 0;
+		try {
+			const raw = await readFile(loc.path, "utf8");
+			return {
+				...candidate,
+				content: stripFrontmatter(raw)
+			};
+		} catch {
+			return;
+		}
+	}
+};
+//#endregion
 //#region src/index.ts
 const name = "openloop-qoder-canvas";
 const inject = [
@@ -928,6 +1061,12 @@ function storageOf(ctx, exec) {
 	});
 }
 function apply(ctx) {
+	try {
+		ctx.skills.registerProvider(() => canvasSkillProvider);
+		ctx.skills.registerProvider(() => localSkillsProvider);
+	} catch (error) {
+		ctx.logger?.warn?.(`qoder-canvas skill providers failed to register: ${String(error)}`);
+	}
 	const originOf = () => {
 		const origin = globalThis.location?.origin;
 		return typeof origin === "string" && origin.length > 0 ? origin : "http://127.0.0.1:3080";
@@ -963,7 +1102,7 @@ function apply(ctx) {
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
-		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, rich designs). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL, or HTML source snippets for html nodes); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices, landing-page-quality designs. MIXED COMPOSITION: use structured node types (stat-card/chart/table/…) for data content; use the html node for rich/free layouts — it renders arbitrary HTML/CSS/JS in a sandboxed iframe with full element-level annotation support (users can click/marquee/text-select INSIDE it; annotated elements come back with their source snippet — locate by text-matching the snippet and re-emit the full source). If a design/PPT/typography skill is available, its HTML output belongs in an html node. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those (match path/nodes[i] or the snippet) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards.",
+		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, rich designs). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL, or HTML source snippets for html nodes); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices, landing-page-quality designs. MIXED COMPOSITION: use structured node types (stat-card/chart/table/…) for data content; use the html node for rich/free layouts — it renders arbitrary HTML/CSS/JS in a sandboxed iframe with full element-level annotation support (users can click/marquee/text-select INSIDE it; annotated elements come back with their source snippet — locate by text-matching the snippet and re-emit the full source). If a design/PPT/typography skill is available, its HTML output belongs in an html node. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those (match path/nodes[i] or the snippet) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards. COMPANION SKILLS (optional, install separately — canvas works fully without them): baoyu-design (polished UI mockups/prototypes), huashu-design (high-fidelity prototypes/slides/PPT), kami (typeset docs/white papers/landing pages), archify (architecture/workflow/sequence diagrams), lieflat-charts (template-driven data-viz charts and reports). If one is installed (check the skill catalog) and matches the task, load it first and author html node sources in its style; otherwise plain HTML in html nodes is fine. Install location: $DSH_HOME/skills/<name>/ with a SKILL.md.",
 		parameters: {
 			document: {
 				type: "json",
