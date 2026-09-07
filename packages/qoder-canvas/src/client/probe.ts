@@ -141,7 +141,7 @@ const PROBE_SOURCE = `(function () {
     if (d.t === 'init') {
       token = d.token;
       mode = d.mode || 'off';
-      send({ t: 'ready', height: document.documentElement.scrollHeight });
+      send({ t: 'ready', height: document.documentElement.scrollHeight, width: document.documentElement.scrollWidth });
     } else if (d.t === 'mode') {
       mode = d.mode;
     } else if (d.t === 'hit') {
@@ -158,12 +158,15 @@ const PROBE_SOURCE = `(function () {
     var info = selectionInfo();
     if (info) send({ t: 'selection', excerpt: info.excerpt, domPath: info.domPath });
   });
-  // 高度自适应：内容变化上报（ResizeObserver 兜底 scroll 监听）
-  var lastH = -1;
+  // 高度/宽度自适应：内容变化上报（ResizeObserver 兜底 scroll 监听）。
+  // 0.9.7：同时上报 scrollWidth——桌面设计稿（kami 等按宽屏排版）在窄容器里
+  // 需要等比缩放显示，父层按 容器宽/scrollWidth 计算 scale
+  var lastH = -1, lastW = -1;
   var reportH = function () {
     if (!token) return;
     var h = document.documentElement.scrollHeight;
-    if (h !== lastH) { lastH = h; send({ t: 'height', height: h }); }
+    var w = document.documentElement.scrollWidth;
+    if (h !== lastH || w !== lastW) { lastH = h; lastW = w; send({ t: 'height', height: h, width: w }); }
   };
   if (window.ResizeObserver) {
     try { new ResizeObserver(reportH).observe(document.documentElement); } catch (e) {}

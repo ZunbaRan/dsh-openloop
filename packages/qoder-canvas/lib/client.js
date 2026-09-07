@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
     if (d.t === 'init') {
       token = d.token;
       mode = d.mode || 'off';
-      send({ t: 'ready', height: document.documentElement.scrollHeight });
+      send({ t: 'ready', height: document.documentElement.scrollHeight, width: document.documentElement.scrollWidth });
     } else if (d.t === 'mode') {
       mode = d.mode;
     } else if (d.t === 'hit') {
@@ -209,12 +209,15 @@ window.__ModuleLoader__.load({
     var info = selectionInfo();
     if (info) send({ t: 'selection', excerpt: info.excerpt, domPath: info.domPath });
   });
-  // 高度自适应：内容变化上报（ResizeObserver 兜底 scroll 监听）
-  var lastH = -1;
+  // 高度/宽度自适应：内容变化上报（ResizeObserver 兜底 scroll 监听）。
+  // 0.9.7：同时上报 scrollWidth——桌面设计稿（kami 等按宽屏排版）在窄容器里
+  // 需要等比缩放显示，父层按 容器宽/scrollWidth 计算 scale
+  var lastH = -1, lastW = -1;
   var reportH = function () {
     if (!token) return;
     var h = document.documentElement.scrollHeight;
-    if (h !== lastH) { lastH = h; send({ t: 'height', height: h }); }
+    var w = document.documentElement.scrollWidth;
+    if (h !== lastH || w !== lastW) { lastH = h; lastW = w; send({ t: 'height', height: h, width: w }); }
   };
   if (window.ResizeObserver) {
     try { new ResizeObserver(reportH).observe(document.documentElement); } catch (e) {}
@@ -269,6 +272,8 @@ window.__ModuleLoader__.load({
 					rec.degraded = false;
 					const h = d["height"];
 					if (typeof h === "number" && h > 0) rec.height = h;
+					const w = d["width"];
+					if (typeof w === "number" && w > 0) rec.width = w;
 					rec.frame.contentWindow?.postMessage({
 						__openloopProbe: true,
 						t: "mode",
@@ -278,10 +283,17 @@ window.__ModuleLoader__.load({
 					emit$1();
 				} else if (t === "height") {
 					const h = d["height"];
+					const w = d["width"];
+					let changed = false;
 					if (typeof h === "number" && h > 0 && Math.abs(h - rec.height) > 2) {
 						rec.height = h;
-						emit$1();
+						changed = true;
 					}
+					if (typeof w === "number" && w > 0 && Math.abs(w - rec.width) > 2) {
+						rec.width = w;
+						changed = true;
+					}
+					if (changed) emit$1();
 				} else if (t === "hit-result" || t === "marquee-result") {
 					const reqId = d["reqId"];
 					if (typeof reqId === "number") {
@@ -317,6 +329,7 @@ window.__ModuleLoader__.load({
 				ready: false,
 				degraded: false,
 				height: 0,
+				width: 0,
 				mountedAt: Date.now(),
 				pending: /* @__PURE__ */ new Map()
 			};
@@ -389,13 +402,38 @@ window.__ModuleLoader__.load({
 			return out;
 		}
 		if (typeof window !== "undefined") window.__openloopBridgeDebug = bridgeDebug;
-		/** iframe 内容坐标（父页面 client 坐标 → iframe 视口坐标） */
+		/** iframe 的当前缩放比（0.9.7 宽度自适应：内容自然宽 > 容器宽时等比缩小；未缩放=1） */
+		function frameScale(rec) {
+			if (rec.width <= 0) return 1;
+			const fr = rec.frame.getBoundingClientRect();
+			if (fr.width === 0) return 1;
+			return fr.width / rec.width;
+		}
+		/** iframe 内容坐标（父页面 client 坐标 → iframe 视口坐标；0.9.7 带 scale 换算 + 越界守卫） */
 		function toFrameCoords(rec, clientX, clientY) {
 			const r = rec.frame.getBoundingClientRect();
+			const s = frameScale(rec);
 			return {
-				x: clientX - r.left,
-				y: clientY - r.top
+				x: (clientX - r.left) / s,
+				y: (clientY - r.top) / s
 			};
+		}
+		/** 坐标越界守卫（0.9.7 问题 2「选到奇怪位置」）：缝隙/滚动条处换算出的坐标超出
+		* iframe 视口——不发探针查询（否则返回边缘大容器，高亮错位）。调用方在
+		* probeHitAt/probeMarqueeIn 前判定。 */
+		function coordsInFrame(rec, x, y) {
+			if (x < 0 || y < 0) return false;
+			const fr = rec.frame.getBoundingClientRect();
+			const s = frameScale(rec);
+			return x <= fr.width / s && y <= fr.height / s;
+		}
+		/** 按 nodeId 取 frame 记录（HighlightEl 算 scale 用） */
+		function frameRecordOf(nodeId) {
+			return registry.get(nodeId) ?? null;
+		}
+		/** iframe 内容自然宽度（0=未知；HtmlNode 缩放渲染用） */
+		function probeWidth(nodeId) {
+			return registry.get(nodeId)?.width ?? 0;
 		}
 		/** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级。
 		* 真机教训：120ms 对复杂 HTML 过紧（postMessage 往返 + 大 DOM 命中计算 + 主线程
@@ -452,27 +490,28 @@ window.__ModuleLoader__.load({
 		* 坐标换算（纯函数，单测覆盖）：探针 rect（iframe 视口）→ 父页面画布容器坐标。
 		* iframe 本身不滚动（高度自适应），故只加 iframe 在容器内的偏移。
 		*/
-		function frameRectToContainer(frame, container, r) {
+		function frameRectToContainer(frame, container, r, scale = 1) {
 			const fb = frame.getBoundingClientRect();
 			const cb = container.getBoundingClientRect();
 			return {
-				left: fb.left - cb.left + r.x,
-				top: fb.top - cb.top + r.y,
-				width: r.w,
-				height: r.h
+				left: fb.left - cb.left + r.x * scale,
+				top: fb.top - cb.top + r.y * scale,
+				width: r.w * scale,
+				height: r.h * scale
 			};
 		}
 		//#endregion
 		//#region src/client/HtmlNode.tsx
 		/**
-		* HtmlNode：html 节点的 iframe 沙箱渲染器（0.9.0 增强档）。
+		* HtmlNode：html 节点的 iframe 沙箱渲染器（0.9.0 增强档 → 0.9.7 宽度自适应）。
 		*
 		* - srcdoc = buildProbeDocument(source)：探针自动注入（skill/Agent HTML 零配合）
 		* - sandbox="allow-scripts"（opaque origin；html-artifact 先例）+ referrerPolicy
-		* - 高度自适应：bridge 高度（探针 ResizeObserver 上报）clamp [120, 640]，
-		*   超上限 iframe 内部滚动（frameRectToContainer 假设 iframe 不滚——超上限时
-		*   探针 rect 含内部滚动偏移，父层高亮换算仍正确：getBoundingClientRect 本身
-		*   是视口坐标，滚动只影响内容可见性不影响 rect 换算基）
+		* - 高度自适应：bridge 高度（探针 ResizeObserver 上报）clamp [120, 640]
+		* - 0.9.7 宽度自适应（用户需求）：桌面设计稿（kami 等按宽屏排版）在窄容器里
+		*   等比缩放——探针上报内容自然宽 scrollWidth，超过容器宽时
+		*   scale = 容器宽 / scrollWidth，iframe 按自然宽渲染 + transform: scale 缩小。
+		*   坐标换算链（toFrameCoords/frameRectToContainer）已带 scale，标注照常精确。
 		* - onload → registerProbeFrame（版本重渲染自动覆盖旧记录）
 		* - 降级态（探针超时未 ready）：显示提示条 + 固定高度 320（节点级标注仍可用）
 		*/
@@ -480,12 +519,25 @@ window.__ModuleLoader__.load({
 		const MAX_H = 640;
 		function HtmlNode({ nodeId, props }) {
 			const [height, setHeight] = (0, react.useState)(240);
+			const [contentW, setContentW] = (0, react.useState)(0);
+			const [boxW, setBoxW] = (0, react.useState)(0);
 			const source = typeof props.source === "string" ? props.source : "";
 			const title = typeof props.title === "string" ? props.title : "";
+			const boxRef = (0, react.useRef)(null);
+			(0, react.useEffect)(() => {
+				const el = boxRef.current;
+				if (el === null) return;
+				setBoxW(el.clientWidth);
+				const ro = new ResizeObserver(() => setBoxW(el.clientWidth));
+				ro.observe(el);
+				return () => ro.disconnect();
+			}, []);
 			(0, react.useEffect)(() => {
 				const update = () => {
 					const h = probeHeight(nodeId);
 					if (h > 0) setHeight(Math.min(Math.max(h, MIN_H), MAX_H));
+					const w = probeWidth(nodeId);
+					if (w > 0) setContentW(w);
 				};
 				update();
 				return onBridgeChange(update);
@@ -510,7 +562,10 @@ window.__ModuleLoader__.load({
 					unregisterProbeFrame(nodeId);
 				};
 			}, [nodeId, source]);
+			const scale = contentW > 0 && boxW > 0 && contentW > boxW ? boxW / contentW : 1;
+			const scaledH = scale < 1 ? Math.min(Math.max(Math.round(height * scale), MIN_H), MAX_H) : height;
 			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				ref: boxRef,
 				style: {
 					border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.12))",
 					borderRadius: 10,
@@ -518,7 +573,8 @@ window.__ModuleLoader__.load({
 					background: "#fff",
 					display: "flex",
 					flexDirection: "column",
-					minWidth: 0
+					minWidth: 0,
+					...scale < 1 ? { height: scaledH } : {}
 				},
 				children: /* @__PURE__ */ (0, react_jsx_runtime.jsx)("iframe", {
 					ref: frameRef,
@@ -526,12 +582,22 @@ window.__ModuleLoader__.load({
 					onLoad: () => {
 						if (frameRef.current !== null) registerProbeFrame(nodeId, frameRef.current);
 					},
-					style: {
-						width: "100%",
+					style: scale < 1 ? {
+						width: contentW,
 						height,
 						border: 0,
 						display: "block",
-						background: "#fff"
+						background: "#fff",
+						transform: `scale(${scale})`,
+						transformOrigin: "0 0",
+						flexShrink: 0
+					} : {
+						width: "100%",
+						height: scaledH,
+						border: 0,
+						display: "block",
+						background: "#fff",
+						flexShrink: 0
 					}
 				})
 			});
@@ -1631,6 +1697,7 @@ window.__ModuleLoader__.load({
 					return null;
 				}
 				const coords = toFrameCoords(rec, x, y);
+				if (!coordsInFrame(rec, coords.x, coords.y)) return null;
 				const hit = await probeHitAt(rec, coords.x, coords.y);
 				if (hit === null) return {
 					nodeId: rec.nodeId,
@@ -2129,7 +2196,9 @@ window.__ModuleLoader__.load({
 			if (hit.iframeHit !== void 0) {
 				const frameEl = surface.querySelector(`[data-canvas-node="${CSS.escape(hit.nodeId)}"] iframe`);
 				if (frameEl === null) return null;
-				r = frameRectToContainer(frameEl, surface, hit.iframeHit.rect);
+				const hitRec = frameRecordOf(hit.nodeId);
+				const scale = hitRec !== null ? frameScale(hitRec) : 1;
+				r = frameRectToContainer(frameEl, surface, hit.iframeHit.rect, scale);
 			} else {
 				const nodeEl = surface.querySelector(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`);
 				if (nodeEl === null) return null;

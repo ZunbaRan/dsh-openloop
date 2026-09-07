@@ -14,7 +14,7 @@
 import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import type { CanvasSnapshot } from '../dsl.ts'
 import type { AnnotationTarget, CanvasAnnotation } from './canvas-annotations.ts'
-import { broadcastProbeMode, frameAtAny, frameRectToContainer, onProbeSelection, onBridgeChange, probeHitAt, probeMarqueeIn, toFrameCoords, allFrameRecords, type FrameRecord, type ProbeRect } from './html-bridge.ts'
+import { broadcastProbeMode, coordsInFrame, frameAtAny, frameRectToContainer, frameRecordOf, frameScale, onProbeSelection, onBridgeChange, probeHitAt, probeMarqueeIn, toFrameCoords, allFrameRecords, type FrameRecord, type ProbeRect } from './html-bridge.ts'
 import type { ProbeHit } from './probe.ts'
 
 export type PinMode = 'point' | 'marquee' | 'text'
@@ -220,6 +220,9 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
     if (rec === null) { log(`frameAtAny-null xy=${Math.round(x)},${Math.round(y)}`); return null }
     if (!surface.contains(rec.frame)) { log(`not-in-surface node=${rec.nodeId}`); return null }
     const coords = toFrameCoords(rec, x, y)
+    // 0.9.7 越界守卫（用户报告「选到奇怪位置」）：缝隙/边缘处换算坐标超出
+    // iframe 视口——不发探针查询（否则探针返回边缘大容器，高亮错位）
+    if (!coordsInFrame(rec, coords.x, coords.y)) { log('out-of-frame'); return null }
     const hit = await probeHitAt(rec, coords.x, coords.y)
     if (hit === null) return { nodeId: rec.nodeId, domPath: '', tag: 'iframe' } // 降级：节点级
     return { nodeId: rec.nodeId, domPath: hit.domPath, tag: hit.tag, text: hit.text, iframeHit: hit }
@@ -679,7 +682,9 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
     // iframe 内命中：探针 rect（iframe 视口坐标）→ 父层容器坐标
     const frameEl = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(hit.nodeId)}"] iframe`)
     if (frameEl === null) return null
-    const fr = frameRectToContainer(frameEl as HTMLIFrameElement, surface, hit.iframeHit.rect)
+    const hitRec = frameRecordOf(hit.nodeId)
+    const scale = hitRec !== null ? frameScale(hitRec) : 1
+    const fr = frameRectToContainer(frameEl as HTMLIFrameElement, surface, hit.iframeHit.rect, scale)
     r = fr
   } else {
     const nodeEl = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`)
