@@ -81,6 +81,9 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 20. **自动化测试的事件容器选择器勿用 `div[style*="overflow: auto"]` 字符串匹配**（inline style 会被 React 重排为 `overflow: auto;` 或合并其它属性，匹配漂移）——用 getComputedStyle 逐级向上找 overflow==='auto'。
 21. **树摇对模块级副作用 if 块不彻底**（挂 window 的诊断函数可能被摇掉而监听器保留）——诊断暴露不要依赖「无引用的顶层副作用」，改挂在被引用的导出链上或独立 entry。
 22. **分层 patch 系统里，单层声明 ≠ 最终状态（0.9.2 skill 误判复盘）**：cordis patch 按 bundle 分层叠加（每层一份 cordis.patch.yml，后层可覆盖前层）——在 dsh-web-app 包层看到 `tool-skill: disabled: true` 就断定「skill 系统被禁」是错的：profile 里其它叠加层重新启用了它。判断服务是否生效**唯一可信的是运行时行为**（真机验证 Agent 可见性），静态读某一层配置会误判。配套教训：①看到反证（消息流里 skill-catalog 注入还在工作）必须先解释反证再下结论，确认偏误会让你对矛盾信号失明；②排查优先找仓库内活先例（app/artifact 的 registerProvider 就是「插件内含 skill 可用」的证据），同类插件的做法比内核源码更快命中真相。插件内含 skill 的正确姿势：`ctx.skills.registerProvider(() => provider)`（artifact/src/skill.ts 15 行模板）——不依赖 skill-filesystem（那是磁盘扫描器，preset 级，默认禁用）。
+23. **ref 同步渲染期陷阱（0.9.4 总根因）**：`refB.current = refA.current` 写渲染体里，组件与目标 DOM 同 commit 挂载时渲染体读 refA.current **必为 null**（ref 赋值在 commit 阶段、渲染体在 commit 前跑）；无 state 变化则无重渲染——refB 永远 null。凡是「事件时要用」的 ref 值，使用处直接读源 ref（`refA.current`），不要做渲染期二次同步。验证盲区配套：该 bug 单节点画布必现、多节点画布被 annotations 加载的重渲染掩盖——**验收场景必须覆盖「最简内容」与「复杂内容」两端**。
+24. **pnpm check 链的 build 产物可能被 tsdown 缓存掩盖**（`grep -cE 'error TS'` 吞掉 build 失败/未跑的 exit code，旧 lib 被静默打包）——发布前 `grep` lib 产物验证目标代码在场，必要时手动 `pnpm build` 重跑。
+25. **dsh plugin add 的路径必须绝对路径**——相对路径被 pnpm 当 git 依赖解析（报「Repository not found」），而且 remove 成功 add 失败会让插件裸奔（node_modules 里整个消失）——装完必须 grep 包内容确认。
 
 ## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
 
