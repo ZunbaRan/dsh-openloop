@@ -15,7 +15,7 @@ export * from './dsl.ts'
 export * from './storage.ts'
 
 export const name = 'openloop-qoder-canvas'
-export const inject = ['tools', 'fs']
+export const inject = ['tools', 'fs', 'skills']
 
 interface CanvasArgs {
   document?: unknown
@@ -36,6 +36,42 @@ function argsOf(args: CanvasArgs): { document: unknown; canvasId: string | undef
 let lastWorkspaceKey = '_no-cwd'
 /** 诊断：最近一次 save 失败原因（M4 排查用；成功则清空） */
 let lastSaveError: string | null = null
+
+/**
+ * 已知设计类 skill（0.9.1 路由）：命中即提示 Agent「html 节点用该 skill 风格」。
+ * 匹配按 skill name；description 不匹配——catalog 描述太长易误判。
+ */
+const DESIGN_SKILLS: readonly { name: string; use: string }[] = [
+  { name: 'baoyu-design', use: 'polished UI mockups, interactive prototypes, visual explorations' },
+  { name: 'huashu-design', use: 'high-fidelity prototypes, slides/PPT, animations, expert-review designs' },
+  { name: 'kami', use: 'typeset documents, white papers, one-pagers, slide decks, landing pages' },
+  { name: 'archify', use: 'architecture/workflow/sequence/data-flow diagrams (standalone HTML + inline SVG)' },
+  { name: 'lieflat-charts', use: 'template-driven data-visualization charts and full-page HTML reports' },
+]
+
+/** 查 skill catalog，返回路由提示文本（无 skill / ctx.skills 缺失 → null） */
+async function designSkillHint(ctx: Context, canvasId: string): Promise<string | null> {
+  // 防御：未 inject 声明的服务属性访问直接 throw（app 包 2026-08-30 同款坑）——
+  // try/catch 包住属性访问本身，任何失败都静默降级（路由提示是增强非依赖）
+  let skills: { list?: (opts?: unknown) => Promise<{ name: string }[]> } | undefined
+  try {
+    skills = (ctx as unknown as { skills?: { list?: (opts?: unknown) => Promise<{ name: string }[]> } }).skills
+  } catch {
+    return null
+  }
+  if (skills === undefined || typeof skills.list !== 'function') return null
+  let installed: string[] = []
+  try {
+    const all = await skills.list()
+    installed = all.map(s => s.name)
+  } catch {
+    return null // catalog 查询失败静默
+  }
+  const hits = DESIGN_SKILLS.filter(d => installed.includes(d.name))
+  if (hits.length === 0) return null
+  const list = hits.map(h => `${h.name} (${h.use})`).join('; ')
+  return `Canvas ${canvasId} created. TIP — design skills detected: ${list}. For rich/free layouts in this canvas, LOAD the matching skill first and follow its style guide when authoring html node sources (annotation feedback works inside them). Structured data content still prefers the DSL node types.`
+}
 
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx: Context, exec: { agent?: { session?: unknown } | null; signal?: unknown }): CanvasStorage {
@@ -71,7 +107,17 @@ export function apply(ctx: Context): void {
   setupCanvasReadEndpoint(ctx, {
     origin: originOf,
     storageFor: (workspaceKey) => new CanvasStorage({ fs: (ctx as unknown as { fs: import('./storage.ts').FsLike }).fs, workspaceKey: workspaceKey === '_no-cwd' ? lastWorkspaceKey : workspaceKey }),
-    diag: () => ({ lastSaveError, lastWorkspaceKey }),
+    diag: async () => {
+      // 0.9.2 诊断增强：skills catalog 快照（路由提示排查用）
+      let skillsDiag: unknown = 'unavailable'
+      try {
+        const skillsCtx = (ctx as unknown as { skills?: { list: () => Promise<{ name: string }[]> } }).skills
+        if (skillsCtx !== undefined) skillsDiag = (await skillsCtx.list()).map(s => s.name)
+      } catch (error) {
+        skillsDiag = `error: ${String(error)}`
+      }
+      return { lastSaveError, lastWorkspaceKey, skills: skillsDiag }
+    },
   })
   ctx.tools.register(defineTool({
     name: 'canvas',
@@ -141,7 +187,11 @@ export function apply(ctx: Context): void {
         ctx.logger?.warn?.(`qoder-canvas storage save failed: ${String(error)}`)
       }
       // JsonValue 兼容：snapshot 整体作为 meta 载荷（presentationMeta 通道直通）
-      return JSON.parse(JSON.stringify({ snapshot })) as unknown as Record<string, never>
+      // skill 路由提示（0.9.1）：检测到已安装的 HTML 设计类 skill 时，提示 Agent
+      // 用其风格写 html 节点（skill catalog 运行时查询；无 skill 时零提示）
+      const skillHint = await designSkillHint(ctx, finalId)
+      const result = JSON.parse(JSON.stringify({ snapshot, ...(skillHint !== null ? { hint: skillHint } : {}) })) as unknown as Record<string, never>
+      return result
     },
     presentCall: () => ({ card: 'generic', title: 'Canvas · rendering', kind: 'other' }),
     presentResult(_args, result) {

@@ -1,0 +1,1 @@
+/Users/loloru/Documents/data/project/openChamber/deepseek-harness-lab/.dsh/skills/kami/skills/kami/SKILL.md

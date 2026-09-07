@@ -1,0 +1,1 @@
+/Users/loloru/Documents/data/project/openChamber/deepseek-harness-lab/.dsh/skills/baoyu-design/skills/baoyu-design/SKILL.md

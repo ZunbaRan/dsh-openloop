@@ -844,7 +844,11 @@ function setupCanvasReadEndpoint(ctx, opts) {
 //#endregion
 //#region src/index.ts
 const name = "openloop-qoder-canvas";
-const inject = ["tools", "fs"];
+const inject = [
+	"tools",
+	"fs",
+	"skills"
+];
 function argsOf(args) {
 	const canvasId = typeof args.canvasId === "string" && args.canvasId.length > 0 ? args.canvasId : void 0;
 	const load = typeof args.load === "string" && args.load.length > 0 ? args.load : void 0;
@@ -861,6 +865,51 @@ function argsOf(args) {
 let lastWorkspaceKey = "_no-cwd";
 /** 诊断：最近一次 save 失败原因（M4 排查用；成功则清空） */
 let lastSaveError = null;
+/**
+* 已知设计类 skill（0.9.1 路由）：命中即提示 Agent「html 节点用该 skill 风格」。
+* 匹配按 skill name；description 不匹配——catalog 描述太长易误判。
+*/
+const DESIGN_SKILLS = [
+	{
+		name: "baoyu-design",
+		use: "polished UI mockups, interactive prototypes, visual explorations"
+	},
+	{
+		name: "huashu-design",
+		use: "high-fidelity prototypes, slides/PPT, animations, expert-review designs"
+	},
+	{
+		name: "kami",
+		use: "typeset documents, white papers, one-pagers, slide decks, landing pages"
+	},
+	{
+		name: "archify",
+		use: "architecture/workflow/sequence/data-flow diagrams (standalone HTML + inline SVG)"
+	},
+	{
+		name: "lieflat-charts",
+		use: "template-driven data-visualization charts and full-page HTML reports"
+	}
+];
+/** 查 skill catalog，返回路由提示文本（无 skill / ctx.skills 缺失 → null） */
+async function designSkillHint(ctx, canvasId) {
+	let skills;
+	try {
+		skills = ctx.skills;
+	} catch {
+		return null;
+	}
+	if (skills === void 0 || typeof skills.list !== "function") return null;
+	let installed = [];
+	try {
+		installed = (await skills.list()).map((s) => s.name);
+	} catch {
+		return null;
+	}
+	const hits = DESIGN_SKILLS.filter((d) => installed.includes(d.name));
+	if (hits.length === 0) return null;
+	return `Canvas ${canvasId} created. TIP — design skills detected: ${hits.map((h) => `${h.name} (${h.use})`).join("; ")}. For rich/free layouts in this canvas, LOAD the matching skill first and follow its style guide when authoring html node sources (annotation feedback works inside them). Structured data content still prefers the DSL node types.`;
+}
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx, exec) {
 	const cwdRaw = (exec.agent?.session)?.header?.cwd;
@@ -897,10 +946,20 @@ function apply(ctx) {
 			fs: ctx.fs,
 			workspaceKey: workspaceKey === "_no-cwd" ? lastWorkspaceKey : workspaceKey
 		}),
-		diag: () => ({
-			lastSaveError,
-			lastWorkspaceKey
-		})
+		diag: async () => {
+			let skillsDiag = "unavailable";
+			try {
+				const skillsCtx = ctx.skills;
+				if (skillsCtx !== void 0) skillsDiag = (await skillsCtx.list()).map((s) => s.name);
+			} catch (error) {
+				skillsDiag = `error: ${String(error)}`;
+			}
+			return {
+				lastSaveError,
+				lastWorkspaceKey,
+				skills: skillsDiag
+			};
+		}
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
@@ -962,10 +1021,11 @@ function apply(ctx) {
 				if (error instanceof CanvasValidationError) return { __error: error.message };
 				return { __error: `canvas document validation failed: ${String(error)}` };
 			}
+			const finalId = targetId ?? generateCanvasId();
 			const snapshot = {
 				kind: "qoder-canvas",
 				version: 1,
-				canvasId: targetId ?? generateCanvasId(),
+				canvasId: finalId,
 				revision: baseRevision + 1,
 				canvas: validated
 			};
@@ -976,7 +1036,11 @@ function apply(ctx) {
 				lastSaveError = error instanceof Error ? `${error.message} :: ${String(error.stack ?? "").slice(0, 400)}` : String(error);
 				ctx.logger?.warn?.(`qoder-canvas storage save failed: ${String(error)}`);
 			}
-			return JSON.parse(JSON.stringify({ snapshot }));
+			const skillHint = await designSkillHint(ctx, finalId);
+			return JSON.parse(JSON.stringify({
+				snapshot,
+				...skillHint !== null ? { hint: skillHint } : {}
+			}));
 		},
 		presentCall: () => ({
 			card: "generic",

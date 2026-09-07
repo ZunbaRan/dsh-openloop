@@ -25,8 +25,7 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body))
 }
 
-export function setupCanvasReadEndpoint(ctx: Context, opts: { storageFor: (workspaceKey: string) => CanvasStorage; origin: () => string; diag?: () => unknown }): void {
-  const injectFn = (ctx as unknown as { inject?: (names: string[], fn: (ws: WebServerLike | undefined) => void) => void }).inject
+export function setupCanvasReadEndpoint(ctx: Context, opts: { storageFor: (workspaceKey: string) => CanvasStorage; origin: () => string; diag?: () => unknown }): void {  const injectFn = (ctx as unknown as { inject?: (names: string[], fn: (ws: WebServerLike | undefined) => void) => void }).inject
   if (typeof injectFn !== 'function') return
   ctx.effect(() => {
     let disposed = false

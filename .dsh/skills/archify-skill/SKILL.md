@@ -1,0 +1,1 @@
+/Users/loloru/Documents/data/project/openChamber/deepseek-harness-lab/.dsh/skills/archify/archify/SKILL.md
