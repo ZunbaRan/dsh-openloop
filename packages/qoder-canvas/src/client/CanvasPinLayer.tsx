@@ -121,14 +121,21 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
   const [marqueeHits, setMarqueeHits] = useState<ElementHit[]>([])
   const marqueeActive = useRef(false)
   const marqueeStart = useRef<{ x: number; y: number } | null>(null)
+  /** 框选实时命中节流：同帧合并一次计算 + 矩形未变跳过重算 */
+  const marqueeRaf = useRef(0)
+  const lastMarqueeRect = useRef<{ left: number; top: number; right: number; bottom: number } | null>(null)
   /** iframe hover 预取竞态序号（旧异步响应丢弃） */
   const hoverIframeSeq = useRef(0)
+  /** iframe hover 探针查询去抖定时器（鼠标稳定 60ms 才发） */
+  const hoverIframeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** 最新 targets（异步 iframe 框选合并时读取——避免闭包旧值） */
   const targetsRef = useRef<readonly AnnotationTarget[]>([])
   targetsRef.current = targets
-  const surfaceRef = useRef<HTMLElement | null>(null)
-  // 每次渲染同步 surface（监听挂在画布容器上——画布会随 snapshot 重渲染，但容器稳定）
-  surfaceRef.current = containerRef.current
+  // 0.9.4 真机根因修复：不使用渲染期同步的 surfaceRef——PinLayer 与 area div 同
+  // commit 挂载时渲染体读 canvasAreaRef.current 必为 null（ref 赋值在 commit 阶段，
+  // 渲染体在 commit 前跑），无 state 变化则无重渲染，surfaceRef 永远 null，hitElement
+  // 永远 return null（单 html 节点画布必现「点不中/框选无反馈」；多节点画布碰巧
+  // 因 annotations 加载重渲染而掩盖）。使用处一律直接读 containerRef.current。
 
   // 0.9.0：mode 广播给全部探针（text 模式 iframe 放行原生划选；其余模式父层接管）
   useEffect(() => {
@@ -162,11 +169,12 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
    * 返回 iframe 占位命中（同步）；探针细粒度命中走 hover 预取缓存（异步，见 onPointerMove）。
    */
   const hitElement = (x: number, y: number): ElementHit | null => {
-    const surface = surfaceRef.current
+    const surface = containerRef.current
     if (surface === null) return null
+    const dbgStack: string[] = []
     for (const el of document.elementsFromPoint(x, y)) {
-      if (el.closest('[data-openloop-canvas-pin-layer]') !== null) continue
-      if (!surface.contains(el)) continue
+      if (el.closest('[data-openloop-canvas-pin-layer]') !== null) { dbgStack.push(`${el.tagName}:pin`); continue }
+      if (!surface.contains(el)) { dbgStack.push(`${el.tagName}:!in`); continue }
       // html 节点：命中 iframe（或其容器）——外层只能给节点级占位，细粒度由探针补
       const nodeEl = el.closest('[data-canvas-node]')
       if (nodeEl === null || !surface.contains(nodeEl)) continue
@@ -190,6 +198,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         text: text.length > 0 ? text.slice(0, 40) : undefined,
       }
     }
+    
     return null
   }
 
@@ -198,10 +207,14 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
    * point/marquee 两查询；命中返回带 iframeHit 的 ElementHit（nodeId 归属 html 节点）。
    */
   const hitIframeAt = async (x: number, y: number): Promise<ElementHit | null> => {
-    const surface = surfaceRef.current
-    if (surface === null) return null
+    const surface = containerRef.current
+    const log = (m: string): void => {
+      
+    }
+    if (surface === null) { log('surface-null'); return null }
     const rec = frameAtAny(x, y)
-    if (rec === null || !surface.contains(rec.frame)) return null
+    if (rec === null) { log(`frameAtAny-null xy=${Math.round(x)},${Math.round(y)}`); return null }
+    if (!surface.contains(rec.frame)) { log(`not-in-surface node=${rec.nodeId}`); return null }
     const coords = toFrameCoords(rec, x, y)
     const hit = await probeHitAt(rec, coords.x, coords.y)
     if (hit === null) return { nodeId: rec.nodeId, domPath: '', tag: 'iframe' } // 降级：节点级
@@ -216,7 +229,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
    *   （如只框住 table 第一列 → 选中该列的若干 td，而不是整个 table）
    */
   const hitMarquee = (rect: { left: number; top: number; right: number; bottom: number }): AnnotationTarget[] => {
-    const surface = surfaceRef.current
+    const surface = containerRef.current
     if (surface === null) return []
     const intersects = (r: DOMRect): boolean =>
       !(r.right < rect.left || r.left > rect.right || r.bottom < rect.top || r.top > rect.bottom)
@@ -240,8 +253,12 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         continue
       }
       // 元素级：收集相交的叶子元素（无 element 子节点——td/span/叶子 div/svg path 等）
+      // 真机修复（2026-09-07）：跳过 IFRAME——父层 DOM 里 iframe 无子元素会被
+      // 当叶子误收为 element target（框选 html 区域时把整块 iframe 当叶子选中，
+      // 而不是深入 iframe 内元素）；iframe 区域的命中一律交给 probeMarquee 探针路径
       const walk = (el: Element): void => {
         for (const child of el.children) {
+          if (child.tagName === 'IFRAME') continue
           if (child.children.length === 0) {
             const cr = child.getBoundingClientRect()
             if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
@@ -269,7 +286,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
 
   // 文本划选：Range 索引（与 S4 相同）
   const buildRangeIndex = (range: Range): { nodeId: string; text: string }[] => {
-    const surface = surfaceRef.current
+    const surface = containerRef.current
     if (surface === null) return []
     const out: { nodeId: string; text: string }[] = []
     for (const el of surface.querySelectorAll('[data-canvas-node]')) {
@@ -296,7 +313,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
   const hitText = (): { nodeId: string; text: string }[] => {
     const sel = window.getSelection()
     if (sel === null || sel.rangeCount === 0 || sel.isCollapsed) return []
-    const surface = surfaceRef.current
+    const surface = containerRef.current
     if (surface === null) return []
     const range = sel.getRangeAt(0)
     if (!surface.contains(range.commonAncestorContainer)) return []
@@ -320,27 +337,45 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
       if (inFloatPanel(e)) { setHovered(null); return }
       if (mode === 'point' && !marqueeActive.current) {
         const domHit = hitElement(e.clientX, e.clientY)
+        
         if (domHit !== null && domHit.tag === 'iframe') {
-          // html 节点 iframe：异步探针命中（rAF 节流 + 序号防竞态——旧响应丢弃）
+          // html 节点 iframe：异步探针命中。真机教训（2026-09-07 补充信息「错误的
+          // 选中」）：hover 移动中每 move 都 postMessage 查探针——复杂设计稿下探针
+          // 消息拥堵，120ms 超时一律降级为节点级大框（高亮错位/过大的根源）。
+          // 改为【去抖 60ms】：鼠标稳定后才发一次探针查询；移动中只显示占位框
           const seq = ++hoverIframeSeq.current
           setHovered(domHit) // 先给节点级占位（无闪烁）
-          void hitIframeAt(e.clientX, e.clientY).then(h => {
-            if (seq === hoverIframeSeq.current && h !== null) setHovered(h)
-          })
+          const ex = e.clientX, ey = e.clientY
+          if (hoverIframeTimer.current !== null) clearTimeout(hoverIframeTimer.current)
+          hoverIframeTimer.current = setTimeout(() => {
+            hoverIframeTimer.current = null
+            void hitIframeAt(ex, ey).then(h => {
+              if (seq === hoverIframeSeq.current && h !== null) setHovered(h)
+            })
+          }, 60)
         } else {
           hoverIframeSeq.current++
           setHovered(domHit)
         }
       } else if (marqueeActive.current) {
         setMarquee(prev => prev !== null ? { ...prev, x1: e.clientX, y1: e.clientY } : null)
-        // 实时反馈：矩形命中元素即时亮框（用 ref 起点算，避免 state 闭包旧值；元素级）
+        // 实时反馈：矩形命中元素即时亮框（rAF 节流——真机教训 2026-09-07：
+        // 每帧全量 querySelectorAll + 全叶子遍历 + getBoundingClientRect 是框选卡顿
+        // 根因；同帧合并为一次计算，且矩形未变时跳过重算）
         const start = marqueeStart.current
-        if (start !== null) {
-          const rect = {
-            left: Math.min(start.x, e.clientX), right: Math.max(start.x, e.clientX),
-            top: Math.min(start.y, e.clientY), bottom: Math.max(start.y, e.clientY),
-          }
-          setMarqueeHits(hitMarquee(rect).map(targetToHit).filter((h): h is ElementHit => h !== null))
+        if (start !== null && marqueeRaf.current === 0) {
+          const ex = e.clientX, ey = e.clientY
+          marqueeRaf.current = requestAnimationFrame(() => {
+            marqueeRaf.current = 0
+            const rect = {
+              left: Math.min(start.x, ex), right: Math.max(start.x, ex),
+              top: Math.min(start.y, ey), bottom: Math.max(start.y, ey),
+            }
+            const last = lastMarqueeRect.current
+            if (last !== null && Math.abs(last.left - rect.left) < 2 && Math.abs(last.right - rect.right) < 2 && Math.abs(last.top - rect.top) < 2 && Math.abs(last.bottom - rect.bottom) < 2) return
+            lastMarqueeRect.current = rect
+            setMarqueeHits(hitMarquee(rect).map(targetToHit).filter((h): h is ElementHit => h !== null))
+          })
         }
       }
     }
@@ -407,6 +442,8 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
       } else if (marqueeActive.current) {
         marqueeActive.current = false
         marqueeStart.current = null
+        if (marqueeRaf.current !== 0) { cancelAnimationFrame(marqueeRaf.current); marqueeRaf.current = 0 }
+        lastMarqueeRect.current = null
         setMarqueeHits([])
         setMarquee(prev => {
           if (prev !== null) {
@@ -418,7 +455,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
               // DOM 命中同步发；矩形扫过的 html iframe 异步补探针叶子命中
               callbacks.onTargetsChange(hitMarquee(rect))
               void (async () => {
-                const surface = surfaceRef.current
+                const surface = containerRef.current
                 if (surface === null) return
                 for (const rec of allFrameRecords()) {
                   const fr = rec.frame.getBoundingClientRect()
@@ -461,7 +498,12 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
       }
     }
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') { setLocked(null); setMarquee(null); setMarqueeHits([]); callbacks.onTargetsChange([]) }
+      if (e.key === 'Escape') {
+        setLocked(null); setMarquee(null); setMarqueeHits([])
+        if (marqueeRaf.current !== 0) { cancelAnimationFrame(marqueeRaf.current); marqueeRaf.current = 0 }
+        lastMarqueeRect.current = null
+        callbacks.onTargetsChange([])
+      }
       if (e.key === 'Enter' && (e.target === document.body || e.target === container)) callbacks.onSave()
     }
     container.addEventListener('pointermove', onPointerMove)
@@ -487,7 +529,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
       <div data-openloop-canvas-pin-layer style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20 }}>
         {/* hover 高亮（元素级）+ DevTools 式 tooltip */}
         {hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? (
-          <HighlightEl surface={surfaceRef.current} hit={hovered} borderStyle="outline" nodeType={snapshot.canvas.nodes.find(n => n.id === hovered.nodeId)?.type} />
+          <HighlightEl surface={containerRef.current} hit={hovered} borderStyle="outline" nodeType={snapshot.canvas.nodes.find(n => n.id === hovered.nodeId)?.type} />
         ) : null}
         {/* 选中高亮（S8：targets 驱动——点选 1 个带 tooltip；框选 N 个全部亮框不带 tooltip。
             0.9.0：html-element target 的 rect 由探针数据画（HighlightEl iframeHit 分支）——
@@ -500,7 +542,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
               : { nodeId: t.id, domPath: '', tag: 'div' }
             return (
               <HighlightEl key={`sel-${t.id}-${t.kind === 'element' ? t.domPath : 'root'}`}
-                surface={surfaceRef.current} hit={hit} borderStyle="solid"
+                surface={containerRef.current} hit={hit} borderStyle="solid"
                 nodeType={snapshot.canvas.nodes.find(n => n.id === t.id)?.type}
                 showTooltip={targets.length === 1} />
             )
@@ -509,7 +551,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
             // 节点级占位框（iframe 整块）——锁定时有精确框（locked 状态驱动），targets 回显够用
             return (
               <HighlightEl key={`sel-${t.id}-${t.domPath}`}
-                surface={surfaceRef.current} hit={{ nodeId: t.id, domPath: '', tag: 'iframe' }} borderStyle="solid"
+                surface={containerRef.current} hit={{ nodeId: t.id, domPath: '', tag: 'iframe' }} borderStyle="solid"
                 nodeType="html" showTooltip={targets.length === 1} />
             )
           }
@@ -517,7 +559,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         })}
         {/* 框选拖拽中的实时命中高亮（outline，无 tooltip；元素级 domPath 定位） */}
         {marqueeHits.map(h => (
-          <HighlightEl key={`mq-${h.nodeId}-${h.domPath}`} surface={surfaceRef.current}
+          <HighlightEl key={`mq-${h.nodeId}-${h.domPath}`} surface={containerRef.current}
             hit={h} borderStyle="outline"
             nodeType={undefined} showTooltip={false} />
         ))}
@@ -533,7 +575,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         ) : null}
         {/* 已存注释 badges（node 级定位） */}
         {[...annotationsByNode.entries()].map(([nodeId, list]) => (
-          <NodeBadgeAnchor key={nodeId} surface={surfaceRef.current} nodeId={nodeId}>
+          <NodeBadgeAnchor key={nodeId} surface={containerRef.current} nodeId={nodeId}>
             {list.map(({ ann, n }) => (
               <PinBadge key={ann.id} n={n} annotation={ann}
                 onEdit={() => callbacks.onEditAnnotation(ann)}

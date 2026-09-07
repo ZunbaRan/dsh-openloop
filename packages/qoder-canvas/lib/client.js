@@ -219,7 +219,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		//#region src/client/html-bridge.ts
-		const READY_TIMEOUT_MS = 800;
+		const READY_TIMEOUT_MS = 3e3;
 		let reqSeq = 1;
 		const registry = /* @__PURE__ */ new Map();
 		const listeners$1 = /* @__PURE__ */ new Set();
@@ -234,7 +234,7 @@ window.__ModuleLoader__.load({
 			const d = ev.data;
 			if (d === null || typeof d !== "object" || d["__openloopProbe"] !== true) return;
 			for (const rec of registry.values()) {
-				if (rec.token !== d["token"] || rec.frame.contentWindow !== ev.source) continue;
+				if (!(d["t"] === "hello" ? rec.frame.contentWindow === ev.source : rec.token === d["token"]) || rec.frame.contentWindow !== ev.source) continue;
 				const t = d["t"];
 				if (t === "hello") rec.frame.contentWindow?.postMessage({
 					__openloopProbe: true,
@@ -364,8 +364,10 @@ window.__ModuleLoader__.load({
 				y: clientY - r.top
 			};
 		}
-		/** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级） */
-		function probeHitAt(rec, x, y, timeoutMs = 120) {
+		/** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级。
+		* 真机教训：120ms 对复杂 HTML 过紧（postMessage 往返 + 大 DOM 命中计算 + 主线程
+		* 竞争）——点选体验优先放宽默认 300ms） */
+		function probeHitAt(rec, x, y, timeoutMs = 300) {
 			if (!rec.ready || rec.degraded) return Promise.resolve(null);
 			return new Promise((resolve) => {
 				const reqId = reqSeq++;
@@ -387,8 +389,8 @@ window.__ModuleLoader__.load({
 				}, "*");
 			});
 		}
-		/** 框选查询（同上；返回叶子元素命中数组） */
-		function probeMarqueeIn(rec, rect, timeoutMs = 200) {
+		/** 框选查询（同上；返回叶子元素命中数组。默认 400ms——复杂 HTML 多叶子遍历） */
+		function probeMarqueeIn(rec, rect, timeoutMs = 400) {
 			if (!rec.ready || rec.degraded) return Promise.resolve([]);
 			return new Promise((resolve) => {
 				const reqId = reqSeq++;
@@ -1498,13 +1500,16 @@ window.__ModuleLoader__.load({
 			const [marqueeHits, setMarqueeHits] = (0, react.useState)([]);
 			const marqueeActive = (0, react.useRef)(false);
 			const marqueeStart = (0, react.useRef)(null);
+			/** 框选实时命中节流：同帧合并一次计算 + 矩形未变跳过重算 */
+			const marqueeRaf = (0, react.useRef)(0);
+			const lastMarqueeRect = (0, react.useRef)(null);
 			/** iframe hover 预取竞态序号（旧异步响应丢弃） */
 			const hoverIframeSeq = (0, react.useRef)(0);
+			/** iframe hover 探针查询去抖定时器（鼠标稳定 60ms 才发） */
+			const hoverIframeTimer = (0, react.useRef)(null);
 			/** 最新 targets（异步 iframe 框选合并时读取——避免闭包旧值） */
 			const targetsRef = (0, react.useRef)([]);
 			targetsRef.current = targets;
-			const surfaceRef = (0, react.useRef)(null);
-			surfaceRef.current = containerRef.current;
 			(0, react.useEffect)(() => {
 				broadcastProbeMode(mode === "text" ? "text" : "off");
 			}, [mode]);
@@ -1537,11 +1542,18 @@ window.__ModuleLoader__.load({
 			* 返回 iframe 占位命中（同步）；探针细粒度命中走 hover 预取缓存（异步，见 onPointerMove）。
 			*/
 			const hitElement = (x, y) => {
-				const surface = surfaceRef.current;
+				const surface = containerRef.current;
 				if (surface === null) return null;
+				const dbgStack = [];
 				for (const el of document.elementsFromPoint(x, y)) {
-					if (el.closest("[data-openloop-canvas-pin-layer]") !== null) continue;
-					if (!surface.contains(el)) continue;
+					if (el.closest("[data-openloop-canvas-pin-layer]") !== null) {
+						dbgStack.push(`${el.tagName}:pin`);
+						continue;
+					}
+					if (!surface.contains(el)) {
+						dbgStack.push(`${el.tagName}:!in`);
+						continue;
+					}
 					const nodeEl = el.closest("[data-canvas-node]");
 					if (nodeEl === null || !surface.contains(nodeEl)) continue;
 					const nodeId = nodeEl.getAttribute("data-canvas-node");
@@ -1572,10 +1584,17 @@ window.__ModuleLoader__.load({
 			* point/marquee 两查询；命中返回带 iframeHit 的 ElementHit（nodeId 归属 html 节点）。
 			*/
 			const hitIframeAt = async (x, y) => {
-				const surface = surfaceRef.current;
+				const surface = containerRef.current;
 				if (surface === null) return null;
 				const rec = frameAtAny(x, y);
-				if (rec === null || !surface.contains(rec.frame)) return null;
+				if (rec === null) {
+					`${Math.round(x)}${Math.round(y)}`;
+					return null;
+				}
+				if (!surface.contains(rec.frame)) {
+					`${rec.nodeId}`;
+					return null;
+				}
 				const coords = toFrameCoords(rec, x, y);
 				const hit = await probeHitAt(rec, coords.x, coords.y);
 				if (hit === null) return {
@@ -1599,7 +1618,7 @@ window.__ModuleLoader__.load({
 			*   （如只框住 table 第一列 → 选中该列的若干 td，而不是整个 table）
 			*/
 			const hitMarquee = (rect) => {
-				const surface = surfaceRef.current;
+				const surface = containerRef.current;
 				if (surface === null) return [];
 				const intersects = (r) => !(r.right < rect.left || r.left > rect.right || r.bottom < rect.top || r.top > rect.bottom);
 				const intersectArea = (r) => {
@@ -1625,29 +1644,32 @@ window.__ModuleLoader__.load({
 						continue;
 					}
 					const walk = (el) => {
-						for (const child of el.children) if (child.children.length === 0) {
-							const cr = child.getBoundingClientRect();
-							if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
-								const domPath = domPathWithin(nodeEl, child);
-								const text = (child.textContent ?? "").trim();
-								const tag = child.tagName.toLowerCase();
-								out.push({
-									kind: "element",
-									id: nodeId,
-									label: `${type} ${tag}${text.length > 0 ? ` "${text.slice(0, 20)}"` : ""}`,
-									tag,
-									domPath,
-									text: text.length > 0 ? text.slice(0, 40) : void 0
-								});
-							}
-						} else walk(child);
+						for (const child of el.children) {
+							if (child.tagName === "IFRAME") continue;
+							if (child.children.length === 0) {
+								const cr = child.getBoundingClientRect();
+								if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
+									const domPath = domPathWithin(nodeEl, child);
+									const text = (child.textContent ?? "").trim();
+									const tag = child.tagName.toLowerCase();
+									out.push({
+										kind: "element",
+										id: nodeId,
+										label: `${type} ${tag}${text.length > 0 ? ` "${text.slice(0, 20)}"` : ""}`,
+										tag,
+										domPath,
+										text: text.length > 0 ? text.slice(0, 40) : void 0
+									});
+								}
+							} else walk(child);
+						}
 					};
 					walk(nodeEl);
 				}
 				return out;
 			};
 			const buildRangeIndex = (range) => {
-				const surface = surfaceRef.current;
+				const surface = containerRef.current;
 				if (surface === null) return [];
 				const out = [];
 				for (const el of surface.querySelectorAll("[data-canvas-node]")) {
@@ -1676,7 +1698,7 @@ window.__ModuleLoader__.load({
 			const hitText = () => {
 				const sel = window.getSelection();
 				if (sel === null || sel.rangeCount === 0 || sel.isCollapsed) return [];
-				const surface = surfaceRef.current;
+				const surface = containerRef.current;
 				if (surface === null) return [];
 				const range = sel.getRangeAt(0);
 				if (!surface.contains(range.commonAncestorContainer)) return [];
@@ -1701,9 +1723,14 @@ window.__ModuleLoader__.load({
 						if (domHit !== null && domHit.tag === "iframe") {
 							const seq = ++hoverIframeSeq.current;
 							setHovered(domHit);
-							hitIframeAt(e.clientX, e.clientY).then((h) => {
-								if (seq === hoverIframeSeq.current && h !== null) setHovered(h);
-							});
+							const ex = e.clientX, ey = e.clientY;
+							if (hoverIframeTimer.current !== null) clearTimeout(hoverIframeTimer.current);
+							hoverIframeTimer.current = setTimeout(() => {
+								hoverIframeTimer.current = null;
+								hitIframeAt(ex, ey).then((h) => {
+									if (seq === hoverIframeSeq.current && h !== null) setHovered(h);
+								});
+							}, 60);
 						} else {
 							hoverIframeSeq.current++;
 							setHovered(domHit);
@@ -1715,14 +1742,21 @@ window.__ModuleLoader__.load({
 							y1: e.clientY
 						} : null);
 						const start = marqueeStart.current;
-						if (start !== null) {
-							const rect = {
-								left: Math.min(start.x, e.clientX),
-								right: Math.max(start.x, e.clientX),
-								top: Math.min(start.y, e.clientY),
-								bottom: Math.max(start.y, e.clientY)
-							};
-							setMarqueeHits(hitMarquee(rect).map(targetToHit).filter((h) => h !== null));
+						if (start !== null && marqueeRaf.current === 0) {
+							const ex = e.clientX, ey = e.clientY;
+							marqueeRaf.current = requestAnimationFrame(() => {
+								marqueeRaf.current = 0;
+								const rect = {
+									left: Math.min(start.x, ex),
+									right: Math.max(start.x, ex),
+									top: Math.min(start.y, ey),
+									bottom: Math.max(start.y, ey)
+								};
+								const last = lastMarqueeRect.current;
+								if (last !== null && Math.abs(last.left - rect.left) < 2 && Math.abs(last.right - rect.right) < 2 && Math.abs(last.top - rect.top) < 2 && Math.abs(last.bottom - rect.bottom) < 2) return;
+								lastMarqueeRect.current = rect;
+								setMarqueeHits(hitMarquee(rect).map(targetToHit).filter((h) => h !== null));
+							});
 						}
 					}
 				};
@@ -1800,6 +1834,11 @@ window.__ModuleLoader__.load({
 					} else if (marqueeActive.current) {
 						marqueeActive.current = false;
 						marqueeStart.current = null;
+						if (marqueeRaf.current !== 0) {
+							cancelAnimationFrame(marqueeRaf.current);
+							marqueeRaf.current = 0;
+						}
+						lastMarqueeRect.current = null;
 						setMarqueeHits([]);
 						setMarquee((prev) => {
 							if (prev !== null) {
@@ -1812,7 +1851,7 @@ window.__ModuleLoader__.load({
 								if (rect.right - rect.left > 6 && rect.bottom - rect.top > 6) {
 									callbacks.onTargetsChange(hitMarquee(rect));
 									(async () => {
-										const surface = surfaceRef.current;
+										const surface = containerRef.current;
 										if (surface === null) return;
 										for (const rec of allFrameRecords()) {
 											const fr = rec.frame.getBoundingClientRect();
@@ -1860,6 +1899,11 @@ window.__ModuleLoader__.load({
 						setLocked(null);
 						setMarquee(null);
 						setMarqueeHits([]);
+						if (marqueeRaf.current !== 0) {
+							cancelAnimationFrame(marqueeRaf.current);
+							marqueeRaf.current = 0;
+						}
+						lastMarqueeRect.current = null;
 						callbacks.onTargetsChange([]);
 					}
 					if (e.key === "Enter" && (e.target === document.body || e.target === container)) callbacks.onSave();
@@ -1890,7 +1934,7 @@ window.__ModuleLoader__.load({
 				},
 				children: [
 					hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
-						surface: surfaceRef.current,
+						surface: containerRef.current,
 						hit: hovered,
 						borderStyle: "outline",
 						nodeType: snapshot.canvas.nodes.find((n) => n.id === hovered.nodeId)?.type
@@ -1908,7 +1952,7 @@ window.__ModuleLoader__.load({
 								tag: "div"
 							};
 							return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
-								surface: surfaceRef.current,
+								surface: containerRef.current,
 								hit,
 								borderStyle: "solid",
 								nodeType: snapshot.canvas.nodes.find((n) => n.id === t.id)?.type,
@@ -1916,7 +1960,7 @@ window.__ModuleLoader__.load({
 							}, `sel-${t.id}-${t.kind === "element" ? t.domPath : "root"}`);
 						}
 						if (t.kind === "html-element") return /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
-							surface: surfaceRef.current,
+							surface: containerRef.current,
 							hit: {
 								nodeId: t.id,
 								domPath: "",
@@ -1929,7 +1973,7 @@ window.__ModuleLoader__.load({
 						return null;
 					}),
 					marqueeHits.map((h) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
-						surface: surfaceRef.current,
+						surface: containerRef.current,
 						hit: h,
 						borderStyle: "outline",
 						nodeType: void 0,
@@ -1947,7 +1991,7 @@ window.__ModuleLoader__.load({
 						zIndex: 50
 					} }) : null,
 					[...annotationsByNode.entries()].map(([nodeId, list]) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(NodeBadgeAnchor, {
-						surface: surfaceRef.current,
+						surface: containerRef.current,
 						nodeId,
 						children: list.map(({ ann, n }) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(PinBadge, {
 							n,

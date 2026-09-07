@@ -41,7 +41,9 @@ interface FrameRecord {
   readonly pending: Map<number, (hit: unknown) => void>
 }
 
-const READY_TIMEOUT_MS = 800
+// 真机教训（2026-09-07）：800ms 对复杂 HTML 设计稿过紧（大 srcdoc 渲染慢 +
+// 主线程繁忙时 hello→init 往返延迟）——误判降级导致「点击只能选整块」
+const READY_TIMEOUT_MS = 3000
 let reqSeq = 1
 
 const registry = new Map<string, FrameRecord>() // key: nodeId
@@ -60,9 +62,13 @@ if (typeof window !== 'undefined') {
   window.addEventListener('message', (ev: MessageEvent) => {
     const d = ev.data as Record<string, unknown> | null
     if (d === null || typeof d !== 'object' || d['__openloopProbe'] !== true) return
+    // 诊断日志（0.9.4 排查期保留——走 window 数组，宿主 console 可能被接管）
+    
     // 按 token 找记录（iframe 的 ev.source 与 contentWindow 对齐双保险）
+    // 特例：hello 无 token（探针未 init 前拉握手）——按 ev.source 匹配 frame
     for (const rec of registry.values()) {
-      if (rec.token !== d['token'] || rec.frame.contentWindow !== ev.source) continue
+      const tokenMatch = d['t'] === 'hello' ? rec.frame.contentWindow === ev.source : rec.token === d['token']
+      if (!tokenMatch || rec.frame.contentWindow !== ev.source) continue
       const t = d['t']
       if (t === 'hello') {
         // 探针拉起握手：脚本已执行（监听已挂）——（重）发 init 确保 token 必达
@@ -194,22 +200,32 @@ export function toFrameCoords(rec: FrameRecord, clientX: number, clientY: number
   return { x: clientX - r.left, y: clientY - r.top }
 }
 
-/** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级） */
-export function probeHitAt(rec: FrameRecord, x: number, y: number, timeoutMs = 120): Promise<ProbeHit | null> {
-  if (!rec.ready || rec.degraded) return Promise.resolve(null)
+/** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级。
+ * 真机教训：120ms 对复杂 HTML 过紧（postMessage 往返 + 大 DOM 命中计算 + 主线程
+ * 竞争）——点选体验优先放宽默认 300ms） */
+export function probeHitAt(rec: FrameRecord, x: number, y: number, timeoutMs = 300): Promise<ProbeHit | null> {
+  if (!rec.ready || rec.degraded) {
+    
+    return Promise.resolve(null)
+  }
   return new Promise(resolve => {
     const reqId = reqSeq++
-    const timer = setTimeout(() => { rec.pending.delete(reqId); resolve(null) }, timeoutMs)
+    const timer = setTimeout(() => {
+      rec.pending.delete(reqId)
+      
+      resolve(null)
+    }, timeoutMs)
     rec.pending.set(reqId, hit => {
       clearTimeout(timer)
       resolve(hit as ProbeHit | null)
     })
+    
     rec.frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'hit', token: rec.token, reqId, x, y }, '*')
   })
 }
 
-/** 框选查询（同上；返回叶子元素命中数组） */
-export function probeMarqueeIn(rec: FrameRecord, rect: ProbeRect, timeoutMs = 200): Promise<ProbeHit[]> {
+/** 框选查询（同上；返回叶子元素命中数组。默认 400ms——复杂 HTML 多叶子遍历） */
+export function probeMarqueeIn(rec: FrameRecord, rect: ProbeRect, timeoutMs = 400): Promise<ProbeHit[]> {
   if (!rec.ready || rec.degraded) return Promise.resolve([])
   return new Promise(resolve => {
     const reqId = reqSeq++
