@@ -203,7 +203,7 @@ export function toFrameCoords(rec: FrameRecord, clientX: number, clientY: number
 /** 点查询（探针 ready 才有效；degraded/未 ready 返回 null → 走节点级降级。
  * 真机教训：120ms 对复杂 HTML 过紧（postMessage 往返 + 大 DOM 命中计算 + 主线程
  * 竞争）——点选体验优先放宽默认 300ms） */
-export function probeHitAt(rec: FrameRecord, x: number, y: number, timeoutMs = 300): Promise<ProbeHit | null> {
+export function probeHitAt(rec: FrameRecord, x: number, y: number, timeoutMs = 500): Promise<ProbeHit | null> {
   if (!rec.ready || rec.degraded) {
     
     return Promise.resolve(null)

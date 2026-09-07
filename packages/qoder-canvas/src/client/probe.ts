@@ -64,10 +64,32 @@ const PROBE_SOURCE = `(function () {
     return { x: r.left, y: r.top, w: r.width, h: r.height };
   }
   function hitOf(el) {
-    var text = (el.textContent || '').trim();
+    // 真机教训（2026-09-07 用户 kami 设计稿实测）：textContent/outerHTML 会序列化
+    // 整个子树——hover 到大容器（几百上千后代）时计算爆炸，probeHitAt 300ms 超时
+    // 降级为节点级大框（「还是只能选最外层」）。
+    // 大元素降级：text 只取【自身直接文本节点】（不递归子树）；snippet 对超多
+    // 后代的容器给骨架版（tag+属性+子数），不序列化全树。
+    var isBig = el.querySelectorAll('*').length > 60;
+    var text = '';
+    if (isBig) {
+      var direct = '';
+      for (var ni = 0; ni < el.childNodes.length; ni++) {
+        var cn = el.childNodes[ni];
+        if (cn.nodeType === 3) direct += cn.textContent;
+      }
+      text = direct.trim();
+    } else {
+      text = (el.textContent || '').trim();
+    }
     var snippet = '';
-    try { snippet = el.outerHTML || ''; } catch (e) {}
-    if (snippet.length > 600) snippet = snippet.slice(0, 600);
+    if (isBig) {
+      var openTag = '';
+      try { openTag = (el.outerHTML || '').split('>')[0] || ''; } catch (e) {}
+      snippet = openTag + '> …(' + el.querySelectorAll('*').length + ' children)</' + (el.tagName ? el.tagName.toLowerCase() : 'node') + '>';
+    } else {
+      try { snippet = el.outerHTML || ''; } catch (e) {}
+      if (snippet.length > 600) snippet = snippet.slice(0, 600);
+    }
     return {
       domPath: domPath(el),
       tag: el.tagName ? el.tagName.toLowerCase() : 'node',
