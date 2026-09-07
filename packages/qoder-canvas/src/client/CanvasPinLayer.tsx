@@ -11,10 +11,10 @@
  * 设计参照（QODER_CANVAS_SIDEBAR §3）：零蒙层拦截，hover 高亮 → 点击锁定 →
  * targets 气泡 → 评注 → 结构化草稿（canvas-annotations.ts）。
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
 import type { CanvasSnapshot } from '../dsl.ts'
 import type { AnnotationTarget, CanvasAnnotation } from './canvas-annotations.ts'
-import { broadcastProbeMode, frameAtAny, frameRectToContainer, onProbeSelection, probeHitAt, probeMarqueeIn, toFrameCoords, allFrameRecords, type FrameRecord, type ProbeRect } from './html-bridge.ts'
+import { broadcastProbeMode, frameAtAny, frameRectToContainer, onProbeSelection, onBridgeChange, probeHitAt, probeMarqueeIn, toFrameCoords, allFrameRecords, type FrameRecord, type ProbeRect } from './html-bridge.ts'
 import type { ProbeHit } from './probe.ts'
 
 export type PinMode = 'point' | 'marquee' | 'text'
@@ -141,6 +141,10 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
   useEffect(() => {
     broadcastProbeMode(mode === 'text' ? 'text' : 'off')
   }, [mode])
+
+  // 0.9.6：bridge 状态变化（ready/degraded/高度自适应）→ 重渲染（捕获层/高亮跟随 iframe 尺寸）
+  const [, forceRender] = useReducer((x: number) => x + 1, 0)
+  useEffect(() => onBridgeChange(forceRender), [])
 
   // 0.9.0：探针划字订阅 → text 模式下 iframe 内划选直接产 target
   useEffect(() => {
@@ -527,6 +531,14 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
       {/* 光标样式注入容器 */}
       <style>{`[data-openloop-canvas-workbench] [data-openloop-canvas]{ cursor: ${cursor}; }`}</style>
       <div data-openloop-canvas-pin-layer style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 20 }}>
+        {/* 0.9.6 透明捕获层（原计划增强档设计，实现时漏掉的【总根因】）：
+            真实鼠标在 iframe 上时事件在 iframe 独立文档内消化，父页面 area 收不到
+            任何 pointer 事件——捕获层盖在 iframe 上方（父页面 DOM），事件被它接收
+            后冒泡到 area 监听器。text 模式不挂（放行 iframe 原生划选，探针
+            selectionchange 上报）。hitElement 跳过 pin-layer 内部元素已自动覆盖它。 */}
+        {mode !== 'text' && snapshot.canvas.nodes.filter(n => n.type === 'html').map(n => (
+          <IframeCapture key={`cap-${n.id}`} surface={containerRef.current} nodeId={n.id} />
+        ))}
         {/* hover 高亮（元素级）+ DevTools 式 tooltip */}
         {hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? (
           <HighlightEl surface={containerRef.current} hit={hovered} borderStyle="outline" nodeType={snapshot.canvas.nodes.find(n => n.id === hovered.nodeId)?.type} />
@@ -612,6 +624,26 @@ function domPathWithin(ancestor: Element, el: Element): string {
     cur = cur.parentElement
   }
   return parts.join(' > ')
+}
+
+/** iframe 透明捕获层：覆盖在 html 节点 iframe 上方，把鼠标事件引回父页面 DOM 树 */
+function IframeCapture({ surface, nodeId }: { surface: HTMLElement | null; nodeId: string }): ReactNode {
+  if (surface === null) return null
+  const frameEl = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(nodeId)}"] iframe`)
+  if (frameEl === null) return null
+  const box = surface.getBoundingClientRect()
+  const r = frameEl.getBoundingClientRect()
+  if (r.width === 0 || r.height === 0) return null
+  return (
+    <div
+      data-iframe-capture={nodeId}
+      style={{
+        position: 'absolute', left: r.left - box.left, top: r.top - box.top,
+        width: r.width, height: r.height,
+        pointerEvents: 'auto', zIndex: 25, background: 'transparent',
+      }}
+    />
+  )
 }
 
 /** badge 锚点：包一层 node 元素尺寸的 absolute 容器，角标钉在右上 */

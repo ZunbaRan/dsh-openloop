@@ -72,12 +72,16 @@ if (typeof window !== 'undefined') {
       const t = d['t']
       if (t === 'hello') {
         // 探针拉起握手：脚本已执行（监听已挂）——（重）发 init 确保 token 必达
-        rec.frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'init', token: rec.token }, '*')
+        // 0.9.6 根因 2：init 带当前 mode——否则用户在探针 ready 前切了划字，
+        // mode 广播丢失，探针永远停 'off' 不上报 selection
+        rec.frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'init', token: rec.token, mode: currentMode }, '*')
       } else if (t === 'ready') {
         rec.ready = true
         rec.degraded = false
         const h = d['height']
         if (typeof h === 'number' && h > 0) rec.height = h
+        // ready 后补发当前 mode（用户在 ready 前切模式的广播可能丢失——双保险）
+        rec.frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'mode', token: rec.token, mode: currentMode }, '*')
         emit()
       } else if (t === 'height') {
         const h = d['height']
@@ -120,7 +124,7 @@ export function registerProbeFrame(nodeId: string, frame: HTMLIFrameElement): vo
   const rec: FrameRecord = { nodeId, frame, token, ready: false, degraded: false, height: 0, mountedAt: Date.now(), pending: new Map() }
   registry.set(nodeId, rec)
   // 握手：iframe onload 后探针已在监听——发 init（含当前 mode 由 PinLayer 切换时补发）
-  frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'init', token }, '*')
+  frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'init', token, mode: currentMode }, '*')
   // 超时降级
   setTimeout(() => {
     if (rec.ready === false && registry.get(nodeId) === rec) {
@@ -141,8 +145,12 @@ export function unregisterProbeFrame(nodeId: string): void {
   emit()
 }
 
+/** 当前模式（模块级——init/ready 补发时用；0.9.6 根因 2 修复） */
+let currentMode: Mode = 'off'
+
 /** 模式广播（PinLayer mode 变化时对全部 frame 补发——含未 ready 的，探针 init 后生效） */
 export function broadcastProbeMode(mode: Mode): void {
+  currentMode = mode
   for (const rec of registry.values()) {
     rec.frame.contentWindow?.postMessage({ __openloopProbe: true, t: 'mode', token: rec.token, mode }, '*')
   }

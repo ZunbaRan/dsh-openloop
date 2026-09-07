@@ -261,13 +261,20 @@ window.__ModuleLoader__.load({
 				if (t === "hello") rec.frame.contentWindow?.postMessage({
 					__openloopProbe: true,
 					t: "init",
-					token: rec.token
+					token: rec.token,
+					mode: currentMode
 				}, "*");
 				else if (t === "ready") {
 					rec.ready = true;
 					rec.degraded = false;
 					const h = d["height"];
 					if (typeof h === "number" && h > 0) rec.height = h;
+					rec.frame.contentWindow?.postMessage({
+						__openloopProbe: true,
+						t: "mode",
+						token: rec.token,
+						mode: currentMode
+					}, "*");
 					emit$1();
 				} else if (t === "height") {
 					const h = d["height"];
@@ -317,7 +324,8 @@ window.__ModuleLoader__.load({
 			frame.contentWindow?.postMessage({
 				__openloopProbe: true,
 				t: "init",
-				token
+				token,
+				mode: currentMode
 			}, "*");
 			setTimeout(() => {
 				if (rec.ready === false && registry.get(nodeId) === rec) {
@@ -336,8 +344,11 @@ window.__ModuleLoader__.load({
 			}
 			emit$1();
 		}
+		/** 当前模式（模块级——init/ready 补发时用；0.9.6 根因 2 修复） */
+		let currentMode = "off";
 		/** 模式广播（PinLayer mode 变化时对全部 frame 补发——含未 ready 的，探针 init 后生效） */
 		function broadcastProbeMode(mode) {
+			currentMode = mode;
 			for (const rec of registry.values()) rec.frame.contentWindow?.postMessage({
 				__openloopProbe: true,
 				t: "mode",
@@ -1535,6 +1546,8 @@ window.__ModuleLoader__.load({
 			(0, react.useEffect)(() => {
 				broadcastProbeMode(mode === "text" ? "text" : "off");
 			}, [mode]);
+			const [, forceRender] = (0, react.useReducer)((x) => x + 1, 0);
+			(0, react.useEffect)(() => onBridgeChange(forceRender), []);
 			(0, react.useEffect)(() => {
 				if (mode !== "text") return;
 				return onProbeSelection((nodeId, info) => {
@@ -1955,6 +1968,10 @@ window.__ModuleLoader__.load({
 					zIndex: 20
 				},
 				children: [
+					mode !== "text" && snapshot.canvas.nodes.filter((n) => n.type === "html").map((n) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(IframeCapture, {
+						surface: containerRef.current,
+						nodeId: n.id
+					}, `cap-${n.id}`)),
 					hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)(HighlightEl, {
 						surface: containerRef.current,
 						hit: hovered,
@@ -2049,6 +2066,28 @@ window.__ModuleLoader__.load({
 				cur = cur.parentElement;
 			}
 			return parts.join(" > ");
+		}
+		/** iframe 透明捕获层：覆盖在 html 节点 iframe 上方，把鼠标事件引回父页面 DOM 树 */
+		function IframeCapture({ surface, nodeId }) {
+			if (surface === null) return null;
+			const frameEl = surface.querySelector(`[data-canvas-node="${CSS.escape(nodeId)}"] iframe`);
+			if (frameEl === null) return null;
+			const box = surface.getBoundingClientRect();
+			const r = frameEl.getBoundingClientRect();
+			if (r.width === 0 || r.height === 0) return null;
+			return /* @__PURE__ */ (0, react_jsx_runtime.jsx)("div", {
+				"data-iframe-capture": nodeId,
+				style: {
+					position: "absolute",
+					left: r.left - box.left,
+					top: r.top - box.top,
+					width: r.width,
+					height: r.height,
+					pointerEvents: "auto",
+					zIndex: 25,
+					background: "transparent"
+				}
+			});
 		}
 		/** badge 锚点：包一层 node 元素尺寸的 absolute 容器，角标钉在右上 */
 		function NodeBadgeAnchor({ surface, nodeId, children }) {
