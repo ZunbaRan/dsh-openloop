@@ -6,7 +6,6 @@
  * - 校验失败 fail-closed，错误消息面向 Agent 可自修正（指出字段/原因/期望）
  * - 节点集开放注册（NODE_REGISTRY）：v0.1 注册仪表盘 10 节点，
  *   v0.2+ 增幻灯片等能力 = 新增节点集 + layout preset 的增量扩展；
- *   0.9.0 增 html 节点（自由 HTML，iframe 沙箱 + 探针桥元素级标注）→ 11 节点
  */
 import type { JsonObject } from './types.ts'
 
@@ -47,7 +46,6 @@ export type NodePropRule =
   | { readonly kind: 'chart-series'; readonly required?: boolean }
   | { readonly kind: 'table-data'; readonly required?: boolean }
   | { readonly kind: 'context-object'; readonly maxBytes: number; readonly required?: boolean }
-  | { readonly kind: 'html-source'; readonly maxBytes: number; readonly required?: boolean }
 
 export interface NodeDefinition {
   readonly type: string
@@ -67,7 +65,6 @@ export const NODE_REGISTRY: Readonly<Record<string, NodeDefinition>> = {
   callout: { type: 'callout', description: '高亮提示框', props: { tone: { kind: 'enum', values: ['info', 'success', 'warn', 'error'] }, title: { kind: 'string', maxLength: 120 }, text: { kind: 'string', maxLength: 2000, required: true } } },
   action: { type: 'action', description: '行动按钮：点击把 intent+context 编排为草稿注入输入框', props: { label: { kind: 'string', maxLength: 60, required: true }, intent: { kind: 'string', maxLength: 120, required: true }, context: { kind: 'context-object', maxBytes: 4096 } } },
   link: { type: 'link', description: '外链（仅 http/https）', props: { label: { kind: 'string', maxLength: 120, required: true }, href: { kind: 'string', maxLength: 2048, required: true } } },
-  html: { type: 'html', description: '自由 HTML 块（iframe 沙箱渲染，支持脚本；元素级标注经探针桥）。用于富排版/演示/设计稿——baoyu-design 等设计 skill 的产物放这里；结构化内容仍用专用节点', props: { source: { kind: 'html-source', maxBytes: 100 * 1024, required: true }, title: { kind: 'string', maxLength: 120 } } },
 }
 
 export const LAYOUTS: readonly CanvasLayout[] = ['grid', 'flow', 'split-h', 'split-v']
@@ -242,13 +239,6 @@ function checkProp(path: string, value: unknown, rule: NodePropRule): void {
       }
       return
     }
-    case 'html-source': {
-      if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (typeof value !== 'string') { fail(path, 'must be a string (complete HTML document or fragment)', 'html string'); return }
-      const bytes = byteSize(value)
-      if (bytes > rule.maxBytes) fail(path, `size ${bytes}B exceeds max ${rule.maxBytes}B; inline scripts/styles count — move large assets to http(s) URLs`)
-      return
-    }
   }
 }
 
@@ -299,9 +289,7 @@ function validateInner(value: unknown): CanvasDocument {
     const n = nodes[i]
     const path = `nodes[${i}]`
     if (!isPlainObject(n)) { fail(path, 'must be an object'); continue }
-    // html 节点豁免通用节点字节上限（source 本身受 html-source maxBytes 约束，默认 100KB）
-    const isHtmlNode = n['type'] === 'html'
-    if (!isHtmlNode && byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`)
+    if (byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`)
     const id = n['id']
     if (typeof id !== 'string' || !ID_RE.test(id)) fail(`${path}.id`, 'must match [a-zA-Z0-9_-]{1,32}')
     else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`)

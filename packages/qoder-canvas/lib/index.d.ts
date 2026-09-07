@@ -66,10 +66,6 @@ type NodePropRule = {
   readonly kind: 'context-object';
   readonly maxBytes: number;
   readonly required?: boolean;
-} | {
-  readonly kind: 'html-source';
-  readonly maxBytes: number;
-  readonly required?: boolean;
 };
 interface NodeDefinition {
   readonly type: string;
