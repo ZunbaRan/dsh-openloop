@@ -84,6 +84,7 @@ export PATH="/Users/loloru/.nvm/versions/node/v22.19.0/bin:$PATH" && pi-messenge
 23. **ref 同步渲染期陷阱（0.9.4 总根因）**：`refB.current = refA.current` 写渲染体里，组件与目标 DOM 同 commit 挂载时渲染体读 refA.current **必为 null**（ref 赋值在 commit 阶段、渲染体在 commit 前跑）；无 state 变化则无重渲染——refB 永远 null。凡是「事件时要用」的 ref 值，使用处直接读源 ref（`refA.current`），不要做渲染期二次同步。验证盲区配套：该 bug 单节点画布必现、多节点画布被 annotations 加载的重渲染掩盖——**验收场景必须覆盖「最简内容」与「复杂内容」两端**。
 24. **pnpm check 链的 build 产物可能被 tsdown 缓存掩盖**（`grep -cE 'error TS'` 吞掉 build 失败/未跑的 exit code，旧 lib 被静默打包）——发布前 `grep` lib 产物验证目标代码在场，必要时手动 `pnpm build` 重跑。
 25. **dsh plugin add 的路径必须绝对路径**——相对路径被 pnpm 当 git 依赖解析（报「Repository not found」），而且 remove 成功 add 失败会让插件裸奔（node_modules 里整个消失）——装完必须 grep 包内容确认。
+26. **iframe 交互验证的合成事件盲区（0.9.6 最大教训）**：在父页面容器上 `dispatchEvent(new PointerEvent(...))` 验证 iframe 交互是**无效场景**——合成事件在父 DOM 树里冒泡（target 就是监听器所在处，永远通），而真实鼠标在 iframe 上时事件在 iframe 的独立浏览上下文内消化，**父页面一个事件都收不到**。「测试全绿、用户全坏」即由此产生。正确姿势：①事件 dispatch 到 iframe 区域的实际落点（透明捕获层/iframe 元素本身）；②需要 iframe 内真实行为时用**内容内嵌的自动交互脚本**（srcdoc 里 setTimeout 自动选择/点击）触发真实浏览器事件；③凡「鼠标/键盘在 iframe 上」的功能（标注/框选/划字），iframe 上方必须有父页面 DOM 的**透明捕获层**把事件引回来（增强档计划里本有此组件，实现时漏掉导致全线失效）。
 
 ## 0.1.2 内核迁移踩坑（2026-09-04 实测，勿再犯）
 
