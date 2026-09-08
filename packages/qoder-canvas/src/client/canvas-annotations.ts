@@ -40,6 +40,9 @@ export type AnnotationTarget =
       readonly text?: string | undefined
       /** 命中元素 outerHTML 截断（~600 字符）——Agent 按源码片段文本匹配定位修改 */
       readonly snippet: string
+      /** 0.12.6 兄弟索引路径（[顶层 childIndex, …, 命中 childIndex]）——
+          CSS 选择器在 Tailwind class（含 :）下回查不稳，索引 walk 纯数字稳定 */
+      readonly indexPath?: readonly number[] | undefined
     }
 
 export interface CanvasAnnotation {

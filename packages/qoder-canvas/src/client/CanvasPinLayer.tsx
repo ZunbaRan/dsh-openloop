@@ -47,8 +47,16 @@ interface ElementHit {
   readonly tag: string
   readonly text?: string | undefined
   /** 0.12：html 节点 open shadow DOM 内的命中（同文档——el 是 shadow 内元素；
-      targets 回显时 el 可缺省（HighlightEl 内部按 domPath 回查） */
-  readonly shadowHit?: { readonly el?: Element | undefined; readonly domPath: string; readonly snippet: string } | undefined
+      targets 回显时 el 可缺省（HighlightEl 内部回查） */
+  readonly shadowHit?: {
+    readonly el?: Element | undefined
+    readonly domPath: string
+    readonly snippet: string
+    /** 0.12.6 兄弟索引路径（[顶层 childIndex, …, 命中 childIndex]）——
+        CSS 选择器在 baoyu/Tailwind class（含 : 特殊字符）下回查不稳，
+        索引 walk 纯数字绝对稳定 */
+    readonly indexPath?: readonly number[] | undefined
+  } | undefined
 }
 
 const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
@@ -177,7 +185,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         domPath: '',
         tag: deep.tagName.toLowerCase(),
         text: text.length > 0 ? text.slice(0, 40) : undefined,
-        shadowHit: { el: deep, domPath: domPathWithinShadow(deep), snippet },
+        shadowHit: { el: deep, domPath: domPathWithinShadow(deep), indexPath: indexPathWithinShadow(deep), snippet },
       }
     }
     for (const el of document.elementsFromPoint(x, y)) {
@@ -367,6 +375,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
               label: `html ${hit.tag}${hit.text !== undefined ? ` "${hit.text.slice(0, 20)}"` : ''}`,
               tag: hit.tag,
               domPath: hit.shadowHit.domPath,
+              indexPath: hit.shadowHit.indexPath,
               text: hit.text,
               snippet: hit.shadowHit.snippet,
             }])
@@ -465,12 +474,12 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
             )
           }
           if (t.kind === 'html-element') {
-            // 0.12.5 高亮修复：targets 的 html-element 必须带 shadowHit（domPath + snippet）——
-            // 否则 HighlightEl 回退到 host 整块（「hover 正确但确认后高亮变整块」根因）
+            // 0.12.5/0.12.6 高亮修复：targets 的 html-element 带 shadowHit（domPath + indexPath + snippet）——
+            // indexPath 索引 walk 回查绝对稳定（Tailwind class 下 CSS 选择器不可靠）
             return (
               <HighlightEl key={`sel-${t.id}-${t.domPath}`}
                 surface={containerRef.current}
-                hit={{ nodeId: t.id, domPath: '', tag: t.tag, shadowHit: { domPath: t.domPath, snippet: t.snippet } }}
+                hit={{ nodeId: t.id, domPath: '', tag: t.tag, shadowHit: { domPath: t.domPath, indexPath: t.indexPath, snippet: t.snippet } }}
                 borderStyle="solid" nodeType="html" showTooltip={targets.length === 1} />
             )
           }
@@ -572,6 +581,25 @@ function domPathWithinShadow(el: Element): string {
   return parts.join(' > ')
 }
 
+/** 0.12.6 兄弟索引路径（从 ShadowRoot 顶层到命中元素的 childIndex 序列）。
+    与 CSS 选择器无关——baoyu/Tailwind class（含 : 等特殊字符）下回查 100% 稳定 */
+function indexPathWithinShadow(el: Element): number[] {
+  const idx: number[] = []
+  let cur: Element | null = el
+  while (cur !== null) {
+    const parent: Element | null = cur.parentElement
+    if (parent !== null) {
+      idx.unshift([...parent.children].indexOf(cur))
+    } else {
+      // 顶层（parentNode 是 ShadowRoot）：childIndex 相对 shadowRoot.children
+      const root = cur.getRootNode()
+      if (root instanceof ShadowRoot) idx.unshift([...root.children].indexOf(cur))
+    }
+    cur = cur.parentElement
+  }
+  return idx
+}
+
 /** badge 锚点：包一层 node 元素尺寸的 absolute 容器，角标钉在右上 */
 function NodeBadgeAnchor({ surface, nodeId, children }: { surface: HTMLElement | null; nodeId: string; children: ReactNode }): ReactNode {
   if (surface === null) return null
@@ -602,12 +630,32 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
   if (nodeEl === null) return null
   let el: Element = nodeEl
   if (hit.shadowHit !== undefined) {
-    // 0.12 shadow 命中：优先按 domPath 在 host.shadowRoot 回查（targets 回显路径——
-    // 用户实测「点击确认后高亮变整块」根因：targets 渲染只传 domPath:'' 没传 shadowHit，
-    // HighlightEl 找不到 shadow 内元素回退到 host 整块）；el 引用（hover 实时命中）兜底
+    // 0.12 shadow 命中回查（优先级）：
+    // 1) indexPath walk（0.12.6——纯数字索引，CSS 选择器在 Tailwind class 下不稳时仍 100% 稳定）
+    // 2) domPath querySelector
+    // 3) el 引用（hover 实时命中）
+    // 4) nodeEl 兜底
     const sr = nodeEl.shadowRoot
     if (sr !== null) {
-      try { el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl } catch { el = hit.shadowHit.el ?? nodeEl }
+      const ip = hit.shadowHit.indexPath
+      let found: Element | null = null
+      if (ip !== undefined && ip.length > 0) {
+        let cur: Element | null = null
+        let container: Element | ShadowRoot = sr
+        let ok = true
+        for (const idx of ip) {
+          const next: Element | null = container.children.item(idx)
+          if (next === null) { ok = false; break }
+          cur = next
+          container = next
+        }
+        if (ok && cur !== null) found = cur
+      }
+      if (found !== null) {
+        el = found
+      } else {
+        try { el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl } catch { el = hit.shadowHit.el ?? nodeEl }
+      }
     } else {
       el = hit.shadowHit.el ?? nodeEl
     }

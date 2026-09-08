@@ -8374,6 +8374,7 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 				shadowHit: {
 					el: deep,
 					domPath: domPathWithinShadow(deep),
+					indexPath: indexPathWithinShadow(deep),
 					snippet
 				}
 			};
@@ -8574,6 +8575,7 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 						label: `html ${hit.tag}${hit.text !== void 0 ? ` "${hit.text.slice(0, 20)}"` : ""}`,
 						tag: hit.tag,
 						domPath: hit.shadowHit.domPath,
+						indexPath: hit.shadowHit.indexPath,
 						text: hit.text,
 						snippet: hit.shadowHit.snippet
 					}]);
@@ -8703,6 +8705,7 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 						tag: t.tag,
 						shadowHit: {
 							domPath: t.domPath,
+							indexPath: t.indexPath,
 							snippet: t.snippet
 						}
 					},
@@ -8808,6 +8811,22 @@ function domPathWithinShadow(el) {
 	}
 	return parts.join(" > ");
 }
+/** 0.12.6 兄弟索引路径（从 ShadowRoot 顶层到命中元素的 childIndex 序列）。
+与 CSS 选择器无关——baoyu/Tailwind class（含 : 等特殊字符）下回查 100% 稳定 */
+function indexPathWithinShadow(el) {
+	const idx = [];
+	let cur = el;
+	while (cur !== null) {
+		const parent = cur.parentElement;
+		if (parent !== null) idx.unshift([...parent.children].indexOf(cur));
+		else {
+			const root = cur.getRootNode();
+			if (root instanceof ShadowRoot) idx.unshift([...root.children].indexOf(cur));
+		}
+		cur = cur.parentElement;
+	}
+	return idx;
+}
 /** badge 锚点：包一层 node 元素尺寸的 absolute 容器，角标钉在右上 */
 function NodeBadgeAnchor({ surface, nodeId, children }) {
 	if (surface === null) return null;
@@ -8845,12 +8864,31 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
 	let el = nodeEl;
 	if (hit.shadowHit !== void 0) {
 		const sr = nodeEl.shadowRoot;
-		if (sr !== null) try {
-			el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl;
-		} catch {
-			el = hit.shadowHit.el ?? nodeEl;
-		}
-		else el = hit.shadowHit.el ?? nodeEl;
+		if (sr !== null) {
+			const ip = hit.shadowHit.indexPath;
+			let found = null;
+			if (ip !== void 0 && ip.length > 0) {
+				let cur = null;
+				let container = sr;
+				let ok = true;
+				for (const idx of ip) {
+					const next = container.children.item(idx);
+					if (next === null) {
+						ok = false;
+						break;
+					}
+					cur = next;
+					container = next;
+				}
+				if (ok && cur !== null) found = cur;
+			}
+			if (found !== null) el = found;
+			else try {
+				el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl;
+			} catch {
+				el = hit.shadowHit.el ?? nodeEl;
+			}
+		} else el = hit.shadowHit.el ?? nodeEl;
 	} else if (hit.domPath.length > 0) try {
 		el = nodeEl.querySelector(hit.domPath) ?? nodeEl;
 	} catch {
