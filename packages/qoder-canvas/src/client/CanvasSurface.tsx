@@ -6,7 +6,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import type { CanvasNode, CanvasSnapshot } from '../dsl.ts'
 import { renderMarkdownLines } from './markdown.tsx'
-import { BoxNode, DividerNode, IconNode, TextNode, DesignKeyframesStyle } from './DesignNodes.tsx'
 
 // ---- 通用样式 ----
 
@@ -266,17 +265,9 @@ function LinkNode({ props }: { props: Record<string, unknown> }): ReactNode {
   )
 }
 
-function NodeRenderer({ node, onAction }: { node: CanvasNode; onAction: ((node: CanvasNode) => void) | undefined }): ReactNode {
+function NodeRenderer({ node, onAction, renderHtml }: { node: CanvasNode; onAction: ((node: CanvasNode) => void) | undefined; renderHtml: ((node: CanvasNode) => ReactNode) | undefined }): ReactNode {
   const props = node.props as Record<string, unknown>
-  // 0.11 设计原语：嵌套子节点渲染器（透传 onAction；避免与 DesignNodes 循环 import 的注入式写法）
-  const renderChild = (child: CanvasNode): ReactNode => <NodeRenderer node={child} onAction={onAction} />
   switch (node.type) {
-    // ---- v0.11 设计原语（DSL 复刻 baoyu-design）----
-    case 'box': return <BoxNode node={node} renderChild={renderChild} />
-    case 'text': return <TextNode node={node} />
-    case 'icon': return <IconNode node={node} />
-    case 'divider': return <DividerNode node={node} />
-    // ---- 数据节点（v0.1）----
     case 'stat-card': return <StatCardNode props={props} />
     case 'chart': return <ChartNode props={props} />
     case 'table': return <TableNode props={props} />
@@ -285,6 +276,13 @@ function NodeRenderer({ node, onAction }: { node: CanvasNode; onAction: ((node: 
     case 'callout': return <CalloutNode props={props} />
     case 'action': return <ActionNode props={props} onClick={() => onAction?.(node) } />
     case 'link': return <LinkNode props={props} />
+    case 'html':
+      // 0.12：app 上下文注入 shadow DOM 渲染器（renderHtml）；对话流预览（CanvasCard）无注入 → 占位
+      return renderHtml !== undefined ? renderHtml(node) : (
+        <div style={{ ...nodeBase(), padding: 20, fontSize: 12, color: 'var(--dsw-alias-label-caption, #888)' }}>
+          自由 HTML 块（{String(props.title ?? node.id)}）——打开工作台查看与标注
+        </div>
+      )
     case 'section': return <SectionNode node={node}>{null}</SectionNode>
     case 'panel': return <div style={nodeBase()} /> // 占位：v0.1 不支持嵌套
     default: return <div style={nodeBase()}>未知节点 {node.type}</div>
@@ -293,14 +291,12 @@ function NodeRenderer({ node, onAction }: { node: CanvasNode; onAction: ((node: 
 
 // ---- 主渲染 ----
 
-export function CanvasSurface({ snapshot, onAction }: { snapshot: CanvasSnapshot; onAction?: (node: CanvasNode) => void }): ReactNode {
+export function CanvasSurface({ snapshot, onAction, renderHtml }: { snapshot: CanvasSnapshot; onAction?: (node: CanvasNode) => void; renderHtml?: (node: CanvasNode) => ReactNode }): ReactNode {
   const { canvas } = snapshot
   const sectionNodes = canvas.nodes.filter(n => n.type === 'section')
   const plainNodes = canvas.nodes.filter(n => n.type !== 'section')
   return (
     <section style={surface} data-openloop-canvas={snapshot.canvasId} data-revision={snapshot.revision}>
-      {/* 0.11 设计原语动画 keyframes（全局一份；无动画节点时也无害——纯 CSS 声明） */}
-      <DesignKeyframesStyle />
       <header style={headerStyle}>
         <span style={{ fontSize: 13, fontWeight: 650, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{canvas.title}</span>
         <span style={{ fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--dsw-alias-label-caption, #888)' }}>{snapshot.canvasId}@r{snapshot.revision}</span>
@@ -310,7 +306,7 @@ export function CanvasSurface({ snapshot, onAction }: { snapshot: CanvasSnapshot
           // 0.2.1 修复：wrapper 不可用 display:contents（无盒模型 →
           // getBoundingClientRect 全 0，标注框选/高亮全部失效）；普通 div 作 grid item
           <div key={n.id} data-canvas-node={n.id} style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            <NodeRenderer node={n} onAction={onAction} />
+            <NodeRenderer node={n} onAction={onAction} renderHtml={renderHtml} />
           </div>
         ))}
       </div>

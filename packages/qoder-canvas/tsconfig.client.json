@@ -1,6 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "lib": ["es2022", "dom", "dom.iterable"] },
-  "include": ["src/client", "src/dsl.ts", "tests/client.spec.tsx"],
+  "include": ["src/client", "src/dsl.ts", "src/app", "src/canvas-app-bridge.ts", "tests/client.spec.tsx", "tests/bridge.spec.ts"],
   "exclude": []
 }

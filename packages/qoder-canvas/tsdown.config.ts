@@ -11,4 +11,14 @@ export default [
     deps: { neverBundle: externals }, define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
     outputOptions: { entryFileNames: 'client.js', banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {`, footer: 'return module.exports; } });', intro: 'var module = { exports: {} }; var exports = module.exports;' },
   },
+  // 0.12：canvas iframe app（自包含 ESM——React 打入，无 ModuleLoader banner，
+  // 由 /qoder-canvas/app 壳端点的 <script type="module"> 加载）。
+  // 真机教训：react 在 peer/devDeps → tsdown 默认 external——app.js 首行
+  // `import "react"` 裸模块浏览器加载必败 → 显式 bundle
+  {
+    entry: { app: 'src/app/main.tsx' }, outDir: 'lib', format: ['esm'], platform: 'browser', dts: false, clean: false,
+    noExternal: [/^react/, /^react-dom/],
+    define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
+    outputOptions: { entryFileNames: 'app.js' },
+  },
 ] satisfies UserConfig[]

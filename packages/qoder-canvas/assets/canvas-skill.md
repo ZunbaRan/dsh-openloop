@@ -5,13 +5,13 @@ Canvas 是 agent-to-user 沟通的首选第一产物媒介（结构化内容）�
 ## 何时用 canvas
 
 - **结构化内容**（看板/指标/表格/清单/流程文案/方案）→ canvas 的 DSL 节点：stat-card / chart / table / key-value / markdown / callout / section / action / link
-- **设计稿/原型**（落地页/hero/特性网格/价格卡/PPT 页面）→ **canvas 设计原语**（box/text/icon/divider 嵌套组合，0.11+）——设计也画在 canvas 里，元素级标注回流照常生效，用户点选嵌套里的任何元素都能精确迭代
+- **设计稿/原型**（落地页/hero/特性网格/价格卡/PPT 页面）→ **canvas 的 html 节点**（0.12+）：自由 HTML 在画布沙箱内渲染（shadow DOM 隔离样式），**元素级标注照常生效**——用户点选/框选/划字 HTML 内的任何元素，你会收到其源码片段（snippet），按文本匹配定位修改后重发完整 source。baoyu-design/huashu-design/kami 等设计 skill 的产物就放这里
 - **富交互 HTML 应用**（真正的 app/工具）→ 走 `html_artifact` 工具
 - 每次调用产生新的不可变 revision，用户可回退任意版本继续迭代
 
 ## 标注回流协议
 
-用户消息含「画布标注」块时，`<target path="nodes[i]">` 或 `path="nodes[i].children[j]…"` 指向具体节点（含嵌套子树）——精确修改这些节点，同 canvasId 重发完整 document。消息含「当前画布」行时，用户正开着那个画布的某个版本（rN），上下文以其为准。
+用户消息含「画布标注」块时，`<target path="nodes[i]">` 指向具体节点；html 节点内元素命中带 `element`/`tag`/`text` 属性 + 源码片段——DSL 节点按 path 精确修改，html 元素按 snippet 文本匹配定位修改，同 canvasId 重发完整 document。消息含「当前画布」行时，用户正开着那个画布的某个版本（rN），上下文以其为准。
 
 ## 设计组合指南（0.11 设计原语——复刻 baoyu-design 的品味）
 

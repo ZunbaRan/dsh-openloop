@@ -4,12 +4,10 @@
  * 原则（承 openloop 契约哲学）：
  * - Agent 输出不可信任：一切进画布的东西过白名单 + 量级上限
  * - 校验失败 fail-closed，错误消息面向 Agent 可自修正（指出字段/原因/期望）
- * - 节点集开放注册（NODE_REGISTRY）：v0.1 仪表盘 10 节点，
- *   v0.11 增设计原语 4 节点（box/text/icon/divider，可嵌套）——DSL 复刻
- *   baoyu-design：Agent 写结构化设计 JSON，我们的组件生成主 document DOM
+ * - 节点集开放注册（NODE_REGISTRY）：v0.1 注册仪表盘 10 节点，
+ *   v0.2+ 增幻灯片等能力 = 新增节点集 + layout preset 的增量扩展；
  */
 import type { JsonObject } from './types.ts'
-import { ANIMATIONS, ICONS, checkStyleValue } from './design-system.ts'
 
 // ---- 类型 ----
 
@@ -19,8 +17,6 @@ export interface CanvasNode {
   readonly id: string
   readonly type: string
   readonly props: JsonObject
-  /** 0.11 嵌套：仅设计原语节点（box）支持 children（递归 CanvasNode） */
-  readonly children?: readonly CanvasNode[]
 }
 
 export interface CanvasDocument {
@@ -50,10 +46,7 @@ export type NodePropRule =
   | { readonly kind: 'chart-series'; readonly required?: boolean }
   | { readonly kind: 'table-data'; readonly required?: boolean }
   | { readonly kind: 'context-object'; readonly maxBytes: number; readonly required?: boolean }
-  /** 0.11 设计原语：style 白名单对象（design-system.ts 单一事实源） */
-  | { readonly kind: 'style'; readonly maxProps: number; readonly required?: boolean }
-  /** 0.11 设计原语：动画配置（name 枚举 + duration/delay） */
-  | { readonly kind: 'animation'; readonly required?: boolean }
+  | { readonly kind: 'html-source'; readonly maxBytes: number; readonly required?: boolean }
 
 export interface NodeDefinition {
   readonly type: string
@@ -73,11 +66,8 @@ export const NODE_REGISTRY: Readonly<Record<string, NodeDefinition>> = {
   callout: { type: 'callout', description: '高亮提示框', props: { tone: { kind: 'enum', values: ['info', 'success', 'warn', 'error'] }, title: { kind: 'string', maxLength: 120 }, text: { kind: 'string', maxLength: 2000, required: true } } },
   action: { type: 'action', description: '行动按钮：点击把 intent+context 编排为草稿注入输入框', props: { label: { kind: 'string', maxLength: 60, required: true }, intent: { kind: 'string', maxLength: 120, required: true }, context: { kind: 'context-object', maxBytes: 4096 } } },
   link: { type: 'link', description: '外链（仅 http/https）', props: { label: { kind: 'string', maxLength: 120, required: true }, href: { kind: 'string', maxLength: 2048, required: true } } },
-  // ---- v0.11 设计原语（DSL 复刻 baoyu-design：结构化设计 JSON → 我们的 DOM）----
-  box: { type: 'box', description: '设计容器（可嵌套 children ≤6 层）：布局/间距/背景/边框/阴影/动画', props: { style: { kind: 'style', maxProps: 16 }, animation: { kind: 'animation' } } },
-  text: { type: 'text', description: '设计文本：字号/字重/颜色/对齐/动画', props: { content: { kind: 'string', maxLength: 500, required: true }, style: { kind: 'style', maxProps: 12 }, animation: { kind: 'animation' } } },
-  icon: { type: 'icon', description: '内置 SVG 图标（lucide 风格白名单）', props: { name: { kind: 'enum', values: [...ICONS], required: true }, size: { kind: 'number', min: 12, max: 96 }, style: { kind: 'style', maxProps: 4 } } },
-  divider: { type: 'divider', description: '分隔线', props: { style: { kind: 'style', maxProps: 6 } } },
+  // 0.12：html 节点回归（自由 HTML——canvas 整体 iframe 内 open shadow DOM 渲染，同文档可标注）
+  html: { type: 'html', description: '自由 HTML 块（画布沙箱内渲染，支持脚本；元素级标注同文档原生生效）。用于富排版/演示/设计稿——baoyu-design 等设计 skill 的产物放这里；结构化内容仍用专用节点', props: { source: { kind: 'html-source', maxBytes: 100 * 1024, required: true }, title: { kind: 'string', maxLength: 120 } } },
 }
 
 export const LAYOUTS: readonly CanvasLayout[] = ['grid', 'flow', 'split-h', 'split-v']
@@ -94,14 +84,7 @@ export const LIMITS = {
   maxTableColumns: 12,
   maxTitleLength: 120,
   maxEdges: 64,
-  // 0.11 设计原语（嵌套）
-  maxDepth: 6, // children 递归深度上限（含顶层）
-  maxTotalNodes: 128, // 全画布节点总数（含嵌套子节点）
-  maxDesignNodeBytes: 32 * 1024, // 含 children 的设计节点字节上限（高于数据节点 16KB）
 } as const
-
-/** 允许 children 的节点类型（仅设计容器） */
-const NESTABLE_TYPES: ReadonlySet<string> = new Set(['box'])
 
 // ---- 校验 ----
 
@@ -259,33 +242,11 @@ function checkProp(path: string, value: unknown, rule: NodePropRule): void {
       }
       return
     }
-    case 'style': {
-      // 0.11 设计原语：白名单对象（design-system.ts 单一事实源校验）
+    case 'html-source': {
       if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!isPlainObject(value)) { fail(path, 'must be an object of whitelisted style properties', '{ color, fontSize, padding, … }'); return }
-      const keys = Object.keys(value)
-      if (keys.length > rule.maxProps) fail(path, `${keys.length} props exceeds max ${rule.maxProps}`)
-      for (const k of keys) {
-        const err = checkStyleValue(k, (value as JsonObject)[k])
-        if (err !== null) fail(`${path}.${k}`, err)
-      }
-      return
-    }
-    case 'animation': {
-      // 0.11 设计原语：{ name, duration?, delay? }（name 预定义枚举）
-      if (value === undefined) { if (rule.required === true) fail(path, 'is required'); return }
-      if (!isPlainObject(value)) { fail(path, 'must be an object', '{ name: "fade-in"|"slide-up"|…, duration?, delay? }'); return }
-      const name = value['name']
-      if (typeof name !== 'string' || !(ANIMATIONS as readonly string[]).includes(name)) {
-        fail(`${path}.name`, `must be one of ${ANIMATIONS.join('/')}`, ANIMATIONS.join(' | '))
-      }
-      const duration = value['duration']
-      if (duration !== undefined && (typeof duration !== 'number' || duration < 0 || duration > 4000)) fail(`${path}.duration`, 'must be a number in [0, 4000] ms')
-      const delay = value['delay']
-      if (delay !== undefined && (typeof delay !== 'number' || delay < 0 || delay > 4000)) fail(`${path}.delay`, 'must be a number in [0, 4000] ms')
-      for (const k of Object.keys(value)) {
-        if (k !== 'name' && k !== 'duration' && k !== 'delay') fail(`${path}.${k}`, `unknown animation field; allowed: name, duration, delay`)
-      }
+      if (typeof value !== 'string') { fail(path, 'must be a string (complete HTML document or fragment)', 'html string'); return }
+      const bytes = byteSize(value)
+      if (bytes > rule.maxBytes) fail(path, `size ${bytes}B exceeds max ${rule.maxBytes}B; inline scripts/styles count — move large assets to http(s) URLs`)
       return
     }
   }
@@ -334,24 +295,23 @@ function validateInner(value: unknown): CanvasDocument {
   if (nodes.length === 0) fail('nodes', 'must contain at least 1 node')
   if (nodes.length > LIMITS.maxNodes) fail('nodes', `${nodes.length} nodes exceeds max ${LIMITS.maxNodes}`)
   const seenIds = new Set<string>()
-  let totalNodes = 0
-  /** 0.11 递归节点校验（设计原语嵌套）：深度/总数守卫 + id 全局查重 */
-  const validateNode = (n: unknown, path: string, depth: number): void => {
-    if (!isPlainObject(n)) { fail(path, 'must be an object'); return }
-    totalNodes += 1
-    if (totalNodes > LIMITS.maxTotalNodes) { fail(path, `total node count exceeds max ${LIMITS.maxTotalNodes} (including nested children)`); return }
-    const byteLimit = NESTABLE_TYPES.has(String(n['type'])) ? LIMITS.maxDesignNodeBytes : LIMITS.maxNodeBytes
-    if (byteSize(n) > byteLimit) fail(path, `size exceeds max ${byteLimit}B`)
+  for (let i = 0; i < nodes.length; i += 1) {
+    const n = nodes[i]
+    const path = `nodes[${i}]`
+    if (!isPlainObject(n)) { fail(path, 'must be an object'); continue }
+    // html 节点豁免通用节点字节上限（source 本身受 html-source maxBytes 约束，100KB）
+    const isHtmlNode = n['type'] === 'html'
+    if (!isHtmlNode && byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`)
     const id = n['id']
     if (typeof id !== 'string' || !ID_RE.test(id)) fail(`${path}.id`, 'must match [a-zA-Z0-9_-]{1,32}')
-    else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}" (ids must be unique across the whole canvas including nested children)`)
+    else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`)
     else seenIds.add(id)
     const type = n['type']
-    if (typeof type !== 'string') { fail(`${path}.type`, 'must be a string'); return }
+    if (typeof type !== 'string') { fail(`${path}.type`, 'must be a string'); continue }
     const def = NODE_REGISTRY[type]
-    if (def === undefined) { fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(' | ')); return }
+    if (def === undefined) { fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(' | ')); continue }
     const props = n['props']
-    if (!isPlainObject(props)) { fail(`${path}.props`, 'must be an object'); return }
+    if (!isPlainObject(props)) { fail(`${path}.props`, 'must be an object'); continue }
     for (const [key, rule] of Object.entries(def.props)) {
       checkProp(`${path}.props.${key}`, props[key], rule)
     }
@@ -361,24 +321,6 @@ function validateInner(value: unknown): CanvasDocument {
     for (const key of Object.keys(props)) {
       if (!(key in def.props)) fail(`${path}.props.${key}`, `unknown prop for ${type}; allowed: ${Object.keys(def.props).join(', ') || '(none)'}`)
     }
-    // 嵌套 children（仅设计容器；fail-closed）
-    const children = n['children']
-    if (children !== undefined) {
-      if (!NESTABLE_TYPES.has(type)) { fail(`${path}.children`, `nodes of type "${type}" do not support children; only ${[...NESTABLE_TYPES].join('/')} can nest`); return }
-      if (!Array.isArray(children)) { fail(`${path}.children`, 'must be an array of nodes'); return }
-      if (children.length > LIMITS.maxNodes) fail(`${path}.children`, `${children.length} children exceeds max ${LIMITS.maxNodes}`)
-      if (depth + 1 > LIMITS.maxDepth) fail(`${path}.children`, `nesting depth exceeds max ${LIMITS.maxDepth}`)
-      for (let i = 0; i < children.length; i += 1) {
-        validateNode(children[i], `${path}.children[${i}]`, depth + 1)
-      }
-    }
-    // 未知节点键拒绝（children/id/type/props 之外）
-    for (const key of Object.keys(n)) {
-      if (key !== 'id' && key !== 'type' && key !== 'props' && key !== 'children') fail(`${path}.${key}`, `unknown node field; allowed: id, type, props, children`)
-    }
-  }
-  for (let i = 0; i < nodes.length; i += 1) {
-    validateNode(nodes[i], `nodes[${i}]`, 1)
   }
   const edges = value['edges']
   const checkedEdges: { from: string; to: string }[] = []

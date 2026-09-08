@@ -117,3 +117,31 @@ describe('canvasId', () => {
     expect(isValidCanvasId('cv_ABCDEFGH')).toBe(false)
   })
 })
+
+describe('html node (0.12)', () => {
+  const htmlDoc = (source: unknown): unknown => ({ title: 't', layout: 'grid', nodes: [{ id: 'h1', type: 'html', props: { source } }] })
+
+  it('accepts a valid html node', () => {
+    const d = validateCanvasDocument(htmlDoc('<div style="padding:20px"><h1>Landing</h1><p>hero copy</p></div>'))
+    expect(d.nodes[0]?.type).toBe('html')
+  })
+
+  it('accepts html node with inline script (sandboxed canvas renders it)', () => {
+    const openTag = '<' + 'script>'
+    const closeTag = '<' + '/script>'
+    expect(() => validateCanvasDocument(htmlDoc(`<div>ok${openTag}console.log(1)${closeTag}</div>`))).not.toThrow()
+  })
+
+  it('rejects non-string source', () => {
+    expect(() => validateCanvasDocument(htmlDoc(123))).toThrow(/must be a string/)
+  })
+
+  it('rejects source exceeding 100KB', () => {
+    expect(() => validateCanvasDocument(htmlDoc(`<div>${'x'.repeat(101 * 1024)}</div>`))).toThrow(/exceeds max/)
+  })
+
+  it('rejects unknown html prop (fail-closed)', () => {
+    const doc = { title: 't', layout: 'grid', nodes: [{ id: 'h1', type: 'html', props: { source: '<p>x</p>', sneaky: true } }] }
+    expect(() => validateCanvasDocument(doc)).toThrow(/unknown prop/)
+  })
+})

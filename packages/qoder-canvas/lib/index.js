@@ -1,264 +1,10 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { readFile, readdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { readFile, readdir } from "node:fs/promises";
 import { BUNDLED_SKILL_RANK } from "@deepseek-ai/dsh-skill";
-//#region src/design-system.ts
-/** style 白名单（~30 安全属性——对齐计划中的三层语法第二层） */
-const STYLE_WHITELIST = {
-	color: { type: "color" },
-	fontSize: {
-		type: "length",
-		max: 96
-	},
-	fontWeight: {
-		type: "enum",
-		values: [
-			"300",
-			"400",
-			"500",
-			"600",
-			"700",
-			"800"
-		]
-	},
-	textAlign: {
-		type: "enum",
-		values: [
-			"left",
-			"center",
-			"right"
-		]
-	},
-	lineHeight: {
-		type: "number",
-		min: .8,
-		max: 3
-	},
-	letterSpacing: {
-		type: "length",
-		max: 8
-	},
-	fontFamily: {
-		type: "enum",
-		values: [
-			"sans",
-			"serif",
-			"mono"
-		]
-	},
-	textTransform: {
-		type: "enum",
-		values: [
-			"none",
-			"uppercase",
-			"lowercase",
-			"capitalize"
-		]
-	},
-	display: {
-		type: "enum",
-		values: [
-			"flex",
-			"block",
-			"grid"
-		]
-	},
-	flexDirection: {
-		type: "enum",
-		values: ["row", "column"]
-	},
-	justifyContent: {
-		type: "enum",
-		values: [
-			"flex-start",
-			"center",
-			"flex-end",
-			"space-between",
-			"space-around"
-		]
-	},
-	alignItems: {
-		type: "enum",
-		values: [
-			"flex-start",
-			"center",
-			"flex-end",
-			"stretch"
-		]
-	},
-	gap: {
-		type: "length",
-		max: 96
-	},
-	padding: {
-		type: "length",
-		max: 96
-	},
-	margin: {
-		type: "length",
-		max: 48
-	},
-	width: {
-		type: "length",
-		max: 1600
-	},
-	maxWidth: {
-		type: "length",
-		max: 1600
-	},
-	minHeight: {
-		type: "length",
-		max: 800
-	},
-	flex: {
-		type: "enum",
-		values: [
-			"none",
-			"grow",
-			"full"
-		]
-	},
-	flexWrap: {
-		type: "enum",
-		values: ["nowrap", "wrap"]
-	},
-	backgroundColor: { type: "color" },
-	borderRadius: {
-		type: "length",
-		max: 48
-	},
-	borderWidth: {
-		type: "length",
-		max: 8
-	},
-	borderStyle: {
-		type: "enum",
-		values: [
-			"solid",
-			"dashed",
-			"none"
-		]
-	},
-	borderColor: { type: "color" },
-	opacity: {
-		type: "number",
-		min: 0,
-		max: 1
-	},
-	shadow: {
-		type: "enum",
-		values: [
-			"none",
-			"sm",
-			"md",
-			"lg"
-		]
-	},
-	gradient: {
-		type: "enum",
-		values: [
-			"none",
-			"warm",
-			"cool",
-			"sunset",
-			"ocean",
-			"forest"
-		]
-	},
-	tone: {
-		type: "enum",
-		values: [
-			"default",
-			"success",
-			"warn",
-			"error",
-			"info",
-			"muted"
-		]
-	}
-};
-/** 预定义动画枚举（纯 CSS @keyframes，无 JS） */
-const ANIMATIONS = [
-	"none",
-	"fade-in",
-	"slide-up",
-	"slide-down",
-	"scale-in",
-	"pulse",
-	"float"
-];
-/** 内置图标白名单（lucide 风格，DesignNodes 渲染） */
-const ICONS = [
-	"star",
-	"heart",
-	"check",
-	"x",
-	"plus",
-	"arrow-right",
-	"arrow-up",
-	"arrow-down",
-	"zap",
-	"shield",
-	"settings",
-	"search",
-	"bell",
-	"clock",
-	"calendar",
-	"user",
-	"users",
-	"mail",
-	"phone",
-	"home",
-	"globe",
-	"rocket",
-	"target",
-	"trending-up",
-	"trending-down",
-	"layers",
-	"grid",
-	"list",
-	"eye",
-	"lock",
-	"cloud",
-	"database"
-];
-const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0?\.\d+|1|0)\s*)?\)|hsla?\(\s*\d{1,3}\s*,\s*\d{1,3}%\s*,\s*\d{1,3}%\s*(,\s*(0?\.\d+|1|0)\s*)?\)?|[a-zA-Z]{3,20})$/;
-const LENGTH_RE = /^(\d{1,4}(\.\d+)?)(px|%|rem)?$/;
-/** 校验单个 style 值（返回错误消息或 null=通过） */
-function checkStyleValue(prop, value) {
-	const rule = STYLE_WHITELIST[prop];
-	if (rule === void 0) return `unknown style property "${prop}"; allowed: ${Object.keys(STYLE_WHITELIST).join(", ")}`;
-	switch (rule.type) {
-		case "color":
-			if (typeof value !== "string" || !COLOR_RE.test(value)) return `"${String(value)}" is not a valid color (use #hex, rgb(), hsl(), or a named color)`;
-			return null;
-		case "length":
-			if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= rule.max) return null;
-			if (typeof value === "string" && LENGTH_RE.test(value)) {
-				const n = parseFloat(value);
-				if (n >= 0 && n <= rule.max) return null;
-			}
-			return `"${String(value)}" must be a length ≤ ${rule.max} (number=px, or "Npx"/"N%"/"Nrem")`;
-		case "number":
-			if (typeof value !== "number" || !Number.isFinite(value) || value < rule.min || value > rule.max) return `"${String(value)}" must be a number in [${rule.min}, ${rule.max}]`;
-			return null;
-		case "enum":
-			if (typeof value !== "string" || !rule.values.includes(value)) return `"${String(value)}" must be one of ${rule.values.join("/")}`;
-			return null;
-	}
-}
-[
-	"@keyframes openloop-fade-in { from { opacity: 0 } to { opacity: 1 } }",
-	"@keyframes openloop-slide-up { from { opacity: 0; transform: translateY(12px) } to { opacity: 1; transform: translateY(0) } }",
-	"@keyframes openloop-slide-down { from { opacity: 0; transform: translateY(-12px) } to { opacity: 1; transform: translateY(0) } }",
-	"@keyframes openloop-scale-in { from { opacity: 0; transform: scale(.96) } to { opacity: 1; transform: scale(1) } }",
-	"@keyframes openloop-pulse { 0%,100% { opacity: 1 } 50% { opacity: .6 } }",
-	"@keyframes openloop-float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-5px) } }"
-].join("\n");
-//#endregion
 //#region src/dsl.ts
 /** v0.1 仪表盘节点集（10 节点） */
 const NODE_REGISTRY = {
@@ -441,60 +187,20 @@ const NODE_REGISTRY = {
 			}
 		}
 	},
-	box: {
-		type: "box",
-		description: "设计容器（可嵌套 children ≤6 层）：布局/间距/背景/边框/阴影/动画",
+	html: {
+		type: "html",
+		description: "自由 HTML 块（画布沙箱内渲染，支持脚本；元素级标注同文档原生生效）。用于富排版/演示/设计稿——baoyu-design 等设计 skill 的产物放这里；结构化内容仍用专用节点",
 		props: {
-			style: {
-				kind: "style",
-				maxProps: 16
+			source: {
+				kind: "html-source",
+				maxBytes: 102400,
+				required: true
 			},
-			animation: { kind: "animation" }
-		}
-	},
-	text: {
-		type: "text",
-		description: "设计文本：字号/字重/颜色/对齐/动画",
-		props: {
-			content: {
+			title: {
 				kind: "string",
-				maxLength: 500,
-				required: true
-			},
-			style: {
-				kind: "style",
-				maxProps: 12
-			},
-			animation: { kind: "animation" }
-		}
-	},
-	icon: {
-		type: "icon",
-		description: "内置 SVG 图标（lucide 风格白名单）",
-		props: {
-			name: {
-				kind: "enum",
-				values: [...ICONS],
-				required: true
-			},
-			size: {
-				kind: "number",
-				min: 12,
-				max: 96
-			},
-			style: {
-				kind: "style",
-				maxProps: 4
+				maxLength: 120
 			}
 		}
-	},
-	divider: {
-		type: "divider",
-		description: "分隔线",
-		props: { style: {
-			kind: "style",
-			maxProps: 6
-		} }
 	}
 };
 const LAYOUTS = [
@@ -512,13 +218,8 @@ const LIMITS = {
 	maxTableRows: 100,
 	maxTableColumns: 12,
 	maxTitleLength: 120,
-	maxEdges: 64,
-	maxDepth: 6,
-	maxTotalNodes: 128,
-	maxDesignNodeBytes: 32768
+	maxEdges: 64
 };
-/** 允许 children 的节点类型（仅设计容器） */
-const NESTABLE_TYPES = /* @__PURE__ */ new Set(["box"]);
 var CanvasValidationError = class extends Error {
 	constructor(message) {
 		super(message);
@@ -717,39 +418,17 @@ function checkProp(path, value, rule) {
 			}
 			return;
 		}
-		case "style": {
+		case "html-source": {
 			if (value === void 0) {
 				if (rule.required === true) fail(path, "is required");
 				return;
 			}
-			if (!isPlainObject(value)) {
-				fail(path, "must be an object of whitelisted style properties", "{ color, fontSize, padding, … }");
+			if (typeof value !== "string") {
+				fail(path, "must be a string (complete HTML document or fragment)", "html string");
 				return;
 			}
-			const keys = Object.keys(value);
-			if (keys.length > rule.maxProps) fail(path, `${keys.length} props exceeds max ${rule.maxProps}`);
-			for (const k of keys) {
-				const err = checkStyleValue(k, value[k]);
-				if (err !== null) fail(`${path}.${k}`, err);
-			}
-			return;
-		}
-		case "animation": {
-			if (value === void 0) {
-				if (rule.required === true) fail(path, "is required");
-				return;
-			}
-			if (!isPlainObject(value)) {
-				fail(path, "must be an object", "{ name: \"fade-in\"|\"slide-up\"|…, duration?, delay? }");
-				return;
-			}
-			const name = value["name"];
-			if (typeof name !== "string" || !ANIMATIONS.includes(name)) fail(`${path}.name`, `must be one of ${ANIMATIONS.join("/")}`, ANIMATIONS.join(" | "));
-			const duration = value["duration"];
-			if (duration !== void 0 && (typeof duration !== "number" || duration < 0 || duration > 4e3)) fail(`${path}.duration`, "must be a number in [0, 4000] ms");
-			const delay = value["delay"];
-			if (delay !== void 0 && (typeof delay !== "number" || delay < 0 || delay > 4e3)) fail(`${path}.delay`, "must be a number in [0, 4000] ms");
-			for (const k of Object.keys(value)) if (k !== "name" && k !== "duration" && k !== "delay") fail(`${path}.${k}`, `unknown animation field; allowed: name, duration, delay`);
+			const bytes = byteSize(value);
+			if (bytes > rule.maxBytes) fail(path, `size ${bytes}B exceeds max ${rule.maxBytes}B; inline scripts/styles count — move large assets to http(s) URLs`);
 			return;
 		}
 	}
@@ -803,59 +482,37 @@ function validateInner(value) {
 	if (nodes.length === 0) fail("nodes", "must contain at least 1 node");
 	if (nodes.length > LIMITS.maxNodes) fail("nodes", `${nodes.length} nodes exceeds max ${LIMITS.maxNodes}`);
 	const seenIds = /* @__PURE__ */ new Set();
-	let totalNodes = 0;
-	/** 0.11 递归节点校验（设计原语嵌套）：深度/总数守卫 + id 全局查重 */
-	const validateNode = (n, path, depth) => {
+	for (let i = 0; i < nodes.length; i += 1) {
+		const n = nodes[i];
+		const path = `nodes[${i}]`;
 		if (!isPlainObject(n)) {
 			fail(path, "must be an object");
-			return;
+			continue;
 		}
-		totalNodes += 1;
-		if (totalNodes > LIMITS.maxTotalNodes) {
-			fail(path, `total node count exceeds max ${LIMITS.maxTotalNodes} (including nested children)`);
-			return;
-		}
-		const byteLimit = NESTABLE_TYPES.has(String(n["type"])) ? LIMITS.maxDesignNodeBytes : LIMITS.maxNodeBytes;
-		if (byteSize(n) > byteLimit) fail(path, `size exceeds max ${byteLimit}B`);
+		if (!(n["type"] === "html") && byteSize(n) > LIMITS.maxNodeBytes) fail(path, `size exceeds max ${LIMITS.maxNodeBytes}B`);
 		const id = n["id"];
 		if (typeof id !== "string" || !ID_RE.test(id)) fail(`${path}.id`, "must match [a-zA-Z0-9_-]{1,32}");
-		else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}" (ids must be unique across the whole canvas including nested children)`);
+		else if (seenIds.has(id)) fail(`${path}.id`, `duplicate node id "${id}"`);
 		else seenIds.add(id);
 		const type = n["type"];
 		if (typeof type !== "string") {
 			fail(`${path}.type`, "must be a string");
-			return;
+			continue;
 		}
 		const def = NODE_REGISTRY[type];
 		if (def === void 0) {
 			fail(`${path}.type`, `unknown node type "${type}"`, Object.keys(NODE_REGISTRY).join(" | "));
-			return;
+			continue;
 		}
 		const props = n["props"];
 		if (!isPlainObject(props)) {
 			fail(`${path}.props`, "must be an object");
-			return;
+			continue;
 		}
 		for (const [key, rule] of Object.entries(def.props)) checkProp(`${path}.props.${key}`, props[key], rule);
 		if (type === "link" && typeof props["href"] === "string") checkHref(`${path}.props.href`, props["href"]);
 		for (const key of Object.keys(props)) if (!(key in def.props)) fail(`${path}.props.${key}`, `unknown prop for ${type}; allowed: ${Object.keys(def.props).join(", ") || "(none)"}`);
-		const children = n["children"];
-		if (children !== void 0) {
-			if (!NESTABLE_TYPES.has(type)) {
-				fail(`${path}.children`, `nodes of type "${type}" do not support children; only ${[...NESTABLE_TYPES].join("/")} can nest`);
-				return;
-			}
-			if (!Array.isArray(children)) {
-				fail(`${path}.children`, "must be an array of nodes");
-				return;
-			}
-			if (children.length > LIMITS.maxNodes) fail(`${path}.children`, `${children.length} children exceeds max ${LIMITS.maxNodes}`);
-			if (depth + 1 > LIMITS.maxDepth) fail(`${path}.children`, `nesting depth exceeds max ${LIMITS.maxDepth}`);
-			for (let i = 0; i < children.length; i += 1) validateNode(children[i], `${path}.children[${i}]`, depth + 1);
-		}
-		for (const key of Object.keys(n)) if (key !== "id" && key !== "type" && key !== "props" && key !== "children") fail(`${path}.${key}`, `unknown node field; allowed: id, type, props, children`);
-	};
-	for (let i = 0; i < nodes.length; i += 1) validateNode(nodes[i], `nodes[${i}]`, 1);
+	}
 	const edges = value["edges"];
 	const checkedEdges = [];
 	if (edges !== void 0) {
@@ -1019,7 +676,7 @@ async function readBody(req, maxBytes = 65536) {
 	}
 	return Buffer.concat(chunks).toString("utf8");
 }
-function json$1(res, status, body) {
+function json$2(res, status, body) {
 	res.setHeader("Content-Type", "application/json");
 	res.setHeader("Cache-Control", "no-store");
 	res.statusCode = status;
@@ -1059,22 +716,22 @@ function setupAnnotateAudit(ctx, opts) {
 						allowed = false;
 					}
 					if (!allowed) {
-						json$1(res, 403, { error: "forbidden origin" });
+						json$2(res, 403, { error: "forbidden origin" });
 						return;
 					}
 					let body = null;
 					try {
 						body = JSON.parse(await readBody(req));
 					} catch {
-						json$1(res, 400, { error: "invalid json body" });
+						json$2(res, 400, { error: "invalid json body" });
 						return;
 					}
 					if (typeof body?.canvasId !== "string" || !/^cv_[a-z0-9]{8}$/.test(body.canvasId) || typeof body?.note !== "string" || body.note.length === 0 || body.note.length > 2e3 || !Array.isArray(body?.targets) || body.targets.length > 32 || !body.targets.every((t) => typeof t === "string" && t.length <= 32)) {
-						json$1(res, 400, { error: "invalid annotation payload" });
+						json$2(res, 400, { error: "invalid annotation payload" });
 						return;
 					}
 					if (rateLimited(body.canvasId)) {
-						json$1(res, 429, { error: "rate limited" });
+						json$2(res, 429, { error: "rate limited" });
 						return;
 					}
 					const line = JSON.stringify({
@@ -1087,7 +744,7 @@ function setupAnnotateAudit(ctx, opts) {
 					try {
 						opts.writeLog(line);
 					} catch {}
-					json$1(res, 200, { ok: true });
+					json$2(res, 200, { ok: true });
 				}
 			});
 		});
@@ -1098,7 +755,7 @@ function setupAnnotateAudit(ctx, opts) {
 }
 //#endregion
 //#region src/read.ts
-function json(res, status, body) {
+function json$1(res, status, body) {
 	res.setHeader("Content-Type", "application/json");
 	res.setHeader("Cache-Control", "no-store");
 	res.statusCode = status;
@@ -1131,13 +788,13 @@ function setupCanvasReadEndpoint(ctx, opts) {
 				path: "/qoder-canvas/canvas",
 				handler: async (req, res) => {
 					if (!allowed(req)) {
-						json(res, 403, { error: "forbidden origin" });
+						json$1(res, 403, { error: "forbidden origin" });
 						return;
 					}
 					const url = new URL(req.url ?? "/", "http://loopback.invalid");
 					const id = url.pathname.replace(/^\/qoder-canvas\/canvas\/?/, "");
 					if (!/^cv_[a-z0-9]{8}$/.test(id)) {
-						json(res, 400, { error: "malformed canvas id" });
+						json$1(res, 400, { error: "malformed canvas id" });
 						return;
 					}
 					const wsKey = url.searchParams.get("workspaceKey");
@@ -1145,10 +802,10 @@ function setupCanvasReadEndpoint(ctx, opts) {
 					const revRaw = url.searchParams.get("rev");
 					const snapshot = revRaw !== null && /^\d+$/.test(revRaw) ? await storage.read(id, Number(revRaw)) : await storage.latest(id);
 					if (snapshot === null) {
-						json(res, 404, { error: "canvas not found" });
+						json$1(res, 404, { error: "canvas not found" });
 						return;
 					}
-					json(res, 200, snapshot);
+					json$1(res, 200, snapshot);
 				}
 			});
 			ws.register({
@@ -1157,12 +814,12 @@ function setupCanvasReadEndpoint(ctx, opts) {
 				handler: async (req, res) => {
 					try {
 						if (!allowed(req)) {
-							json(res, 403, { error: "forbidden origin" });
+							json$1(res, 403, { error: "forbidden origin" });
 							return;
 						}
-						json(res, 200, opts.diag !== void 0 ? opts.diag() : { diag: "unavailable" });
+						json$1(res, 200, opts.diag !== void 0 ? opts.diag() : { diag: "unavailable" });
 					} catch (error) {
-						json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+						json$1(res, 500, { error: error instanceof Error ? error.message : String(error) });
 					}
 				}
 			});
@@ -1172,14 +829,141 @@ function setupCanvasReadEndpoint(ctx, opts) {
 				handler: async (req, res) => {
 					try {
 						if (!allowed(req)) {
-							json(res, 403, { error: "forbidden origin" });
+							json$1(res, 403, { error: "forbidden origin" });
 							return;
 						}
 						const wsKey = new URL(req.url ?? "/", "http://loopback.invalid").searchParams.get("workspaceKey");
-						json(res, 200, { items: await opts.storageFor(wsKey !== null && wsKey.length > 0 ? wsKey : "_no-cwd").list() });
+						json$1(res, 200, { items: await opts.storageFor(wsKey !== null && wsKey.length > 0 ? wsKey : "_no-cwd").list() });
 					} catch (error) {
-						json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+						json$1(res, 500, { error: error instanceof Error ? error.message : String(error) });
 					}
+				}
+			});
+		});
+		return () => {
+			disposed = true;
+		};
+	});
+}
+//#endregion
+//#region src/app-serve.ts
+/**
+* app-serve：canvas iframe 的壳端点 + app.js 静态资源端点（0.12）。
+*
+* - GET /qoder-canvas/app      → 壳 HTML（挂载点 div + ESM script 引 app.js）
+* - GET /qoder-canvas/app.js   → lib/app.js（tsdown 第三 entry 产物，node 侧读盘）
+*
+* 端点纪律（read.ts 同款）：ctx.effect 包裹 disposer + 运行时注入（headless
+* 静默降级）+ Origin 动态 host 校验。app.js 定位：import.meta.url 同目录
+* （node 侧 lib/app-serve.js 与 lib/app.js 同级）。
+*/
+const SHELL_HTML = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; }
+  #openloop-canvas-app-root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="openloop-canvas-app-root"></div>
+<script>
+// 诊断信（0.12 排查期）：模块加载成败/运行时错误回传宿主 console
+window.addEventListener('error', function (e) {
+  try { parent.postMessage({ __openloopCanvasAppDiag: true, kind: 'error', message: String(e.message || e.error), src: String(e.filename || '') + ':' + e.lineno }, '*') } catch (_) {}
+}, true);
+window.addEventListener('unhandledrejection', function (e) {
+  try { parent.postMessage({ __openloopCanvasAppDiag: true, kind: 'rejection', message: String(e.reason) }, '*') } catch (_) {}
+});
+try { parent.postMessage({ __openloopCanvasAppDiag: true, kind: 'shell-loaded' }, '*') } catch (_) {}
+<\/script>
+<script type="module" src="/qoder-canvas/app.js" onerror="try{parent.postMessage({__openloopCanvasAppDiag:true,kind:'module-error',message:'app.js failed to load (network/CORS)'},'*')}catch(_){}"><\/script>
+</body>
+</html>`;
+/** 定位 lib/app.js（与本文件产物同级；读失败缓存 null 只报一次） */
+function locateAppBundle() {
+	try {
+		const here = dirname(fileURLToPath(import.meta.url));
+		const p = join(here, "app.js");
+		readFileSync(p);
+		return p;
+	} catch {
+		return null;
+	}
+}
+function json(res, status, body) {
+	res.setHeader("Content-Type", "application/json");
+	res.statusCode = status;
+	res.end(typeof body === "string" ? body : JSON.stringify(body));
+}
+function setupCanvasAppEndpoint(ctx, opts) {
+	const injectFn = ctx.inject;
+	if (typeof injectFn !== "function") return;
+	ctx.effect(() => {
+		let disposed = false;
+		injectFn.call(ctx, ["webServer"], (routeCtx) => {
+			const ws = routeCtx?.webServer;
+			if (disposed || ws === void 0 || typeof ws.register !== "function") return;
+			const allowed = (req) => {
+				const h = (k) => {
+					const v = req.headers[k];
+					return typeof v === "string" ? v : Array.isArray(v) ? v[0] ?? "" : "";
+				};
+				const origin = h("origin");
+				if (origin === "null" || origin.length === 0) return true;
+				const host = h("host");
+				try {
+					return new URL(origin).host === host;
+				} catch {
+					return false;
+				}
+			};
+			ws.register({
+				kind: "exact",
+				path: "/qoder-canvas/app",
+				handler: (req, res) => {
+					if (!allowed(req)) {
+						json(res, 403, { error: "forbidden origin" });
+						return;
+					}
+					res.setHeader("Content-Type", "text/html; charset=utf-8");
+					res.setHeader("Cache-Control", "no-store");
+					res.statusCode = 200;
+					res.end(SHELL_HTML);
+				}
+			});
+			let appJsCache = null;
+			let appJsMissing = false;
+			ws.register({
+				kind: "exact",
+				path: "/qoder-canvas/app.js",
+				handler: (req, res) => {
+					if (!allowed(req)) {
+						json(res, 403, { error: "forbidden origin" });
+						return;
+					}
+					if (appJsCache === null && !appJsMissing) {
+						const p = locateAppBundle();
+						if (p === null) {
+							appJsMissing = true;
+							ctx.logger?.warn?.("qoder-canvas: lib/app.js not found — canvas iframe app unavailable (rebuild the plugin)");
+						} else try {
+							appJsCache = readFileSync(p);
+						} catch {
+							appJsMissing = true;
+						}
+					}
+					if (appJsCache === null) {
+						json(res, 500, { error: "app bundle missing" });
+						return;
+					}
+					res.setHeader("Content-Type", "text/javascript; charset=utf-8");
+					res.setHeader("Cache-Control", "no-store");
+					res.setHeader("Access-Control-Allow-Origin", "*");
+					res.statusCode = 200;
+					res.end(appJsCache);
 				}
 			});
 		});
@@ -1342,8 +1126,8 @@ let lastWorkspaceKey = "_no-cwd";
 /** 诊断：最近一次 save 失败原因（M4 排查用；成功则清空） */
 let lastSaveError = null;
 /**
-* 已知设计类 skill（0.9.1 路由）：命中即提示 Agent「富 HTML 设计走 html_artifact
-* 并用该 skill 风格」。匹配按 skill name。
+* 已知设计类 skill（0.9.1 路由 → 0.12 方向修正）：命中即提示 Agent
+* 「富 HTML 设计写进 canvas 的 html 节点（沙箱内可标注）并用该 skill 风格」。
 */
 const DESIGN_SKILLS = [
 	{
@@ -1384,7 +1168,7 @@ async function designSkillHint(ctx, canvasId) {
 	}
 	const hits = DESIGN_SKILLS.filter((d) => installed.includes(d.name));
 	if (hits.length === 0) return null;
-	return `Canvas ${canvasId} created. TIP — design skills detected: ${hits.map((h) => `${h.name} (${h.use})`).join("; ")}. For rich HTML designs (their specialty), render them via the html_artifact tool in that skill's style; canvas DSL nodes stay for structured data content.`;
+	return `Canvas ${canvasId} created. TIP — design skills detected: ${hits.map((h) => `${h.name} (${h.use})`).join("; ")}. For rich HTML designs, author them in the canvas html node in that skill's style — element-level annotation works inside it; DSL nodes stay for structured data content.`;
 }
 /** execute 内构造 storage（对齐 panels/artifact 模式：ctx 断言取 fs + ctx.get('sandboxPolicy')） */
 function storageOf(ctx, exec) {
@@ -1422,6 +1206,7 @@ function apply(ctx) {
 			} catch {}
 		}
 	});
+	setupCanvasAppEndpoint(ctx, { origin: originOf });
 	setupCanvasReadEndpoint(ctx, {
 		origin: originOf,
 		storageFor: (workspaceKey) => new CanvasStorage({
@@ -1445,11 +1230,11 @@ function apply(ctx) {
 	});
 	ctx.tools.register(defineTool({
 		name: "canvas",
-		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, DESIGNS). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (exact nested node paths + node JSON); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, DESIGN MOCKUPS (landing pages, hero sections, feature grids, pricing cards — via nested design primitives), flow diagrams, PPT-style decks, dashboards. DESIGN PRIMITIVES (v0.11): box/text/icon/divider nodes compose NESTED layouts (box supports children, ≤6 levels) with a whitelisted style subset — use them for rich visual design directly in the canvas (better than artifacts for it: element-level annotation works on every nested node, and users can iterate by annotating). MIX data + design freely: structured info → stat-card/chart/table/…; visual sections → nested box/text/icon compositions. When the user message contains a 画布标注 block, they are pointing at specific nodes (path like nodes[2].children[1]) — edit exactly those and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual/design content; prefer show_widget for tiny single-metric cards.",
+		description: "Render a visual canvas — your PRIMARY first-draft output medium (prototypes, plans, structured findings, designs). POSITIONING: canvas is an ideal agent-to-user bridge — it carries dense info AND the user annotates it (click/marquee/text-select elements + comments) that flows back to you as structured <target> context (nodes[i] path + full DSL); it does NOT replace artifacts (interactive HTML/apps), but it excels at first drafts and iteration: engineering plans, product/UX prototypes, small design prototypes, flow diagrams, PPT-style decks, dashboards, comparison matrices. When the user message contains a 画布标注 block, they are pointing at specific nodes — edit exactly those (match path/nodes[i] or the snippet) and re-emit the full document with the same canvasId; each call creates a NEW immutable revision (users may revert to older ones). The user's current open canvas is referenced in messages as 当前画布 when the canvas dock is open. Prefer this over raw HTML for structured/visual content; prefer show_widget for tiny single-metric cards. COMPANION SKILLS (optional, install separately — canvas works fully without them): baoyu-design (polished UI mockups/prototypes), huashu-design (high-fidelity prototypes/slides/PPT), kami (typeset docs/white papers/landing pages), archify (architecture/workflow/sequence diagrams), lieflat-charts (template-driven data-viz charts and reports). DESIGN CONTENT: the html node renders free-form HTML (design-skill output or plain HTML) INSIDE the canvas sandbox WITH full element-level annotation — users can click/marquee/text-select inside it; annotated elements come back with their source snippet. Use DSL nodes for structured data, the html node for rich layouts — mix freely in one canvas. Install location: $DSH_HOME/skills/<name>/ with a SKILL.md.",
 		parameters: {
 			document: {
 				type: "json",
-				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 14 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder). (* = required). DESIGN PRIMITIVES (v0.11, nestable): box: { style?: object of whitelisted props (color, backgroundColor, fontSize (≤96), fontWeight (300-800), textAlign, lineHeight, letterSpacing, fontFamily (sans/serif/mono), textTransform, display (flex/block/grid), flexDirection (row/column), justifyContent, alignItems, gap/padding (≤96) /margin (≤48) /borderRadius (≤48) /borderWidth (≤8) in px, borderStyle, borderColor, width/maxWidth, minHeight, opacity, flex, flexWrap, shadow (none/sm/md/lg), gradient (none/warm/cool/sunset/ocean/forest), tone), animation?: { name: \"none\"|\"fade-in\"|\"slide-up\"|\"slide-down\"|\"scale-in\"|\"pulse\"|\"float\", duration? (ms ≤4000), delay? (ms) }, children?: array of nodes (NESTING: box only, ≤6 levels, total ≤128 nodes incl. nested, ids unique canvas-wide) }; text: { content*: string≤500, style?, animation? }; icon: { name*: one of star/heart/check/x/plus/arrow-right/arrow-up/arrow-down/zap/shield/settings/search/bell/clock/calendar/user/users/mail/phone/home/globe/rocket/target/trending-up/trending-down/layers/grid/list/eye/lock/cloud/database, size?: 12-96, style? (≤4 props) }; divider: { style? (≤6 props) }. Limits: whole document ≤256KB. Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
+				description: "REQUIRED (unless list=true). Canvas document — ALL fields verified strictly, extra props are REJECTED. Shape: { \"title\": string (REQUIRED, non-empty, ≤120 chars — the canvas heading; never omit it), \"layout\": \"grid\"|\"flow\"|\"split-h\"|\"split-v\" (REQUIRED), \"nodes\": array (REQUIRED, 1-32 items, each { \"id\": [a-zA-Z0-9_-]{1,32} unique, \"type\": one of the 11 below, \"props\": EXACTLY the listed fields — no others }), \"edges\": optional array of { from, to } referencing node ids }. NODE TYPES with exact allowed props — stat-card: { label*: string≤60, value*: string≤40, delta?: number, deltaLabel?: string≤20, tone?: \"default\"|\"success\"|\"warn\"|\"error\"|\"info\" }; chart: { chart*: \"line\"|\"bar\"|\"pie\"|\"area\", series*: array≤8 of { name: string≤60, points: array≤200 of { x: number|string, y: number } }, title?: string≤120 }; table: { columns*: string[]≤12 (each ≤40 chars), rows*: array≤100 of arrays (cells: string≤300/number/boolean/null), title?: string≤120 }; key-value: { pairs*: object ≤16 of key(≤60)→string value(≤200), title?: string≤120 }; markdown: { text*: string≤8000 — supports # headings, - lists, **bold**, `code` only, no HTML }; callout: { text*: string≤2000, tone?: \"info\"|\"success\"|\"warn\"|\"error\", title?: string≤120 }; section: { title*: string≤120 }; action: { label*: string≤60, intent*: string≤120, context?: flat object ≤4KB of string/number/boolean values }; link: { label*: string≤120, href*: \"http(s)://…\" only }; panel: {} (placeholder); html: { source*: string — complete HTML document or fragment ≤100KB, rendered in a canvas-sandboxed shadow DOM WITH element-level annotation (use for rich layouts/design decks; inline JS allowed; reference external assets by http(s) URL), title?: string≤120 }. (* = required). Limits: whole document ≤256KB. Example: { \"title\": \"Deploys\", \"layout\": \"grid\", \"nodes\": [{ \"id\": \"n1\", \"type\": \"stat-card\", \"props\": { \"label\": \"Deploys 24h\", \"value\": \"142\", \"delta\": 12, \"tone\": \"success\" } }, { \"id\": \"n2\", \"type\": \"chart\", \"props\": { \"chart\": \"line\", \"series\": [{ \"name\": \"ok\", \"points\": [{ \"x\": 1, \"y\": 8 }] }] } }] }"
 			},
 			canvasId: {
 				type: "string",

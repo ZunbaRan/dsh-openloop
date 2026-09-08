@@ -28,6 +28,19 @@ export type AnnotationTarget =
       /** 划选文本所属的节点 id（S7.1 增强：Agent 不再只靠文本猜位置） */
       readonly nodeId?: string | undefined
     }
+  | {
+      /** 0.12：html 节点 shadow DOM 内的元素命中（同文档直接标注） */
+      readonly kind: 'html-element'
+      /** 所属 html 节点 id */
+      readonly id: string
+      readonly label: string
+      /** shadow 内 CSS 路径（带 :nth-of-type） */
+      readonly domPath: string
+      readonly tag: string
+      readonly text?: string | undefined
+      /** 命中元素 outerHTML 截断（~600 字符）——Agent 按源码片段文本匹配定位修改 */
+      readonly snippet: string
+    }
 
 export interface CanvasAnnotation {
   readonly id: string
@@ -87,45 +100,45 @@ export function removeAnnotation(canvasId: string, id: string): void {
  * 每个 node target 带：document 路径（nodes[i]）+ 节点类型 + id + 【完整 DSL 源码片段】
  * ——Agent 拿到后能精确定位 canvas 工具的 document 里改哪一段。
  */
-type SnapshotLike = { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>>; children?: readonly unknown[] }[] } }
+type SnapshotLike = { canvasId: string; revision: number; canvas: { title: string; nodes?: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[] } }
 
-/**
- * 0.11 嵌套寻址：在（可能嵌套的）节点树中递归查找 id。
- * 命中返回 { path（JSONPath 形如 "nodes[2].children[1].children[0]"）, node }——
- * Agent 拿路径精确定位 document 里的嵌套位置改哪一段（DSL 复刻的王牌：标注回流
- * 精确到嵌套子树，这正是 iframe 路线做不到的）。
- */
-function findNodePath(id: string, nodes: readonly { id: string; children?: readonly unknown[] }[] | undefined, prefix: string): { path: string; node: Record<string, unknown> } | null {
-  if (nodes === undefined) return null
-  for (let i = 0; i < nodes.length; i += 1) {
-    const n = nodes[i] as { id: string; children?: readonly unknown[] }
-    const p = `${prefix}[${i}]`
-    if (n.id === id) return { path: p, node: n as Record<string, unknown> }
-    const child = findNodePath(id, n.children as readonly { id: string; children?: readonly unknown[] }[] | undefined, `${p}.children`)
-    if (child !== null) return child
+/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位；html-element 带 snippet） */
+function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; type: string; props: Readonly<Record<string, unknown>> }[]): string {
+  if (t.kind === 'html-element') {
+    return formatHtmlElementTarget(t, nodes)
   }
-  return null
-}
-
-/** 单个 target 的结构化块（node/element 带 DSL 源码；text 带所属节点定位；0.11 嵌套路径） */
-function formatTargetBlock(t: AnnotationTarget, nodes: readonly { id: string; type: string; props: Readonly<Record<string, unknown>>; children?: readonly unknown[] }[]): string {
   if (t.kind === 'node' || t.kind === 'element') {
-    const found = findNodePath(t.id, nodes, 'nodes')
-    const node = found?.node as { id: string; type: string } | undefined
+    const idx = nodes.findIndex(n => n.id === t.id)
+    const node = idx >= 0 ? nodes[idx] : undefined
     // 元素级：额外带 element（DOM 路径）+ tag + text——Agent 知道用户指的是节点内哪个子元素
     const elementAttrs = t.kind === 'element'
       ? ` element="${t.domPath}" tag="${t.tag}"${t.text !== undefined && t.text.length > 0 ? ` text="${t.text.replace(/"/g, '&quot;')}"` : ''}`
       : ''
-    if (found !== null && node !== undefined) {
-      return `<target type="${node.type}" id="${node.id}" path="${found.path}"${elementAttrs}>\n${JSON.stringify(found.node, null, 2)}\n</target>`
+    if (node !== undefined) {
+      return `<target type="${node.type}" id="${node.id}" path="nodes[${idx}]"${elementAttrs}>\n${JSON.stringify(node, null, 2)}\n</target>`
     }
     // 节点不在当前快照（快照迭代后被删）——降级为 id 引用
     return `<target id="${t.id}" note="not found in current revision"${elementAttrs}>${t.label}</target>`
   }
-  // 划字：带所属节点定位（S7.1——只给文本 Agent 只能猜它在哪个节点；0.11 嵌套路径）
-  const found = t.nodeId !== undefined ? findNodePath(t.nodeId, nodes, 'nodes') : null
-  const inAttr = found !== null ? ` in="${found.path}"` : t.nodeId !== undefined ? ` in="${t.nodeId}"` : ''
+  // 划字：带所属节点定位（S7.1——只给文本 Agent 只能猜它在哪个节点）
+  const idx = t.nodeId !== undefined ? nodes.findIndex(n => n.id === t.nodeId) : -1
+  const inAttr = idx >= 0 ? ` in="nodes[${idx}]"` : t.nodeId !== undefined ? ` in="${t.nodeId}"` : ''
   return `<target type="text"${inAttr}>"${t.excerpt}"</target>`
+}
+
+/** html-element target 块（0.12）：snippet 是 Agent 定位修改的主线索 */
+function formatHtmlElementTarget(t: Extract<AnnotationTarget, { kind: 'html-element' }>, nodes: readonly { id: string; type: string }[]): string {
+  const idx = nodes.findIndex(n => n.id === t.id)
+  const pathAttr = idx >= 0 ? `nodes[${idx}]` : t.id
+  const textAttr = t.text !== undefined && t.text.length > 0 ? ` text="${escapeAttr(t.text)}"` : ''
+  // snippet 首字符防御：防 [ / @ / 1) 等触发 Lexical composer 魔法转换——起头补换行
+  const snippet = t.snippet.length > 0 && /[[@\d]/.test(t.snippet[0] ?? '') ? `\n${t.snippet}` : t.snippet
+  return `<target type="html" id="${t.id}" path="${pathAttr}" element="${escapeAttr(t.domPath)}" tag="${t.tag}"${textAttr}>\n${snippet}\n</target>\n定位说明：该元素在 html 节点 ${pathAttr} 的 source 内，无结构化路径——请以上方源码片段做文本匹配定位，修改后重发完整 source`
+}
+
+/** 属性值转义（防注入破坏 XML 结构） */
+function escapeAttr(s: string): string {
+  return s.replace(/"/g, '&quot;').replace(/\n/g, ' ')
 }
 
 export function formatAnnotationDraft(

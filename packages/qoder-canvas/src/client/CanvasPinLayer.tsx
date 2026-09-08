@@ -46,6 +46,8 @@ interface ElementHit {
   readonly domPath: string
   readonly tag: string
   readonly text?: string | undefined
+  /** 0.12：html 节点 open shadow DOM 内的命中（同文档——el 是 shadow 内元素） */
+  readonly shadowHit?: { readonly el: Element; readonly domPath: string; readonly snippet: string } | undefined
 }
 
 const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
@@ -67,7 +69,7 @@ function PinBadge({ n, annotation, onEdit, onDelete, onHover }: {
 }): ReactNode {
   const [cardOpen, setCardOpen] = useState(false)
   const firstTarget = annotation.targets[0]
-  const anchorId = firstTarget !== undefined && (firstTarget.kind === 'node' || firstTarget.kind === 'element') ? firstTarget.id : null
+  const anchorId = firstTarget !== undefined && (firstTarget.kind === 'node' || firstTarget.kind === 'element' || firstTarget.kind === 'html-element') ? firstTarget.id : null
   return (
     <>
       <button
@@ -152,6 +154,26 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
     if (surface === null) return null
     for (const el of document.elementsFromPoint(x, y)) {
       if (el.closest('[data-openloop-canvas-pin-layer]') !== null) continue
+      // 0.12 shadow 命中：open shadow 内元素（elementsFromPoint 穿透返回）——
+      // closest/contains 都不穿 shadow 边界，需经 getRootNode().host 归属到 html 节点
+      const root = el.getRootNode()
+      if (root instanceof ShadowRoot) {
+        const host = root.host
+        if (host === null || !surface.contains(host)) continue
+        const nodeId = host.getAttribute('data-canvas-node')
+        if (nodeId === null || nodeId.length === 0) continue
+        const text = (el.textContent ?? '').trim()
+        let snippet = ''
+        try { snippet = el.outerHTML ?? '' } catch { snippet = '' }
+        if (snippet.length > 600) snippet = snippet.slice(0, 600)
+        return {
+          nodeId,
+          domPath: '',
+          tag: el.tagName.toLowerCase(),
+          text: text.length > 0 ? text.slice(0, 40) : undefined,
+          shadowHit: { el, domPath: domPathWithinShadow(el), snippet },
+        }
+      }
       if (!surface.contains(el)) continue
       const nodeEl = el.closest('[data-canvas-node]')
       if (nodeEl === null || !surface.contains(nodeEl)) continue
@@ -329,7 +351,18 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
           setLocked(hit)
           const node = snapshot.canvas.nodes.find(n => n.id === hit.nodeId)
           const type = node?.type ?? hit.nodeId
-          if (hit.domPath.length === 0) {
+          if (hit.shadowHit !== undefined) {
+            // 0.12：html 节点 shadow 内命中 → html-element target（snippet 定位）
+            callbacks.onTargetsChange([{
+              kind: 'html-element',
+              id: hit.nodeId,
+              label: `html ${hit.tag}${hit.text !== undefined ? ` "${hit.text.slice(0, 20)}"` : ''}`,
+              tag: hit.tag,
+              domPath: hit.shadowHit.domPath,
+              text: hit.text,
+              snippet: hit.shadowHit.snippet,
+            }])
+          } else if (hit.domPath.length === 0) {
             // 命中 node 根元素——node 级
             const label = node !== undefined ? String(node.props.label ?? node.props.title ?? hit.nodeId) : hit.nodeId
             callbacks.onTargetsChange([{ kind: 'node', id: hit.nodeId, label }])
@@ -409,18 +442,28 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         {hovered !== null && (locked === null || hovered.nodeId !== locked.nodeId || hovered.domPath !== locked.domPath) ? (
           <HighlightEl surface={containerRef.current} hit={hovered} borderStyle="outline" nodeType={snapshot.canvas.nodes.find(n => n.id === hovered.nodeId)?.type} />
         ) : null}
-        {/* 选中高亮（S8：targets 驱动——点选 1 个带 tooltip；框选 N 个全部亮框不带 tooltip） */}
+        {/* 选中高亮（S8：targets 驱动——点选 1 个带 tooltip；框选 N 个全部亮框不带 tooltip。
+            0.12：html-element target 回显 host 整块（精确 rect 在 hover/锁定态） */}
         {targets.map(t => {
-          if (t.kind !== 'node' && t.kind !== 'element') return null
-          const hit: ElementHit = t.kind === 'element'
-            ? { nodeId: t.id, domPath: t.domPath, tag: t.tag, text: t.text }
-            : { nodeId: t.id, domPath: '', tag: 'div' }
-          return (
-            <HighlightEl key={`sel-${t.id}-${t.kind === 'element' ? t.domPath : 'root'}`}
-              surface={containerRef.current} hit={hit} borderStyle="solid"
-              nodeType={snapshot.canvas.nodes.find(n => n.id === t.id)?.type}
-              showTooltip={targets.length === 1} />
-          )
+          if (t.kind === 'node' || t.kind === 'element') {
+            const hit: ElementHit = t.kind === 'element'
+              ? { nodeId: t.id, domPath: t.domPath, tag: t.tag, text: t.text }
+              : { nodeId: t.id, domPath: '', tag: 'div' }
+            return (
+              <HighlightEl key={`sel-${t.id}-${t.kind === 'element' ? t.domPath : 'root'}`}
+                surface={containerRef.current} hit={hit} borderStyle="solid"
+                nodeType={snapshot.canvas.nodes.find(n => n.id === t.id)?.type}
+                showTooltip={targets.length === 1} />
+            )
+          }
+          if (t.kind === 'html-element') {
+            return (
+              <HighlightEl key={`sel-${t.id}-${t.domPath}`}
+                surface={containerRef.current} hit={{ nodeId: t.id, domPath: '', tag: t.tag }} borderStyle="solid"
+                nodeType="html" showTooltip={targets.length === 1} />
+            )
+          }
+          return null
         })}
         {/* 框选拖拽中的实时命中高亮（outline，无 tooltip；元素级 domPath 定位） */}
         {marqueeHits.map(h => (
@@ -479,6 +522,25 @@ function domPathWithin(ancestor: Element, el: Element): string {
   return parts.join(' > ')
 }
 
+/** 0.12：shadow 内 CSS 路径（从命中元素向上到 ShadowRoot 停——parentElement 在 shadow root 处为 null） */
+function domPathWithinShadow(el: Element): string {
+  const parts: string[] = []
+  let cur: Element | null = el
+  while (cur !== null) {
+    const tag = cur.tagName.toLowerCase()
+    const cls = (cur.getAttribute('class') ?? '').trim().split(/\s+/)[0]
+    let part = cls !== undefined && cls.length > 0 ? `${tag}.${CSS.escape(cls)}` : tag
+    const parent: Element | null = cur.parentElement
+    if (parent !== null) {
+      const sameTag = [...parent.children].filter(c => c.tagName === (cur as Element).tagName)
+      if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(cur) + 1})`
+    }
+    parts.unshift(part)
+    cur = cur.parentElement
+  }
+  return parts.join(' > ')
+}
+
 /** badge 锚点：包一层 node 元素尺寸的 absolute 容器，角标钉在右上 */
 function NodeBadgeAnchor({ surface, nodeId, children }: { surface: HTMLElement | null; nodeId: string; children: ReactNode }): ReactNode {
   if (surface === null) return null
@@ -506,7 +568,16 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
   const nodeEl = surface.querySelector<HTMLElement>(`[data-canvas-node="${CSS.escape(hit.nodeId)}"]`)
   if (nodeEl === null) return null
   let el: Element = nodeEl
-  if (hit.domPath.length > 0) {
+  if (hit.shadowHit !== undefined) {
+    // 0.12 shadow 命中：直接用 shadow 内元素的 viewport 坐标（同文档有效）；
+    // 回查走 host.shadowRoot.querySelector
+    const sr = nodeEl.shadowRoot
+    if (sr !== null) {
+      try { el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el } catch { el = hit.shadowHit.el }
+    } else {
+      el = hit.shadowHit.el
+    }
+  } else if (hit.domPath.length > 0) {
     try { el = nodeEl.querySelector(hit.domPath) ?? nodeEl } catch { el = nodeEl }
   }
   const er = el.getBoundingClientRect()
