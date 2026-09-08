@@ -6,6 +6,7 @@ Canvas 是 agent-to-user 沟通的首选第一产物媒介（结构化内容）�
 
 - **结构化内容**（看板/指标/表格/清单/流程文案/方案）→ canvas 的 DSL 节点：stat-card / chart / table / key-value / markdown / callout / section / action / link
 - **设计稿/原型**（落地页/hero/特性网格/价格卡/PPT 页面）→ **canvas 的 html 节点**（0.12+）：自由 HTML 在画布沙箱内渲染（shadow DOM 隔离样式），**元素级标注照常生效**——用户点选/框选/划字 HTML 内的任何元素，你会收到其源码片段（snippet），按文本匹配定位修改后重发完整 source。baoyu-design/huashu-design/kami 等设计 skill 的产物就放这里
+- **形态纯粹性（重要）**：一个画布要么纯 DSL 节点、要么纯 html 节点（通常单节点）——除非用户明确要求混排，不要两种形态混在一个画布里
 - **富交互 HTML 应用**（真正的 app/工具）→ 走 `html_artifact` 工具
 - 每次调用产生新的不可变 revision，用户可回退任意版本继续迭代
 
