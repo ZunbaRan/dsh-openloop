@@ -43,6 +43,9 @@ export type AnnotationTarget =
       /** 0.12.6 兄弟索引路径（[顶层 childIndex, …, 命中 childIndex]）——
           CSS 选择器在 Tailwind class（含 :）下回查不稳，索引 walk 纯数字稳定 */
       readonly indexPath?: readonly number[] | undefined
+      /** 命中时的元素引用（内存态，不持久化——addAnnotation 序列化前剥离）。
+          用户点破（0.12.7）：hover 拿到 el 就该存下来直接用，确认后不需要回查 */
+      readonly el?: Element | undefined
     }
 
 export interface CanvasAnnotation {
@@ -79,9 +82,21 @@ export function listAnnotations(canvasId: string): CanvasAnnotation[] {
   return readAll(canvasId)
 }
 
+/** 序列化安全：targets 里的元素引用（DOM 对象，JSON.stringify 循环引用会炸）在持久化前剥离（0.12.7） */
+function stripTransientTargets(targets: readonly CanvasAnnotation['targets'][number][]): CanvasAnnotation['targets'] {
+  return targets.map(t => {
+    if (t.kind === 'html-element' && t.el !== undefined) {
+      const { el: _drop, ...rest } = t
+      return rest
+    }
+    return t
+  })
+}
+
 export function addAnnotation(input: Omit<CanvasAnnotation, 'id' | 'createdAt'>): CanvasAnnotation {
   const annotation: CanvasAnnotation = {
     ...input,
+    targets: stripTransientTargets(input.targets),
     id: `ann_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`,
     createdAt: new Date().toISOString(),
   }

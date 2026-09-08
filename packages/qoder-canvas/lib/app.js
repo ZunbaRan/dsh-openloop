@@ -8577,7 +8577,8 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 						domPath: hit.shadowHit.domPath,
 						indexPath: hit.shadowHit.indexPath,
 						text: hit.text,
-						snippet: hit.shadowHit.snippet
+						snippet: hit.shadowHit.snippet,
+						el: hit.shadowHit.el
 					}]);
 					else if (hit.domPath.length === 0) {
 						const label = node !== void 0 ? String(node.props.label ?? node.props.title ?? hit.nodeId) : hit.nodeId;
@@ -8697,22 +8698,26 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 						showTooltip: targets.length === 1
 					}, `sel-${t.id}-${t.kind === "element" ? t.domPath : "root"}`);
 				}
-				if (t.kind === "html-element") return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HighlightEl, {
-					surface: containerRef.current,
-					hit: {
-						nodeId: t.id,
-						domPath: "",
-						tag: t.tag,
-						shadowHit: {
-							domPath: t.domPath,
-							indexPath: t.indexPath,
-							snippet: t.snippet
-						}
-					},
-					borderStyle: "solid",
-					nodeType: "html",
-					showTooltip: targets.length === 1
-				}, `sel-${t.id}-${t.domPath}`);
+				if (t.kind === "html-element") {
+					const liveEl = t.el !== void 0 && t.el.isConnected ? t.el : void 0;
+					return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HighlightEl, {
+						surface: containerRef.current,
+						hit: {
+							nodeId: t.id,
+							domPath: "",
+							tag: t.tag,
+							shadowHit: {
+								el: liveEl,
+								domPath: t.domPath,
+								indexPath: t.indexPath,
+								snippet: t.snippet
+							}
+						},
+						borderStyle: "solid",
+						nodeType: "html",
+						showTooltip: targets.length === 1
+					}, `sel-${t.id}-${t.domPath}`);
+				}
 				return null;
 			}),
 			marqueeHits.map((h) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(HighlightEl, {
@@ -8883,10 +8888,14 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
 				if (ok && cur !== null) found = cur;
 			}
 			if (found !== null) el = found;
-			else try {
-				el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl;
-			} catch {
-				el = hit.shadowHit.el ?? nodeEl;
+			else {
+				const ref = hit.shadowHit.el;
+				if (ref !== void 0 && ref.isConnected) el = ref;
+				else try {
+					el = sr.querySelector(hit.shadowHit.domPath) ?? nodeEl;
+				} catch {
+					el = nodeEl;
+				}
 			}
 		} else el = hit.shadowHit.el ?? nodeEl;
 	} else if (hit.domPath.length > 0) try {

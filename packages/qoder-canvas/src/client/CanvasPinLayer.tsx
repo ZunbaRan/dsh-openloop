@@ -378,6 +378,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
               indexPath: hit.shadowHit.indexPath,
               text: hit.text,
               snippet: hit.shadowHit.snippet,
+              el: hit.shadowHit.el, // 0.12.7：元素引用直接带上——确认后高亮直接用，不回查
             }])
           } else if (hit.domPath.length === 0) {
             // 命中 node 根元素——node 级
@@ -474,12 +475,13 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
             )
           }
           if (t.kind === 'html-element') {
-            // 0.12.5/0.12.6 高亮修复：targets 的 html-element 带 shadowHit（domPath + indexPath + snippet）——
-            // indexPath 索引 walk 回查绝对稳定（Tailwind class 下 CSS 选择器不可靠）
+            // 0.12.7（用户点破）：优先用命中时存的元素引用直接画（不回查）；
+            // el 失效（DOM 重建 isConnected=false）或缺失（持久化历史注释）才走 indexPath/domPath 回查
+            const liveEl = t.el !== undefined && t.el.isConnected ? t.el : undefined
             return (
               <HighlightEl key={`sel-${t.id}-${t.domPath}`}
                 surface={containerRef.current}
-                hit={{ nodeId: t.id, domPath: '', tag: t.tag, shadowHit: { domPath: t.domPath, indexPath: t.indexPath, snippet: t.snippet } }}
+                hit={{ nodeId: t.id, domPath: '', tag: t.tag, shadowHit: { el: liveEl, domPath: t.domPath, indexPath: t.indexPath, snippet: t.snippet } }}
                 borderStyle="solid" nodeType="html" showTooltip={targets.length === 1} />
             )
           }
@@ -654,7 +656,13 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
       if (found !== null) {
         el = found
       } else {
-        try { el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl } catch { el = hit.shadowHit.el ?? nodeEl }
+        // 0.12.7：el 引用（选中态直接存的）优先于 domPath 查询
+        const ref = hit.shadowHit.el
+        if (ref !== undefined && ref.isConnected) {
+          el = ref
+        } else {
+          try { el = sr.querySelector(hit.shadowHit.domPath) ?? nodeEl } catch { el = nodeEl }
+        }
       }
     } else {
       el = hit.shadowHit.el ?? nodeEl

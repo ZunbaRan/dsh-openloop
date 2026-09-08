@@ -957,9 +957,20 @@ window.__ModuleLoader__.load({
 		function listAnnotations(canvasId) {
 			return readAll(canvasId);
 		}
+		/** 序列化安全：targets 里的元素引用（DOM 对象，JSON.stringify 循环引用会炸）在持久化前剥离（0.12.7） */
+		function stripTransientTargets(targets) {
+			return targets.map((t) => {
+				if (t.kind === "html-element" && t.el !== void 0) {
+					const { el: _drop, ...rest } = t;
+					return rest;
+				}
+				return t;
+			});
+		}
 		function addAnnotation(input) {
 			const annotation = {
 				...input,
+				targets: stripTransientTargets(input.targets),
 				id: `ann_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e4)}`,
 				createdAt: (/* @__PURE__ */ new Date()).toISOString()
 			};
