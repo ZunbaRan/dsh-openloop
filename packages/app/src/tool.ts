@@ -182,7 +182,7 @@ async function runCore(action: Action, a: Record<string, unknown>, facade: Await
 export function createAppBackendTool(backend: AppBackend, options: { getMcpRuntime?: () => import('@openloop/dsh-mcp-runtime').McpRuntimeService | undefined } = {}): ToolDefinition {
   return defineTool({
     name: APP_BACKEND_TOOL,
-    description: 'Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration, and connect_server for third-party MCP Apps 2.0 packs. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned.',
+    description: 'Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration, and connect_server for third-party MCP Apps 2.0 packs. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned. If a capability you need is missing (e.g. creating collections or other platform features), report the gap to the maintainer and stop — never modify or patch platform packages under vendor/node_modules.',
     parameters: APP_BACKEND_PARAMETERS,
     output: {
       schema: APP_OUTPUT_SCHEMA,
@@ -195,7 +195,9 @@ export function createAppBackendTool(backend: AppBackend, options: { getMcpRunti
       const a = args as Record<string, unknown>
       const action = expectString(a, 'action', 'list_apps') as Action
       if (!(ACTIONS as readonly string[]).includes(action)) {
-        throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(', ')}.`)
+        // 平台边界协议（L3）：未知 action = 平台能力缺口的信号——指引 agent 报告并止步，
+        // 而不是转向「改平台包」的越界方案（2026-09-05 studio 构建实跑教训）
+        throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(', ')}. This is a platform capability gap, not something to work around: report the gap to the maintainer (what you needed, evidence, suggested platform extension) and stop — do not modify or patch platform packages under vendor/node_modules.`)
       }
       // doctor 动作（backend_health / backend_restart）不经 facade——backend 挂了也要能诊断/恢复
       if (action === 'backend_health' || action === 'backend_restart') {

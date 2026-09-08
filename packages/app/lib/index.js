@@ -6627,7 +6627,7 @@ async function runCore(action, a, facade) {
 function createAppBackendTool(backend, options = {}) {
 	return defineTool({
 		name: APP_BACKEND_TOOL,
-		description: "Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration, and connect_server for third-party MCP Apps 2.0 packs. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned.",
+		description: "Managed local app backend (PocketBase behind a controlled facade): app/component/api registry, board & tile storage, dock state migration, and connect_server for third-party MCP Apps 2.0 packs. Load the openloop-app-backend skill before the first call. All resource ids follow `app-name:resource-name` (naming is addressing). Credentials are write-only — only configured status is returned. If a capability you need is missing (e.g. creating collections or other platform features), report the gap to the maintainer and stop — never modify or patch platform packages under vendor/node_modules.",
 		parameters: APP_BACKEND_PARAMETERS,
 		output: {
 			schema: APP_OUTPUT_SCHEMA,
@@ -6642,7 +6642,7 @@ function createAppBackendTool(backend, options = {}) {
 		async execute(args) {
 			const a = args;
 			const action = expectString(a, "action", "list_apps");
-			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}.`);
+			if (!ACTIONS.includes(action)) throw new Error(`unknown action "${String(a.action)}". Valid actions: ${ACTIONS.join(", ")}. This is a platform capability gap, not something to work around: report the gap to the maintainer (what you needed, evidence, suggested platform extension) and stop — do not modify or patch platform packages under vendor/node_modules.`);
 			if (action === "backend_health" || action === "backend_restart") return await runAction(action, a, backend, void 0);
 			if (action === "connect_server" || action === "disconnect_server" || action === "reconnect_server") {
 				const { connectServer, disconnectServer, reconnectServer } = await import("./connect-CmTvIpKq.js");
