@@ -8355,10 +8355,11 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 				if (host === null || !surface.contains(host)) continue;
 				const nodeId = host.getAttribute("data-canvas-node");
 				if (nodeId === null || nodeId.length === 0) continue;
-				const text = (el.textContent ?? "").trim();
+				const deep = drillToDeepest(el, x, y);
+				const text = (deep.textContent ?? "").trim();
 				let snippet = "";
 				try {
-					snippet = el.outerHTML ?? "";
+					snippet = deep.outerHTML ?? "";
 				} catch {
 					snippet = "";
 				}
@@ -8366,11 +8367,11 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 				return {
 					nodeId,
 					domPath: "",
-					tag: el.tagName.toLowerCase(),
+					tag: deep.tagName.toLowerCase(),
 					text: text.length > 0 ? text.slice(0, 40) : void 0,
 					shadowHit: {
-						el,
-						domPath: domPathWithinShadow(el),
+						el: deep,
+						domPath: domPathWithinShadow(deep),
 						snippet
 					}
 				};
@@ -8758,6 +8759,28 @@ function domPathWithin(ancestor, el) {
 		cur = cur.parentElement;
 	}
 	return parts.join(" > ");
+}
+/**
+* 0.12.1 drill-down：从命中元素向下找最深的含坐标子元素（DevTools 检查器语义）。
+* 纯 rect 遍历（无额外 API 调用），shadow 内 DOM 有限，成本 O(深度×兄弟数)。
+*/
+function drillToDeepest(el, x, y) {
+	let cur = el;
+	for (let depth = 0; depth < 8 && cur.children.length > 0; depth += 1) {
+		let next = null;
+		for (let i = 0; i < cur.children.length; i += 1) {
+			const c = cur.children[i];
+			if (c === void 0) continue;
+			const r = c.getBoundingClientRect();
+			if (r.width > 0 && r.height > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+				next = c;
+				break;
+			}
+		}
+		if (next === null) break;
+		cur = next;
+	}
+	return cur;
 }
 /** 0.12：shadow 内 CSS 路径（从命中元素向上到 ShadowRoot 停——parentElement 在 shadow root 处为 null） */
 function domPathWithinShadow(el) {

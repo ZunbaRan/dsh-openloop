@@ -353,10 +353,13 @@ export function CanvasWorkbench(): ReactNode {
               {appFailed ? (
                 <CanvasSurface snapshot={snapshot} />
               ) : (
+                // 0.12.1 高度修正（用户实测「画布只有半屏」）：iframe 占满工作台容器
+                // （flex:1）而不是固定内容高——内容多时 iframe 内部滚动（自然行为）；
+                // 之前 height: iframeH（默认 400）在 ~900px 可视区只用一半
                 <iframe
                   ref={iframeRef}
                   title={`canvas-app-${snapshot.canvasId}`}
-                  style={{ width: '100%', height: iframeH, border: 0, display: 'block', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1, #fff)' }}
+                  style={{ width: '100%', flex: 1, minHeight: 240, border: 0, display: 'block', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1, #fff)' }}
                 />
               )}
             </div>

@@ -2226,7 +2226,8 @@ window.__ModuleLoader__.load({
 									title: `canvas-app-${snapshot.canvasId}`,
 									style: {
 										width: "100%",
-										height: iframeH,
+										flex: 1,
+										minHeight: 240,
 										border: 0,
 										display: "block",
 										borderRadius: 10,
