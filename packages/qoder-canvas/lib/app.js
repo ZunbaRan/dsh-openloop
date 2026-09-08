@@ -8700,7 +8700,11 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 					hit: {
 						nodeId: t.id,
 						domPath: "",
-						tag: t.tag
+						tag: t.tag,
+						shadowHit: {
+							domPath: t.domPath,
+							snippet: t.snippet
+						}
 					},
 					borderStyle: "solid",
 					nodeType: "html",
@@ -8842,11 +8846,11 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
 	if (hit.shadowHit !== void 0) {
 		const sr = nodeEl.shadowRoot;
 		if (sr !== null) try {
-			el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el;
+			el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl;
 		} catch {
-			el = hit.shadowHit.el;
+			el = hit.shadowHit.el ?? nodeEl;
 		}
-		else el = hit.shadowHit.el;
+		else el = hit.shadowHit.el ?? nodeEl;
 	} else if (hit.domPath.length > 0) try {
 		el = nodeEl.querySelector(hit.domPath) ?? nodeEl;
 	} catch {

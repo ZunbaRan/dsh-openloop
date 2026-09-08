@@ -46,8 +46,9 @@ interface ElementHit {
   readonly domPath: string
   readonly tag: string
   readonly text?: string | undefined
-  /** 0.12：html 节点 open shadow DOM 内的命中（同文档——el 是 shadow 内元素） */
-  readonly shadowHit?: { readonly el: Element; readonly domPath: string; readonly snippet: string } | undefined
+  /** 0.12：html 节点 open shadow DOM 内的命中（同文档——el 是 shadow 内元素；
+      targets 回显时 el 可缺省（HighlightEl 内部按 domPath 回查） */
+  readonly shadowHit?: { readonly el?: Element | undefined; readonly domPath: string; readonly snippet: string } | undefined
 }
 
 const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
@@ -464,10 +465,13 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
             )
           }
           if (t.kind === 'html-element') {
+            // 0.12.5 高亮修复：targets 的 html-element 必须带 shadowHit（domPath + snippet）——
+            // 否则 HighlightEl 回退到 host 整块（「hover 正确但确认后高亮变整块」根因）
             return (
               <HighlightEl key={`sel-${t.id}-${t.domPath}`}
-                surface={containerRef.current} hit={{ nodeId: t.id, domPath: '', tag: t.tag }} borderStyle="solid"
-                nodeType="html" showTooltip={targets.length === 1} />
+                surface={containerRef.current}
+                hit={{ nodeId: t.id, domPath: '', tag: t.tag, shadowHit: { domPath: t.domPath, snippet: t.snippet } }}
+                borderStyle="solid" nodeType="html" showTooltip={targets.length === 1} />
             )
           }
           return null
@@ -598,13 +602,14 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
   if (nodeEl === null) return null
   let el: Element = nodeEl
   if (hit.shadowHit !== undefined) {
-    // 0.12 shadow 命中：直接用 shadow 内元素的 viewport 坐标（同文档有效）；
-    // 回查走 host.shadowRoot.querySelector
+    // 0.12 shadow 命中：优先按 domPath 在 host.shadowRoot 回查（targets 回显路径——
+    // 用户实测「点击确认后高亮变整块」根因：targets 渲染只传 domPath:'' 没传 shadowHit，
+    // HighlightEl 找不到 shadow 内元素回退到 host 整块）；el 引用（hover 实时命中）兜底
     const sr = nodeEl.shadowRoot
     if (sr !== null) {
-      try { el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el } catch { el = hit.shadowHit.el }
+      try { el = sr.querySelector(hit.shadowHit.domPath) ?? hit.shadowHit.el ?? nodeEl } catch { el = hit.shadowHit.el ?? nodeEl }
     } else {
-      el = hit.shadowHit.el
+      el = hit.shadowHit.el ?? nodeEl
     }
   } else if (hit.domPath.length > 0) {
     try { el = nodeEl.querySelector(hit.domPath) ?? nodeEl } catch { el = nodeEl }
