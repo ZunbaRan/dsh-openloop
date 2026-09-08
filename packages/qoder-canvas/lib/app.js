@@ -8814,8 +8814,8 @@ function NodeBadgeAnchor({ surface, nodeId, children }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 		style: {
 			position: "absolute",
-			left: r.left - box.left,
-			top: r.top - box.top,
+			left: r.left - box.left + surface.scrollLeft,
+			top: r.top - box.top + surface.scrollTop,
 			width: r.width,
 			height: r.height,
 			pointerEvents: "none",
@@ -8861,10 +8861,11 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
 	};
 	if (r.width === 0 && r.height === 0) return null;
 	const tooltip = `${nodeType ?? ""} ${hit.tag} · ${Math.round(r.width)}×${Math.round(r.height)}`.trim();
+	const sx = surface.scrollLeft, sy = surface.scrollTop;
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: {
 		position: "absolute",
-		left: r.left - box.left - 2,
-		top: r.top - box.top - 2,
+		left: r.left - box.left - 2 + sx,
+		top: r.top - box.top - 2 + sy,
 		width: r.width + 4,
 		height: r.height + 4,
 		border: borderStyle === "outline" ? `1.5px solid ${ACCENT$2}` : `2px solid ${ACCENT$2}`,
@@ -8876,8 +8877,8 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
 	} }), showTooltip ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 		style: {
 			position: "absolute",
-			left: r.left - box.left - 2,
-			top: Math.max(2, r.top - box.top - 22),
+			left: r.left - box.left - 2 + sx,
+			top: Math.max(2, r.top - box.top - 22 + sy),
 			zIndex: 31,
 			fontSize: 10,
 			fontFamily: "ui-monospace, Menlo, monospace",

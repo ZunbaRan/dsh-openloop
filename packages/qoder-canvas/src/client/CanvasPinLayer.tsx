@@ -575,8 +575,10 @@ function NodeBadgeAnchor({ surface, nodeId, children }: { surface: HTMLElement |
   if (el === null) return null
   const box = surface.getBoundingClientRect()
   const r = el.getBoundingClientRect()
+  // 0.12.2 滚动补偿（用户实测「滚动后高亮错位」）：absolute 定位的参照是
+  // pin-layer 的内容坐标系——视口坐标差之外必须加容器 scroll 偏移
   return (
-    <div style={{ position: 'absolute', left: r.left - box.left, top: r.top - box.top, width: r.width, height: r.height, pointerEvents: 'none', zIndex: 35 }}>
+    <div style={{ position: 'absolute', left: r.left - box.left + surface.scrollLeft, top: r.top - box.top + surface.scrollTop, width: r.width, height: r.height, pointerEvents: 'none', zIndex: 35 }}>
       <div style={{ position: 'absolute', right: 0, top: 0, pointerEvents: 'auto' }}>{children}</div>
     </div>
   )
@@ -611,17 +613,21 @@ function HighlightEl({ surface, hit, borderStyle, nodeType, showTooltip = true }
   const r: { left: number; top: number; width: number; height: number } = { left: er.left, top: er.top, width: er.width, height: er.height }
   if (r.width === 0 && r.height === 0) return null
   const tooltip = `${nodeType ?? ''} ${hit.tag} · ${Math.round(r.width)}×${Math.round(r.height)}`.trim()
+  // 0.12.2 滚动补偿（用户实测「滚动后高亮错位」的根因）：
+  // 高亮框 absolute 定位的参照是 pin-layer 的内容坐标系——视口坐标差之外
+  // 必须加容器的 scrollLeft/scrollTop，否则滚动后高亮框画在旧位置
+  const sx = surface.scrollLeft, sy = surface.scrollTop
   return (
     <>
       <div style={{
-        position: 'absolute', left: r.left - box.left - 2, top: r.top - box.top - 2, width: r.width + 4, height: r.height + 4,
+        position: 'absolute', left: r.left - box.left - 2 + sx, top: r.top - box.top - 2 + sy, width: r.width + 4, height: r.height + 4,
         border: borderStyle === 'outline' ? `1.5px solid ${ACCENT}` : `2px solid ${ACCENT}`, borderRadius: 5, pointerEvents: 'none', zIndex: 30,
         background: 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 12%, transparent)',
         boxShadow: borderStyle === 'solid' ? `0 0 0 3px color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 18%, transparent)` : 'none',
       }} />
       {showTooltip ? (
         <div style={{
-          position: 'absolute', left: r.left - box.left - 2, top: Math.max(2, r.top - box.top - 22), zIndex: 31,
+          position: 'absolute', left: r.left - box.left - 2 + sx, top: Math.max(2, r.top - box.top - 22 + sy), zIndex: 31,
           fontSize: 10, fontFamily: 'ui-monospace, Menlo, monospace', lineHeight: 1,
           padding: '3px 7px', borderRadius: 4, pointerEvents: 'none', whiteSpace: 'nowrap',
           color: '#fff', background: 'var(--dsw-alias-state-business-primary, #4176e6)',
