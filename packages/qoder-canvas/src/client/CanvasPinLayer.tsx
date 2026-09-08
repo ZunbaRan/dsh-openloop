@@ -152,31 +152,35 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
   const hitElement = (x: number, y: number): ElementHit | null => {
     const surface = containerRef.current
     if (surface === null) return null
+    // 0.12.2 shadow 自查优先（真机根因修正）：sandbox opaque origin 下
+    // document.elementsFromPoint 不穿透 open shadow——hover html 节点时栈顶是
+    // shadow host（外层），永远进不了 shadow 分支。改为先对每个 open shadow
+    // 用 shadowRoot.elementFromPoint（shadow 内部自查，天然稳定不依赖穿透）。
+    const shadowHosts = surface.querySelectorAll('[data-openloop-html-host]')
+    for (const host of shadowHosts) {
+      const sr = host.shadowRoot
+      if (sr === null) continue
+      const hostRect = host.getBoundingClientRect()
+      if (x < hostRect.left || x > hostRect.right || y < hostRect.top || y > hostRect.bottom) continue
+      const nodeId = host.getAttribute('data-canvas-node')
+      if (nodeId === null || nodeId.length === 0) continue
+      const inner = sr.elementFromPoint(x, y)
+      if (inner === null) continue
+      const deep = drillToDeepest(inner, x, y)
+      const text = (deep.textContent ?? '').trim()
+      let snippet = ''
+      try { snippet = deep.outerHTML ?? '' } catch { snippet = '' }
+      if (snippet.length > 600) snippet = snippet.slice(0, 600)
+      return {
+        nodeId,
+        domPath: '',
+        tag: deep.tagName.toLowerCase(),
+        text: text.length > 0 ? text.slice(0, 40) : undefined,
+        shadowHit: { el: deep, domPath: domPathWithinShadow(deep), snippet },
+      }
+    }
     for (const el of document.elementsFromPoint(x, y)) {
       if (el.closest('[data-openloop-canvas-pin-layer]') !== null) continue
-      // 0.12 shadow 命中：open shadow 内元素（elementsFromPoint 穿透返回）——
-      // closest/contains 都不穿 shadow 边界，需经 getRootNode().host 归属到 html 节点
-      const root = el.getRootNode()
-      if (root instanceof ShadowRoot) {
-        const host = root.host
-        if (host === null || !surface.contains(host)) continue
-        const nodeId = host.getAttribute('data-canvas-node')
-        if (nodeId === null || nodeId.length === 0) continue
-        // 0.12.1 drill-down（用户实测「html 只能选到大的」）：命中容器元素时向下
-        // 找最深的含坐标子元素——对齐 DevTools 检查器语义（hover 总是选中最深层）
-        const deep = drillToDeepest(el, x, y)
-        const text = (deep.textContent ?? '').trim()
-        let snippet = ''
-        try { snippet = deep.outerHTML ?? '' } catch { snippet = '' }
-        if (snippet.length > 600) snippet = snippet.slice(0, 600)
-        return {
-          nodeId,
-          domPath: '',
-          tag: deep.tagName.toLowerCase(),
-          text: text.length > 0 ? text.slice(0, 40) : undefined,
-          shadowHit: { el: deep, domPath: domPathWithinShadow(deep), snippet },
-        }
-      }
       if (!surface.contains(el)) continue
       const nodeEl = el.closest('[data-canvas-node]')
       if (nodeEl === null || !surface.contains(nodeEl)) continue

@@ -8347,35 +8347,39 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 	const hitElement = (x, y) => {
 		const surface = containerRef.current;
 		if (surface === null) return null;
+		const shadowHosts = surface.querySelectorAll("[data-openloop-html-host]");
+		for (const host of shadowHosts) {
+			const sr = host.shadowRoot;
+			if (sr === null) continue;
+			const hostRect = host.getBoundingClientRect();
+			if (x < hostRect.left || x > hostRect.right || y < hostRect.top || y > hostRect.bottom) continue;
+			const nodeId = host.getAttribute("data-canvas-node");
+			if (nodeId === null || nodeId.length === 0) continue;
+			const inner = sr.elementFromPoint(x, y);
+			if (inner === null) continue;
+			const deep = drillToDeepest(inner, x, y);
+			const text = (deep.textContent ?? "").trim();
+			let snippet = "";
+			try {
+				snippet = deep.outerHTML ?? "";
+			} catch {
+				snippet = "";
+			}
+			if (snippet.length > 600) snippet = snippet.slice(0, 600);
+			return {
+				nodeId,
+				domPath: "",
+				tag: deep.tagName.toLowerCase(),
+				text: text.length > 0 ? text.slice(0, 40) : void 0,
+				shadowHit: {
+					el: deep,
+					domPath: domPathWithinShadow(deep),
+					snippet
+				}
+			};
+		}
 		for (const el of document.elementsFromPoint(x, y)) {
 			if (el.closest("[data-openloop-canvas-pin-layer]") !== null) continue;
-			const root = el.getRootNode();
-			if (root instanceof ShadowRoot) {
-				const host = root.host;
-				if (host === null || !surface.contains(host)) continue;
-				const nodeId = host.getAttribute("data-canvas-node");
-				if (nodeId === null || nodeId.length === 0) continue;
-				const deep = drillToDeepest(el, x, y);
-				const text = (deep.textContent ?? "").trim();
-				let snippet = "";
-				try {
-					snippet = deep.outerHTML ?? "";
-				} catch {
-					snippet = "";
-				}
-				if (snippet.length > 600) snippet = snippet.slice(0, 600);
-				return {
-					nodeId,
-					domPath: "",
-					tag: deep.tagName.toLowerCase(),
-					text: text.length > 0 ? text.slice(0, 40) : void 0,
-					shadowHit: {
-						el: deep,
-						domPath: domPathWithinShadow(deep),
-						snippet
-					}
-				};
-			}
 			if (!surface.contains(el)) continue;
 			const nodeEl = el.closest("[data-canvas-node]");
 			if (nodeEl === null || !surface.contains(nodeEl)) continue;
@@ -9352,6 +9356,7 @@ function HtmlNode({ nodeId, props }) {
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 		ref: hostRef,
 		"data-canvas-node": nodeId,
+		"data-openloop-html-host": "1",
 		title: title.length > 0 ? title : void 0,
 		style: {
 			width: "100%",

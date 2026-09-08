@@ -316,7 +316,7 @@ export function CanvasWorkbench(): ReactNode {
               </div>
             </div>
           ) : (
-            <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 14, position: 'relative' }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto', padding: 14, position: 'relative' }}>
               {/* 工作区目录（M4：悬浮列表） */}
               {catalogOpen ? (
                 <div style={{ position: 'absolute', right: 12, top: 0, zIndex: 65, width: 270, maxHeight: 'min(420px, calc(100% - 24px))', overflow: 'auto', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))', boxShadow: '0 12px 36px rgba(0,0,0,.26)' }}>

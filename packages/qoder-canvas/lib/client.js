@@ -2071,6 +2071,8 @@ window.__ModuleLoader__.load({
 							style: {
 								flex: 1,
 								minHeight: 0,
+								display: "flex",
+								flexDirection: "column",
 								overflow: "auto",
 								padding: 14,
 								position: "relative"

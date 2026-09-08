@@ -28,6 +28,7 @@ export function HtmlNode({ nodeId, props }: { nodeId: string; props: Record<stri
     <div
       ref={hostRef}
       data-canvas-node={nodeId}
+      data-openloop-html-host="1"
       title={title.length > 0 ? title : undefined}
       style={{
         width: '100%', minHeight: 120, position: 'relative',
