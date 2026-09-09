@@ -101,7 +101,7 @@ export function CanvasDockHost({ open, width, onWidthChange, children }: CanvasD
     width: open ? width : 0,
     transition: resizing ? 'none' : TRANSITION,
     overflow: 'hidden',
-    zIndex: 2147483052,  // 0.12.9：board icon(2147483050) 之上——画布内容不被 board toggle 盖住（用户实测 board icon 浮在画布上）
+    zIndex: 2147483105,  // 0.12.12：board toggle(2147483100, dock/index.tsx:66 实测) 之上——之前 2147483052 不够仍被 board icon 盖住
     background: 'var(--dsw-alias-bg-layer-1, #fff)',
     boxSizing: 'border-box',
   }

@@ -66,6 +66,8 @@ const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
 function targetToHit(t: AnnotationTarget): ElementHit | null {
   if (t.kind === 'node') return { nodeId: t.id, domPath: '', tag: 'div' }
   if (t.kind === 'element') return { nodeId: t.id, domPath: t.domPath, tag: t.tag, text: t.text }
+  // 0.12.12：html-element（框选 hover/选中回显）——el 引用优先（不回查）
+  if (t.kind === 'html-element') return { nodeId: t.id, domPath: '', tag: t.tag, text: t.text, shadowHit: { el: t.el, domPath: t.domPath, indexPath: t.indexPath, snippet: t.snippet } }
   return null
 }
 
@@ -293,6 +295,7 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
                   indexPath: indexPathWithinShadow(child),
                   text: text.length > 0 ? text.slice(0, 40) : undefined,
                   snippet,
+                  el: child, // 0.12.12：元素引用直接带上（同 0.12.7 点选方案——回显不查直接画，修「框选完成后高亮整块」）
                 })
               }
             } else {

@@ -815,7 +815,7 @@ window.__ModuleLoader__.load({
 				width: open ? width : 0,
 				transition: resizing ? "none" : TRANSITION,
 				overflow: "hidden",
-				zIndex: 2147483052,
+				zIndex: 2147483105,
 				background: "var(--dsw-alias-bg-layer-1, #fff)",
 				boxSizing: "border-box"
 			};

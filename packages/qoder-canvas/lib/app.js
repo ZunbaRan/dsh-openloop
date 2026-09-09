@@ -8200,6 +8200,18 @@ function targetToHit(t) {
 		tag: t.tag,
 		text: t.text
 	};
+	if (t.kind === "html-element") return {
+		nodeId: t.id,
+		domPath: "",
+		tag: t.tag,
+		text: t.text,
+		shadowHit: {
+			el: t.el,
+			domPath: t.domPath,
+			indexPath: t.indexPath,
+			snippet: t.snippet
+		}
+	};
 	return null;
 }
 /** 已存注释的编号角标（点击弹操作卡） */
@@ -8480,7 +8492,8 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 								domPath: domPathWithinShadow(child),
 								indexPath: indexPathWithinShadow(child),
 								text: text.length > 0 ? text.slice(0, 40) : void 0,
-								snippet
+								snippet,
+								el: child
 							});
 						}
 					} else collectShadow(child);
