@@ -1759,13 +1759,21 @@ window.__ModuleLoader__.load({
 					});
 				} catch {}
 			};
-			/** M4 工作区目录：拉清单（列表端点；失败静默） */
+			/** M4 工作区目录：拉清单（列表端点；失败静默）+ 空态诊断（lastSaveError 自浮现） */
+			const [catalogDiag, setCatalogDiag] = (0, react.useState)(null);
 			const refreshCatalog = async () => {
 				try {
 					const res = await fetch("/qoder-canvas/list");
 					if (!res.ok) return;
 					const body = await res.json();
 					if (Array.isArray(body.items)) setCatalogItems(body.items);
+					try {
+						const d = await fetch("/qoder-canvas/diag");
+						if (d.ok) {
+							const dj = await d.json();
+							setCatalogDiag(dj.lastSaveError ?? null);
+						}
+					} catch {}
 				} catch {}
 			};
 			/** M4 切换画布（目录点击）：拉指定 canvas 最新快照 + 注释跟随 */
@@ -2199,7 +2207,19 @@ window.__ModuleLoader__.load({
 											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
 												style: { fontSize: 10 },
 												children: "让 Agent 用 canvas 工具生成第一个（历史画布首次续编后入册）"
-											})
+											}),
+											catalogDiag !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
+												style: {
+													marginTop: 8,
+													fontSize: 9.5,
+													color: "var(--dsw-alias-state-business-danger, #d0453e)",
+													textAlign: "left",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													maxHeight: 80,
+													overflow: "auto"
+												},
+												children: ["落盘诊断：", catalogDiag]
+											}) : null
 										]
 									}) : catalogItems.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
 										type: "button",

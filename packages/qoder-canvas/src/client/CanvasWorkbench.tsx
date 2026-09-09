@@ -142,13 +142,22 @@ export function CanvasWorkbench(): ReactNode {
     } catch { /* 端点不存在（headless）——保底快照即可 */ }
   }
 
-  /** M4 工作区目录：拉清单（列表端点；失败静默） */
+  /** M4 工作区目录：拉清单（列表端点；失败静默）+ 空态诊断（lastSaveError 自浮现） */
+  const [catalogDiag, setCatalogDiag] = useState<string | null>(null)
   const refreshCatalog = async (): Promise<void> => {
     try {
       const res = await fetch('/qoder-canvas/list')
       if (!res.ok) return
       const body = await res.json() as { items?: CanvasListItem[] }
       if (Array.isArray(body.items)) setCatalogItems(body.items)
+      // 0.12.9 目录空态诊断：拿 lastSaveError（save 失败的确切原因——画布没落盘的根因）
+      try {
+        const d = await fetch('/qoder-canvas/diag')
+        if (d.ok) {
+          const dj = await d.json() as { lastSaveError?: string | null }
+          setCatalogDiag(dj.lastSaveError ?? null)
+        }
+      } catch { /* diag 失败静默 */ }
     } catch { /* headless / 端点未注入 */ }
   }
 
@@ -332,6 +341,11 @@ export function CanvasWorkbench(): ReactNode {
                   {catalogItems.length === 0 ? (
                     <div style={{ padding: '20px 14px', fontSize: 11, color: 'var(--dsw-alias-label-caption, #888)', textAlign: 'center' }}>
                       还没有画布产物<br /><span style={{ fontSize: 10 }}>让 Agent 用 canvas 工具生成第一个（历史画布首次续编后入册）</span>
+                      {catalogDiag !== null ? (
+                        <div style={{ marginTop: 8, fontSize: 9.5, color: 'var(--dsw-alias-state-business-danger, #d0453e)', textAlign: 'left', fontFamily: 'ui-monospace, Menlo, monospace', maxHeight: 80, overflow: 'auto' }}>
+                          落盘诊断：{catalogDiag}
+                        </div>
+                      ) : null}
                     </div>
                   ) : catalogItems.map(item => (
                     <button key={item.canvasId} type="button" onClick={() => { void openCanvas(item.canvasId) }}
