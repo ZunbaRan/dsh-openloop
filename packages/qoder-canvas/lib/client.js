@@ -815,7 +815,7 @@ window.__ModuleLoader__.load({
 				width: open ? width : 0,
 				transition: resizing ? "none" : TRANSITION,
 				overflow: "hidden",
-				zIndex: 2147483045,
+				zIndex: 2147483052,
 				background: "var(--dsw-alias-bg-layer-1, #fff)",
 				boxSizing: "border-box"
 			};
@@ -1591,6 +1591,14 @@ window.__ModuleLoader__.load({
 					theme
 				}, "*");
 			}
+			/** 0.12.9：宿主点击「评论 N」→ 通知 iframe 弹出评注面板（交互反馈） */
+			sendOpenPanel() {
+				this.iframe.contentWindow?.postMessage({
+					__openloopCanvasApp: true,
+					token: this.token,
+					t: "open-panel"
+				}, "*");
+			}
 			sendSnapshot(snapshot, annotations) {
 				console.info("[canvas-bridge] snapshot pushed");
 				this.iframe.contentWindow?.postMessage({
@@ -2006,16 +2014,25 @@ window.__ModuleLoader__.load({
 										});
 									})() : null]
 								}) : null,
-								snapshot !== null && annotations.length > 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-									title: "评论面板在画布内（选中元素时自动弹出）",
+								snapshot !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+									type: "button",
+									onClick: () => {
+										bridgeRef.current?.sendOpenPanel();
+										showToast("已打开画布内的评论面板");
+									},
+									title: "打开评论面板（画布内悬浮）",
 									style: {
 										fontSize: 11,
 										padding: "3px 9px",
 										borderRadius: 6,
+										border: 0,
+										cursor: "pointer",
 										background: "var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))",
-										color: "var(--dsw-alias-label-secondary, inherit)"
+										color: annotations.length > 0 ? ACCENT : "var(--dsw-alias-label-secondary, inherit)",
+										fontFamily: "inherit",
+										fontWeight: annotations.length > 0 ? 600 : 400
 									},
-									children: ["评论 ", annotations.length]
+									children: ["评论", annotations.length > 0 ? ` ${annotations.length}` : ""]
 								}) : null,
 								/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
 									type: "button",

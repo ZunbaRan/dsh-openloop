@@ -119,7 +119,13 @@ export function apply(ctx: Context): void {
   // S4：画布真身拉取端点（GET /qoder-canvas/canvas/:id；缺省 workspace 用最近写入的隔离键）
   setupCanvasReadEndpoint(ctx, {
     origin: originOf,
-    storageFor: (workspaceKey) => new CanvasStorage({ fs: (ctx as unknown as { fs: import('./storage.ts').FsLike }).fs, workspaceKey: workspaceKey === '_no-cwd' ? lastWorkspaceKey : workspaceKey }),
+    // 0.12.9：读/list 端点也带 per-call policy（与 save 同款——rc.7 下
+    // read/listDir 若无 policy 可能被 sandbox 拒，表现为「目录空但画布存在」）
+    storageFor: (workspaceKey) => new CanvasStorage({
+      fs: (ctx as unknown as { fs: import('./storage.ts').FsLike }).fs,
+      workspaceKey: workspaceKey === '_no-cwd' ? lastWorkspaceKey : workspaceKey,
+      policy: { mode: 'workspace-write', workspaceRoot: resolveStorageRoot() },
+    }),
     diag: async () => {
       // 0.9.2 诊断增强：skills catalog 快照（路由提示排查用）
       let skillsDiag: unknown = 'unavailable'

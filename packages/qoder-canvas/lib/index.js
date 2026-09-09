@@ -1211,7 +1211,11 @@ function apply(ctx) {
 		origin: originOf,
 		storageFor: (workspaceKey) => new CanvasStorage({
 			fs: ctx.fs,
-			workspaceKey: workspaceKey === "_no-cwd" ? lastWorkspaceKey : workspaceKey
+			workspaceKey: workspaceKey === "_no-cwd" ? lastWorkspaceKey : workspaceKey,
+			policy: {
+				mode: "workspace-write",
+				workspaceRoot: resolveStorageRoot()
+			}
 		}),
 		diag: async () => {
 			let skillsDiag = "unavailable";

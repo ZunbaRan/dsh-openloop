@@ -9400,6 +9400,10 @@ var CanvasAppClientBridge = class {
 			}
 			const verified = parseEnvelope(ev.data, this.token);
 			if (verified === null) return;
+			if (verified.t === "open-panel") {
+				this.handlers.onOpenPanel?.();
+				return;
+			}
 			if (verified.t === "snapshot") {
 				try {
 					window.parent.postMessage({
@@ -9488,11 +9492,6 @@ function HtmlNode({ nodeId, props }) {
 const ACCENT = "var(--dsw-alias-state-business-primary, #4176e6)";
 const MODES = [
 	{
-		key: "browse",
-		label: "浏览",
-		hint: "普通鼠标，纯查看（不选中不标注）"
-	},
-	{
 		key: "point",
 		label: "点选",
 		hint: "hover 高亮元素，点击选中（元素级精度）"
@@ -9531,6 +9530,9 @@ function CanvasApp() {
 		const bridge = new CanvasAppClientBridge({
 			onInit: (theme) => {
 				if (theme !== void 0) for (const [k, v] of Object.entries(theme)) document.documentElement.style.setProperty(k, v);
+			},
+			onOpenPanel: () => {
+				setPanelOpen(true);
 			},
 			onSnapshot: (data, annotations) => {
 				const snap = data;
@@ -9600,7 +9602,7 @@ function CanvasApp() {
 	(0, import_react.useEffect)(() => {
 		if (targets.length > 0) setPanelOpen(true);
 	}, [targets.length]);
-	const modeHint = (0, import_react.useMemo)(() => MODES.find((m) => m.key === mode)?.hint ?? "", [mode]);
+	const modeHint = (0, import_react.useMemo)(() => mode === "browse" ? "普通鼠标，纯查看（不选中不标注）" : MODES.find((m) => m.key === mode)?.hint ?? "", [mode]);
 	if (snapshot === null) return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 		style: {
 			display: "flex",
@@ -9633,8 +9635,8 @@ function CanvasApp() {
 				children: [
 					MODES.map((m) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
 						type: "button",
-						title: m.hint,
-						onClick: () => setMode(m.key),
+						title: `${m.hint}${mode === m.key ? "（再点取消）" : ""}`,
+						onClick: () => setMode((prev) => prev === m.key ? "browse" : m.key),
 						style: {
 							fontSize: 11,
 							padding: "3px 10px",

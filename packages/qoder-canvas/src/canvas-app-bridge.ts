@@ -120,6 +120,11 @@ export class CanvasAppHostBridge {
     this.iframe.contentWindow?.postMessage({ __openloopCanvasApp: true, token: this.token, t: 'init', theme }, '*')
   }
 
+  /** 0.12.9：宿主点击「评论 N」→ 通知 iframe 弹出评注面板（交互反馈） */
+  sendOpenPanel(): void {
+    this.iframe.contentWindow?.postMessage({ __openloopCanvasApp: true, token: this.token, t: 'open-panel' }, '*')
+  }
+
   sendSnapshot(snapshot: unknown, annotations?: readonly unknown[]): void {
     console.info('[canvas-bridge] snapshot pushed')
     this.iframe.contentWindow?.postMessage({ __openloopCanvasApp: true, token: this.token, t: 'snapshot', snapshot, annotations }, '*')
@@ -138,6 +143,7 @@ export class CanvasAppHostBridge {
 export interface AppBridgeHandlers {
   onInit: (theme: Readonly<Record<string, string>> | undefined) => void
   onSnapshot: (snapshot: unknown, annotations: unknown) => void
+  onOpenPanel?: (() => void) | undefined
 }
 
 export class CanvasAppClientBridge {
@@ -164,6 +170,10 @@ export class CanvasAppClientBridge {
       // 后续消息要求 token 匹配（init 已锁定）
       const verified = parseEnvelope(ev.data, this.token)
       if (verified === null) return
+      if (verified.t === 'open-panel') {
+        this.handlers.onOpenPanel?.()
+        return
+      }
       if (verified.t === 'snapshot') {
         // 诊断信（0.12 T5 排查）：app 端 console 不冒泡主 frame——postMessage 回传
         try { window.parent.postMessage({ __openloopCanvasAppDiag: true, kind: 'app-snapshot', hasToken: this.token !== null }, '*') } catch { /* ignore */ }

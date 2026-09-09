@@ -295,11 +295,13 @@ export function CanvasWorkbench(): ReactNode {
                 })() : null}
               </span>
             ) : null}
-            {/* 评论计数（0.12：评注面板在 iframe 内自动弹出——此为指示器） */}
-            {snapshot !== null && annotations.length > 0 ? (
-              <span title="评论面板在画布内（选中元素时自动弹出）" style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', color: 'var(--dsw-alias-label-secondary, inherit)' }}>
-                评论 {annotations.length}
-              </span>
+            {/* 评论计数（0.12.9：可点击——桥发 open-panel 让 iframe 内评注面板弹出，用户实测「需要能点击有反馈」） */}
+            {snapshot !== null ? (
+              <button type="button" onClick={() => { bridgeRef.current?.sendOpenPanel(); showToast('已打开画布内的评论面板') }}
+                title="打开评论面板（画布内悬浮）"
+                style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, border: 0, cursor: 'pointer', background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', color: annotations.length > 0 ? ACCENT : 'var(--dsw-alias-label-secondary, inherit)', fontFamily: 'inherit', fontWeight: annotations.length > 0 ? 600 : 400 }}>
+                评论{annotations.length > 0 ? ` ${annotations.length}` : ''}
+              </button>
             ) : null}
             <button type="button" onClick={() => persistOpen(false)} title="收起（画布保留）"
               style={{ fontSize: 11, padding: '3px 9px', borderRadius: 6, border: 0, cursor: 'pointer', background: 'var(--dsw-alias-interactive-bg-hover, rgba(127,127,127,.12))', color: 'var(--dsw-alias-label-secondary, inherit)', fontFamily: 'inherit' }}>收起</button>

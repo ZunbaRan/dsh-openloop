@@ -19,7 +19,6 @@ import { HtmlNode } from './HtmlNode.tsx'
 
 const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
 const MODES: readonly { key: PinMode; label: string; hint: string }[] = [
-  { key: 'browse', label: '浏览', hint: '普通鼠标，纯查看（不选中不标注）' },
   { key: 'point', label: '点选', hint: 'hover 高亮元素，点击选中（元素级精度）' },
   { key: 'marquee', label: '框选', hint: '拖拽框选多个元素' },
   { key: 'text', label: '划字', hint: '划选文本作为引用' },
@@ -61,6 +60,7 @@ export function CanvasApp(): ReactNode {
           }
         }
       },
+      onOpenPanel: () => { setPanelOpen(true) },
       onSnapshot: (data, annotations) => {
         // 真机教训（0.12 T5）：data 已是 snapshot 本身（桥解包了消息信封）——
         // 旧代码 data.snapshot 双重解包 undefined，校验永假，UI 停「等待画布数据」
@@ -126,7 +126,7 @@ export function CanvasApp(): ReactNode {
     if (targets.length > 0) setPanelOpen(true)
   }, [targets.length])
 
-  const modeHint = useMemo(() => MODES.find(m => m.key === mode)?.hint ?? '', [mode])
+  const modeHint = useMemo(() => mode === 'browse' ? '普通鼠标，纯查看（不选中不标注）' : (MODES.find(m => m.key === mode)?.hint ?? ''), [mode])
 
   if (snapshot === null) {
     return (
@@ -141,7 +141,8 @@ export function CanvasApp(): ReactNode {
       {/* 模式 toolbar（iframe 内） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.1))', flexShrink: 0 }}>
         {MODES.map(m => (
-          <button key={m.key} type="button" title={m.hint} onClick={() => setMode(m.key)}
+          <button key={m.key} type="button" title={`${m.hint}${mode === m.key ? '（再点取消）' : ''}`}
+            onClick={() => setMode(prev => prev === m.key ? 'browse' : m.key)}
             style={{
               fontSize: 11, padding: '3px 10px', borderRadius: 6, fontFamily: 'inherit', cursor: 'pointer',
               border: mode === m.key ? `1px solid ${ACCENT}` : '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.18))',
