@@ -164,11 +164,17 @@ declare class CanvasStorage {
    * 每个 cv_* 目录列 rev 文件，读最新 rev 拿标题。listDir 不可用（旧桩）返回空。
    */
   list(): Promise<readonly CanvasIndexEntry[]>;
+  /** 删除一个画布产物的全部版本（0.12.10）——node:fs 递归删目录（canvasId 正则防注入） */
+  deleteArtifact(canvasId: string): Promise<boolean>;
 }
+/** 删除一个画布产物的全部版本（返回是否真删到了东西） */
+declare function deleteCanvasArtifact(rootDir: string, workspaceKey: string, canvasId: string): Promise<boolean>;
+/** CanvasStorage 便捷删除（包 deleteCanvasArtifact，用本实例 rootDir/workspaceKey） */
+declare module './storage.ts' {}
 //#endregion
 //#region src/index.d.ts
 declare const name = "openloop-qoder-canvas";
 declare const inject: string[];
 declare function apply(ctx: Context): void;
 //#endregion
-export { CanvasDocument, CanvasIndexEntry, CanvasLayout, CanvasNode, CanvasSnapshot, CanvasStorage, CanvasValidationError, FsDirEntryLike, FsLike, FsTargetLike, LAYOUTS, LIMITS, NODE_REGISTRY, NodeDefinition, NodePropRule, StorageOptions, apply, generateCanvasId, inject, isValidCanvasId, name, resolveStorageRoot, validateCanvasDocument, workspaceKeyOf };
+export { CanvasDocument, CanvasIndexEntry, CanvasLayout, CanvasNode, CanvasSnapshot, CanvasStorage, CanvasValidationError, FsDirEntryLike, FsLike, FsTargetLike, LAYOUTS, LIMITS, NODE_REGISTRY, NodeDefinition, NodePropRule, StorageOptions, apply, deleteCanvasArtifact, generateCanvasId, inject, isValidCanvasId, name, resolveStorageRoot, validateCanvasDocument, workspaceKeyOf };

@@ -77,6 +77,22 @@ export function setupCanvasReadEndpoint(ctx: Context, opts: { storageFor: (works
           }
         },
       })
+      // exact 路由：/qoder-canvas/delete/:id（0.12.10 删除画布产物——POST + Origin 校验 + canvasId 正则）
+      ws.register({
+        kind: 'prefix',
+        path: '/qoder-canvas/delete',
+        handler: async (req, res) => {
+          if (!allowed(req)) { json(res, 403, { error: 'forbidden origin' }); return }
+          if (req.method !== 'POST') { json(res, 405, { error: 'method not allowed' }); return }
+          const url = new URL(req.url ?? '/', 'http://loopback.invalid')
+          const id = url.pathname.replace(/^\/qoder-canvas\/delete\/?/, '')
+          if (!/^cv_[a-z0-9]{8}$/.test(id)) { json(res, 400, { error: 'malformed canvas id' }); return }
+          const wsKey = url.searchParams.get('workspaceKey')
+          const storage = opts.storageFor(wsKey !== null && wsKey.length > 0 ? wsKey : '_no-cwd')
+          const deleted = await storage.deleteArtifact(id)
+          json(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: 'canvas not found' })
+        },
+      })
       // exact 路由：/qoder-canvas/list（工作区目录）
       ws.register({
         kind: 'exact',

@@ -146,6 +146,7 @@ export function apply(ctx: Context): void {
       canvasId: { type: 'string', description: 'Existing canvas id (cv_xxxxxxxx) to iterate; omit to create new.' },
       load: { type: 'string', description: 'Load an existing canvas by id as the base, then apply document on top (iterate continuation).' },
       list: { type: 'boolean', description: 'List existing canvases in this workspace (id/title/revision).' },
+      delete: { type: 'string', description: 'Delete an existing canvas artifact by id (cv_xxxxxxxx) — removes ALL its versions from local storage. Use when the user asks to remove a canvas.' },
     },
     output: {
       schema: { type: 'json' },
@@ -159,7 +160,14 @@ export function apply(ctx: Context): void {
     },
     async execute(args, exec) {
       const { document, canvasId, load, list } = argsOf(args as CanvasArgs)
+      const del = (args as Record<string, unknown>)['delete']
       const storage = storageOf(ctx, exec)
+      // delete：删除画布产物（全部版本）——canvasId 正则防注入
+      if (typeof del === 'string' && del.length > 0) {
+        if (!/^cv_[a-z0-9]{8}$/.test(del)) return { text: `error: malformed canvas id "${del}" (expected cv_xxxxxxxx)` }
+        const deleted = await storage.deleteArtifact(del)
+        return { text: deleted ? `Deleted canvas ${del} (all versions).` : `error: canvas ${del} not found in this workspace` }
+      }
       // list：纯文本清单，无 meta 无卡片
       if (list) {
         const items = await storage.list()

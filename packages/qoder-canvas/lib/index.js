@@ -1,9 +1,9 @@
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { readFile, readdir, rm } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { readFile, readdir } from "node:fs/promises";
 import { BUNDLED_SKILL_RANK } from "@deepseek-ai/dsh-skill";
 //#region src/dsl.ts
 /** v0.1 仪表盘节点集（10 节点） */
@@ -662,7 +662,35 @@ var CanvasStorage = class {
 		}
 		return out;
 	}
+	/** 删除一个画布产物的全部版本（0.12.10）——node:fs 递归删目录（canvasId 正则防注入） */
+	async deleteArtifact(canvasId) {
+		if (!/^cv_[a-z0-9]{8}$/.test(canvasId)) return false;
+		const dir = join(this.rootDir, this.workspaceKey, canvasId);
+		try {
+			await rm(dir, {
+				recursive: true,
+				force: true
+			});
+			return true;
+		} catch {
+			return false;
+		}
+	}
 };
+/** 删除一个画布产物的全部版本（返回是否真删到了东西） */
+async function deleteCanvasArtifact(rootDir, workspaceKey, canvasId) {
+	if (!/^cv_[a-z0-9]{8}$/.test(canvasId)) return false;
+	const dir = join(rootDir, workspaceKey, canvasId);
+	try {
+		await rm(dir, {
+			recursive: true,
+			force: true
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
 //#endregion
 //#region src/annotate.ts
 const RATE_LIMIT_PER_MINUTE = 60;
@@ -821,6 +849,29 @@ function setupCanvasReadEndpoint(ctx, opts) {
 					} catch (error) {
 						json$1(res, 500, { error: error instanceof Error ? error.message : String(error) });
 					}
+				}
+			});
+			ws.register({
+				kind: "prefix",
+				path: "/qoder-canvas/delete",
+				handler: async (req, res) => {
+					if (!allowed(req)) {
+						json$1(res, 403, { error: "forbidden origin" });
+						return;
+					}
+					if (req.method !== "POST") {
+						json$1(res, 405, { error: "method not allowed" });
+						return;
+					}
+					const url = new URL(req.url ?? "/", "http://loopback.invalid");
+					const id = url.pathname.replace(/^\/qoder-canvas\/delete\/?/, "");
+					if (!/^cv_[a-z0-9]{8}$/.test(id)) {
+						json$1(res, 400, { error: "malformed canvas id" });
+						return;
+					}
+					const wsKey = url.searchParams.get("workspaceKey");
+					const deleted = await opts.storageFor(wsKey !== null && wsKey.length > 0 ? wsKey : "_no-cwd").deleteArtifact(id);
+					json$1(res, deleted ? 200 : 404, deleted ? { ok: true } : { error: "canvas not found" });
 				}
 			});
 			ws.register({
@@ -1251,6 +1302,10 @@ function apply(ctx) {
 			list: {
 				type: "boolean",
 				description: "List existing canvases in this workspace (id/title/revision)."
+			},
+			delete: {
+				type: "string",
+				description: "Delete an existing canvas artifact by id (cv_xxxxxxxx) — removes ALL its versions from local storage. Use when the user asks to remove a canvas."
 			}
 		},
 		output: {
@@ -1267,7 +1322,12 @@ function apply(ctx) {
 		},
 		async execute(args, exec) {
 			const { document, canvasId, load, list } = argsOf(args);
+			const del = args["delete"];
 			const storage = storageOf(ctx, exec);
+			if (typeof del === "string" && del.length > 0) {
+				if (!/^cv_[a-z0-9]{8}$/.test(del)) return { text: `error: malformed canvas id "${del}" (expected cv_xxxxxxxx)` };
+				return { text: await storage.deleteArtifact(del) ? `Deleted canvas ${del} (all versions).` : `error: canvas ${del} not found in this workspace` };
+			}
 			if (list) {
 				const items = await storage.list();
 				if (items.length === 0) return { text: "No canvases in this workspace yet. Create one by calling canvas with a document." };
@@ -1329,4 +1389,4 @@ function apply(ctx) {
 	}));
 }
 //#endregion
-export { CanvasStorage, CanvasValidationError, LAYOUTS, LIMITS, NODE_REGISTRY, apply, generateCanvasId, inject, isValidCanvasId, name, resolveStorageRoot, validateCanvasDocument, workspaceKeyOf };
+export { CanvasStorage, CanvasValidationError, LAYOUTS, LIMITS, NODE_REGISTRY, apply, deleteCanvasArtifact, generateCanvasId, inject, isValidCanvasId, name, resolveStorageRoot, validateCanvasDocument, workspaceKeyOf };

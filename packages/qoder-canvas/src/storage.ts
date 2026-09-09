@@ -181,4 +181,40 @@ export class CanvasStorage {
     }
     return out
   }
+
+  /** 删除一个画布产物的全部版本（0.12.10）——node:fs 递归删目录（canvasId 正则防注入） */
+  async deleteArtifact(canvasId: string): Promise<boolean> {
+    if (!/^cv_[a-z0-9]{8}$/.test(canvasId)) return false
+    const dir = join(this.rootDir, this.workspaceKey, canvasId)
+    try {
+      await rm(dir, { recursive: true, force: true })
+      return true
+    } catch {
+      return false
+    }
+  }
 }
+
+// ---------------------------------------------------------------------------
+// 删除能力（0.12.10：用户「dsh 应拥有查看/删除 canvas-artifacts 的能力」）。
+// dsh-fs 无 delete 方法——用 node:fs 递归删 canvasId 目录。
+// 安全边界：canvasId 正则挡死路径注入（^cv_[a-z0-9]{8}$，无 ../ 逃逸）+
+// workspaceKey 隔离（只能删本工作区）+ 路径 join 固定前缀。
+// ---------------------------------------------------------------------------
+
+import { rm } from 'node:fs/promises'
+
+/** 删除一个画布产物的全部版本（返回是否真删到了东西） */
+export async function deleteCanvasArtifact(rootDir: string, workspaceKey: string, canvasId: string): Promise<boolean> {
+  if (!/^cv_[a-z0-9]{8}$/.test(canvasId)) return false
+  const dir = join(rootDir, workspaceKey, canvasId)
+  try {
+    await rm(dir, { recursive: true, force: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** CanvasStorage 便捷删除（包 deleteCanvasArtifact，用本实例 rootDir/workspaceKey） */
+declare module './storage.ts' {}

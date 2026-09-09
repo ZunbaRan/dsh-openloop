@@ -348,16 +348,38 @@ export function CanvasWorkbench(): ReactNode {
                       ) : null}
                     </div>
                   ) : catalogItems.map(item => (
-                    <button key={item.canvasId} type="button" onClick={() => { void openCanvas(item.canvasId) }}
-                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 0, borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.06))', cursor: 'pointer', background: snapshot?.canvasId === item.canvasId ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)' : 'none', fontFamily: 'inherit' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'inherit' }}>{item.title}</span>
-                        {item.revisions.length > 1 ? <span style={{ fontSize: 9.5, color: ACCENT, fontWeight: 600 }}>r{item.revision} · {item.revisions.length}版</span> : <span style={{ fontSize: 9.5, color: 'var(--dsw-alias-label-caption, #999)' }}>r{item.revision}</span>}
-                      </div>
-                      <div style={{ fontSize: 9.5, color: 'var(--dsw-alias-label-caption, #999)', marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace' }}>
-                        {item.canvasId}{item.updatedAt.length > 0 ? ` · ${new Date(item.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}
-                      </div>
-                    </button>
+                    <div key={item.canvasId}
+                      style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '8px 6px 8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.06))', background: snapshot?.canvasId === item.canvasId ? 'color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)' : 'none' }}>
+                      <button type="button" onClick={() => { void openCanvas(item.canvasId) }}
+                        style={{ flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', color: 'inherit' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.title}</span>
+                          {item.revisions.length > 1 ? <span style={{ fontSize: 9.5, color: ACCENT, fontWeight: 600 }}>r{item.revision} · {item.revisions.length}版</span> : <span style={{ fontSize: 9.5, color: 'var(--dsw-alias-label-caption, #999)' }}>r{item.revision}</span>}
+                        </div>
+                        <div style={{ fontSize: 9.5, color: 'var(--dsw-alias-label-caption, #999)', marginTop: 2, fontFamily: 'ui-monospace, Menlo, monospace' }}>
+                          {item.canvasId}{item.updatedAt.length > 0 ? ` · ${new Date(item.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}
+                        </div>
+                      </button>
+                      {/* 0.12.10 删除按钮（用户「dsh 应拥有查看/删除 canvas-artifacts 的能力」） */}
+                      <button type="button" title={`删除「${item.title}」（全部版本）`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!window.confirm(`删除画布「${item.title}」（${item.canvasId}，全部 ${item.revisions.length} 个版本）？此操作不可恢复。`)) return
+                          void (async () => {
+                            try {
+                              const res = await fetch(`/qoder-canvas/delete/${item.canvasId}`, { method: 'POST' })
+                              if (res.ok) {
+                                if (snapshot?.canvasId === item.canvasId) { setSnapshot(null); setAnnotations([]) }
+                                await refreshCatalog()
+                                showToast(`已删除「${item.title}」`)
+                              } else {
+                                showToast('删除失败')
+                              }
+                            } catch { showToast('删除失败（网络）') }
+                          })()
+                        }}
+                        style={{ flexShrink: 0, border: 0, background: 'none', padding: '3px 6px', cursor: 'pointer', fontSize: 13, lineHeight: 1, color: 'var(--dsw-alias-state-business-danger, #d0453e)', fontFamily: 'inherit', opacity: 0.7 }}>×</button>
+                    </div>
                   ))}
                 </div>
               ) : null}

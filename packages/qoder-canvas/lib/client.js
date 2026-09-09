@@ -2221,73 +2221,116 @@ window.__ModuleLoader__.load({
 												children: ["落盘诊断：", catalogDiag]
 											}) : null
 										]
-									}) : catalogItems.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
-										type: "button",
-										onClick: () => {
-											openCanvas(item.canvasId);
-										},
+									}) : catalogItems.map((item) => /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										style: {
-											display: "block",
-											width: "100%",
-											textAlign: "left",
-											padding: "8px 12px",
-											border: 0,
+											display: "flex",
+											alignItems: "center",
+											gap: 4,
+											padding: "8px 6px 8px 12px",
 											borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.06))",
-											cursor: "pointer",
-											background: snapshot?.canvasId === item.canvasId ? "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)" : "none",
-											fontFamily: "inherit"
+											background: snapshot?.canvasId === item.canvasId ? "color-mix(in srgb, var(--dsw-alias-state-business-primary, #4176e6) 8%, transparent)" : "none"
 										},
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											style: {
-												display: "flex",
-												alignItems: "center",
-												gap: 6
+										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
+											type: "button",
+											onClick: () => {
+												openCanvas(item.canvasId);
 											},
-											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+											style: {
+												flex: 1,
+												minWidth: 0,
+												textAlign: "left",
+												border: 0,
+												background: "none",
+												cursor: "pointer",
+												padding: 0,
+												fontFamily: "inherit",
+												color: "inherit"
+											},
+											children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												style: {
-													fontSize: 11.5,
-													fontWeight: 600,
-													flex: 1,
-													minWidth: 0,
-													overflow: "hidden",
-													textOverflow: "ellipsis",
-													whiteSpace: "nowrap",
-													color: "inherit"
+													display: "flex",
+													alignItems: "center",
+													gap: 6
 												},
-												children: item.title
-											}), item.revisions.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
+													style: {
+														fontSize: 11.5,
+														fontWeight: 600,
+														flex: 1,
+														minWidth: 0,
+														overflow: "hidden",
+														textOverflow: "ellipsis",
+														whiteSpace: "nowrap"
+													},
+													children: item.title
+												}), item.revisions.length > 1 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													style: {
+														fontSize: 9.5,
+														color: ACCENT,
+														fontWeight: 600
+													},
+													children: [
+														"r",
+														item.revision,
+														" · ",
+														item.revisions.length,
+														"版"
+													]
+												}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+													style: {
+														fontSize: 9.5,
+														color: "var(--dsw-alias-label-caption, #999)"
+													},
+													children: ["r", item.revision]
+												})]
+											}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 												style: {
 													fontSize: 9.5,
-													color: ACCENT,
-													fontWeight: 600
+													color: "var(--dsw-alias-label-caption, #999)",
+													marginTop: 2,
+													fontFamily: "ui-monospace, Menlo, monospace"
 												},
-												children: [
-													"r",
-													item.revision,
-													" · ",
-													item.revisions.length,
-													"版"
-												]
-											}) : /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-												style: {
-													fontSize: 9.5,
-													color: "var(--dsw-alias-label-caption, #999)"
-												},
-												children: ["r", item.revision]
+												children: [item.canvasId, item.updatedAt.length > 0 ? ` · ${new Date(item.updatedAt).toLocaleString("zh-CN", {
+													month: "numeric",
+													day: "numeric",
+													hour: "2-digit",
+													minute: "2-digit"
+												})}` : ""]
 											})]
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
-											style: {
-												fontSize: 9.5,
-												color: "var(--dsw-alias-label-caption, #999)",
-												marginTop: 2,
-												fontFamily: "ui-monospace, Menlo, monospace"
+										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+											type: "button",
+											title: `删除「${item.title}」（全部版本）`,
+											onClick: (e) => {
+												e.stopPropagation();
+												if (!window.confirm(`删除画布「${item.title}」（${item.canvasId}，全部 ${item.revisions.length} 个版本）？此操作不可恢复。`)) return;
+												(async () => {
+													try {
+														if ((await fetch(`/qoder-canvas/delete/${item.canvasId}`, { method: "POST" })).ok) {
+															if (snapshot?.canvasId === item.canvasId) {
+																setSnapshot(null);
+																setAnnotations([]);
+															}
+															await refreshCatalog();
+															showToast(`已删除「${item.title}」`);
+														} else showToast("删除失败");
+													} catch {
+														showToast("删除失败（网络）");
+													}
+												})();
 											},
-											children: [item.canvasId, item.updatedAt.length > 0 ? ` · ${new Date(item.updatedAt).toLocaleString("zh-CN", {
-												month: "numeric",
-												day: "numeric",
-												hour: "2-digit",
-												minute: "2-digit"
-											})}` : ""]
+											style: {
+												flexShrink: 0,
+												border: 0,
+												background: "none",
+												padding: "3px 6px",
+												cursor: "pointer",
+												fontSize: 13,
+												lineHeight: 1,
+												color: "var(--dsw-alias-state-business-danger, #d0453e)",
+												fontFamily: "inherit",
+												opacity: .7
+											},
+											children: "×"
 										})]
 									}, item.canvasId))]
 								}) : null,
