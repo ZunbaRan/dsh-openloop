@@ -9471,7 +9471,7 @@ function HtmlNode({ nodeId, props }) {
 		if (host === null) return;
 		let root = host.shadowRoot;
 		if (root === null) root = host.attachShadow({ mode: "open" });
-		root.innerHTML = source;
+		root.innerHTML = "<style>:host{display:block;width:100%;min-height:100vh}</style>" + source;
 	}, [source]);
 	return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 		ref: hostRef,

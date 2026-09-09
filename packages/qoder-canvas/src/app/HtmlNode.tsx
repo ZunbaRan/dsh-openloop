@@ -15,13 +15,17 @@ export function HtmlNode({ nodeId, props }: { nodeId: string; props: Record<stri
   const source = typeof props.source === 'string' ? props.source : ''
   const title = typeof props.title === 'string' ? props.title : ''
 
-  // shadow root 一次创建 + source 变化时重注入
+  // shadow root 一次创建 + source 变化时重注入。
+  // 0.12.13 布局碎裂根因（用户 OKR 稿实测）：baoyu 风格 HTML 普遍用
+  // `container-type: inline-size` + `min-height: 100%`——shadow host 无高度
+  // 锚点时 100% 解析为 0，整页塌陷堆叠。注入 :host 基础样式（display block +
+  // min-height 100vh=iframe 视口高）给内容一个高度锚点。
   useEffect(() => {
     const host = hostRef.current
     if (host === null) return
     let root = host.shadowRoot
     if (root === null) root = host.attachShadow({ mode: 'open' })
-    root.innerHTML = source
+    root.innerHTML = '<style>:host{display:block;width:100%;min-height:100vh}</style>' + source
   }, [source])
 
   return (
