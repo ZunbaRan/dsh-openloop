@@ -319,9 +319,12 @@ export function CanvasWorkbench(): ReactNode {
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto', padding: 14, position: 'relative' }}>
               {/* 工作区目录（M4：悬浮列表） */}
               {catalogOpen ? (
-                <div style={{ position: 'absolute', right: 12, top: 0, zIndex: 65, width: 270, maxHeight: 'min(420px, calc(100% - 24px))', overflow: 'auto', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))', boxShadow: '0 12px 36px rgba(0,0,0,.26)' }}>
+                <div style={{ position: 'absolute', right: 12, top: 0, zIndex: 65, width: 320, maxHeight: 'min(480px, calc(100% - 24px))', overflow: 'auto', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1, #fff)', border: '1px solid var(--dsw-alias-border-l2, rgba(127,127,127,.2))', boxShadow: '0 12px 36px rgba(0,0,0,.26)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.1))', background: 'var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))' }}>
                     <span style={{ fontSize: 11, fontWeight: 600, flex: 1 }}>工作区画布（{catalogItems.length}）</span>
+                    <button type="button" onClick={() => { void refreshCatalog() }} title="刷新目录" style={{ border: 0, background: 'none', padding: 2, cursor: 'pointer', color: 'var(--dsw-alias-label-caption, #888)', display: 'flex', fontFamily: 'inherit' }}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" /><path d="M21 3v5h-5" /></svg>
+                    </button>
                     <button type="button" onClick={() => setCatalogOpen(false)} style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', fontSize: 13, lineHeight: 1, color: 'var(--dsw-alias-label-caption, #888)', fontFamily: 'inherit' }}>×</button>
                   </div>
                   {catalogItems.length === 0 ? (

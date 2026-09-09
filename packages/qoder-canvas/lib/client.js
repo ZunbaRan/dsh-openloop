@@ -2095,8 +2095,8 @@ window.__ModuleLoader__.load({
 										right: 12,
 										top: 0,
 										zIndex: 65,
-										width: 270,
-										maxHeight: "min(420px, calc(100% - 24px))",
+										width: 320,
+										maxHeight: "min(480px, calc(100% - 24px))",
 										overflow: "auto",
 										borderRadius: 12,
 										background: "var(--dsw-alias-bg-layer-1, #fff)",
@@ -2112,32 +2112,63 @@ window.__ModuleLoader__.load({
 											borderBottom: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,.1))",
 											background: "var(--dsw-alias-bg-layer-2, rgba(127,127,127,.05))"
 										},
-										children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
-											style: {
-												fontSize: 11,
-												fontWeight: 600,
-												flex: 1
-											},
-											children: [
-												"工作区画布（",
-												catalogItems.length,
-												"）"
-											]
-										}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
-											type: "button",
-											onClick: () => setCatalogOpen(false),
-											style: {
-												border: 0,
-												background: "none",
-												padding: 0,
-												cursor: "pointer",
-												fontSize: 13,
-												lineHeight: 1,
-												color: "var(--dsw-alias-label-caption, #888)",
-												fontFamily: "inherit"
-											},
-											children: "×"
-										})]
+										children: [
+											/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("span", {
+												style: {
+													fontSize: 11,
+													fontWeight: 600,
+													flex: 1
+												},
+												children: [
+													"工作区画布（",
+													catalogItems.length,
+													"）"
+												]
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												type: "button",
+												onClick: () => {
+													refreshCatalog();
+												},
+												title: "刷新目录",
+												style: {
+													border: 0,
+													background: "none",
+													padding: 2,
+													cursor: "pointer",
+													color: "var(--dsw-alias-label-caption, #888)",
+													display: "flex",
+													fontFamily: "inherit"
+												},
+												children: /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("svg", {
+													width: "13",
+													height: "13",
+													viewBox: "0 0 24 24",
+													fill: "none",
+													stroke: "currentColor",
+													strokeWidth: "2",
+													strokeLinecap: "round",
+													strokeLinejoin: "round",
+													"aria-hidden": "true",
+													children: [/* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M21 12a9 9 0 1 1-2.64-6.36L21 8" }), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("path", { d: "M21 3v5h-5" })]
+												})
+											}),
+											/* @__PURE__ */ (0, react_jsx_runtime.jsx)("button", {
+												type: "button",
+												onClick: () => setCatalogOpen(false),
+												style: {
+													border: 0,
+													background: "none",
+													padding: 0,
+													cursor: "pointer",
+													fontSize: 13,
+													lineHeight: 1,
+													color: "var(--dsw-alias-label-caption, #888)",
+													fontFamily: "inherit"
+												},
+												children: "×"
+											})
+										]
 									}), catalogItems.length === 0 ? /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
 										style: {
 											padding: "20px 14px",

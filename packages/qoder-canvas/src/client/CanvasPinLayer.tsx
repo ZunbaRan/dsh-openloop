@@ -15,7 +15,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { CanvasSnapshot } from '../dsl.ts'
 import type { AnnotationTarget, CanvasAnnotation } from './canvas-annotations.ts'
 
-export type PinMode = 'point' | 'marquee' | 'text'
+/** 0.12.8：browse=什么都不选（普通鼠标看网页——用户三次诉求后落地：进工作台默认浏览，要标注再切） */
+export type PinMode = 'browse' | 'point' | 'marquee' | 'text'
 
 export interface PinLayerCallbacks {
   /** 一次完整交互（点选锁定/框选完成/划字完成）产出的 targets */
@@ -269,6 +270,38 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
         }
       }
       walk(nodeEl)
+      // 0.12.8 html 元素级框选（用户实测「html 框选只能整块」）：占比不足 0.5 时
+      // 进 shadow 收集相交叶子（同文档直接遍历——TreeWalker 不穿透 shadow）
+      const sr = (nodeEl as HTMLElement).shadowRoot
+      if (sr !== null) {
+        const collectShadow = (el: Element): void => {
+          for (const child of el.children) {
+            if (child.children.length === 0) {
+              const cr = child.getBoundingClientRect()
+              if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
+                const text = (child.textContent ?? '').trim()
+                const tag = child.tagName.toLowerCase()
+                let snippet = ''
+                try { snippet = child.outerHTML ?? '' } catch { snippet = '' }
+                if (snippet.length > 600) snippet = snippet.slice(0, 600)
+                out.push({
+                  kind: 'html-element',
+                  id: nodeId,
+                  label: `html ${tag}${text.length > 0 ? ` "${text.slice(0, 20)}"` : ''}`,
+                  tag,
+                  domPath: domPathWithinShadow(child),
+                  indexPath: indexPathWithinShadow(child),
+                  text: text.length > 0 ? text.slice(0, 40) : undefined,
+                  snippet,
+                })
+              }
+            } else {
+              collectShadow(child)
+            }
+          }
+        }
+        for (const top of sr.children) collectShadow(top)
+      }
     }
     return out
   }
@@ -278,10 +311,8 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
     const surface = containerRef.current
     if (surface === null) return []
     const out: { nodeId: string; text: string }[] = []
-    for (const el of surface.querySelectorAll('[data-canvas-node]')) {
-      const id = el.getAttribute('data-canvas-node')
-      if (id === null) continue
-      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    const walkRoot = (root: Node, id: string): void => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
       let textNode = walker.nextNode()
       let acc = ''
       let hit = false
@@ -296,6 +327,14 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
       }
       if (hit) out.push({ nodeId: id, text: acc.trim() })
     }
+    for (const el of surface.querySelectorAll('[data-canvas-node]')) {
+      const id = el.getAttribute('data-canvas-node')
+      if (id === null) continue
+      walkRoot(el, id)
+      // 0.12.8：html 节点的文本在 shadow 里（主文档 TreeWalker 不可达）——补走 shadowRoot
+      const sr = el.shadowRoot
+      if (sr !== null) walkRoot(sr, id)
+    }
     return out
   }
 
@@ -305,7 +344,24 @@ export function CanvasPinLayer({ snapshot, containerRef, mode, targets, callback
     const surface = containerRef.current
     if (surface === null) return []
     const range = sel.getRangeAt(0)
-    if (!surface.contains(range.commonAncestorContainer)) return []
+    // 0.12.8 shadow 划字（用户实测「划字不弹面板」根因）：shadow 内节点的
+    // surface.contains 跨 shadow 边界为 false——用 composedPath 式归属：
+    // commonAncestorContainer 在 shadow 内时经 getRootNode().host 链归属 host
+    const anc = range.commonAncestorContainer
+    const ancNode = anc instanceof Element ? anc : anc.parentElement
+    if (ancNode === null) return []
+    const root = ancNode.getRootNode()
+    let belongsToSurface = surface.contains(ancNode)
+    if (!belongsToSurface && root instanceof ShadowRoot) {
+      let host: Element | null = root.host
+      while (host !== null) {
+        if (surface.contains(host)) { belongsToSurface = true; break }
+        const outer = host.getRootNode()
+        host = outer instanceof ShadowRoot ? outer.host : null
+      }
+    }
+    if (!belongsToSurface) return []
+    // shadow 内划字：宿主 html 节点整体作为归属（节选文本仍精确）
     return buildRangeIndex(range)
   }
 

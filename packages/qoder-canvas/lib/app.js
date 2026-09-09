@@ -8457,6 +8457,36 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 				}
 			};
 			walk(nodeEl);
+			const sr = nodeEl.shadowRoot;
+			if (sr !== null) {
+				const collectShadow = (el) => {
+					for (const child of el.children) if (child.children.length === 0) {
+						const cr = child.getBoundingClientRect();
+						if (cr.width > 0 && cr.height > 0 && intersects(cr)) {
+							const text = (child.textContent ?? "").trim();
+							const tag = child.tagName.toLowerCase();
+							let snippet = "";
+							try {
+								snippet = child.outerHTML ?? "";
+							} catch {
+								snippet = "";
+							}
+							if (snippet.length > 600) snippet = snippet.slice(0, 600);
+							out.push({
+								kind: "html-element",
+								id: nodeId,
+								label: `html ${tag}${text.length > 0 ? ` "${text.slice(0, 20)}"` : ""}`,
+								tag,
+								domPath: domPathWithinShadow(child),
+								indexPath: indexPathWithinShadow(child),
+								text: text.length > 0 ? text.slice(0, 40) : void 0,
+								snippet
+							});
+						}
+					} else collectShadow(child);
+				};
+				for (const top of sr.children) collectShadow(top);
+			}
 		}
 		return out;
 	};
@@ -8464,10 +8494,8 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 		const surface = containerRef.current;
 		if (surface === null) return [];
 		const out = [];
-		for (const el of surface.querySelectorAll("[data-canvas-node]")) {
-			const id = el.getAttribute("data-canvas-node");
-			if (id === null) continue;
-			const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+		const walkRoot = (root, id) => {
+			const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
 			let textNode = walker.nextNode();
 			let acc = "";
 			let hit = false;
@@ -8484,6 +8512,13 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 				nodeId: id,
 				text: acc.trim()
 			});
+		};
+		for (const el of surface.querySelectorAll("[data-canvas-node]")) {
+			const id = el.getAttribute("data-canvas-node");
+			if (id === null) continue;
+			walkRoot(el, id);
+			const sr = el.shadowRoot;
+			if (sr !== null) walkRoot(sr, id);
 		}
 		return out;
 	};
@@ -8493,7 +8528,23 @@ function CanvasPinLayer({ snapshot, containerRef, mode, targets, callbacks }) {
 		const surface = containerRef.current;
 		if (surface === null) return [];
 		const range = sel.getRangeAt(0);
-		if (!surface.contains(range.commonAncestorContainer)) return [];
+		const anc = range.commonAncestorContainer;
+		const ancNode = anc instanceof Element ? anc : anc.parentElement;
+		if (ancNode === null) return [];
+		const root = ancNode.getRootNode();
+		let belongsToSurface = surface.contains(ancNode);
+		if (!belongsToSurface && root instanceof ShadowRoot) {
+			let host = root.host;
+			while (host !== null) {
+				if (surface.contains(host)) {
+					belongsToSurface = true;
+					break;
+				}
+				const outer = host.getRootNode();
+				host = outer instanceof ShadowRoot ? outer.host : null;
+			}
+		}
+		if (!belongsToSurface) return [];
 		return buildRangeIndex(range);
 	};
 	(0, import_react.useEffect)(() => {
@@ -9437,8 +9488,13 @@ function HtmlNode({ nodeId, props }) {
 const ACCENT = "var(--dsw-alias-state-business-primary, #4176e6)";
 const MODES = [
 	{
+		key: "browse",
+		label: "浏览",
+		hint: "普通鼠标，纯查看（不选中不标注）"
+	},
+	{
 		key: "point",
-		label: "点击",
+		label: "点选",
 		hint: "hover 高亮元素，点击选中（元素级精度）"
 	},
 	{
@@ -9457,13 +9513,14 @@ function CanvasApp() {
 	const [annotations, setAnnotations] = (0, import_react.useState)([]);
 	const [targets, setTargets] = (0, import_react.useState)([]);
 	const [note, setNote] = (0, import_react.useState)("");
-	const [mode, setMode] = (0, import_react.useState)("point");
+	const [mode, setMode] = (0, import_react.useState)("browse");
 	const [focusNodeId, setFocusNodeId] = (0, import_react.useState)(null);
 	const [editAnn, setEditAnn] = (0, import_react.useState)(null);
 	const [toast, setToast] = (0, import_react.useState)(null);
 	const [panelOpen, setPanelOpen] = (0, import_react.useState)(false);
 	const canvasAreaRef = (0, import_react.useRef)(null);
 	const bridgeRef = (0, import_react.useRef)(null);
+	const revAnnotations = snapshot === null ? [] : annotations.filter((a) => a.revision === snapshot.revision);
 	const showToast = (msg) => {
 		setToast(msg);
 		setTimeout(() => {
@@ -9651,7 +9708,7 @@ function CanvasApp() {
 								setNote("");
 							},
 							onSave: () => saveAnnotation(),
-							annotations,
+							annotations: revAnnotations,
 							onEditAnnotation: (a) => setEditAnn(a),
 							onDeleteAnnotation: (a) => setAnnotations((prev) => prev.filter((x) => x.id !== a.id)),
 							onFocusNode: (id) => setFocusNodeId(id)
@@ -9722,7 +9779,7 @@ function CanvasApp() {
 									setTargets([]);
 									setNote("");
 								},
-								annotations,
+								annotations: revAnnotations,
 								onEdit: (a) => setEditAnn(a),
 								onDelete: (a) => setAnnotations((prev) => prev.filter((x) => x.id !== a.id)),
 								focusNodeId

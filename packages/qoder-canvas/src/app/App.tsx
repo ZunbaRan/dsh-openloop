@@ -19,7 +19,8 @@ import { HtmlNode } from './HtmlNode.tsx'
 
 const ACCENT = 'var(--dsw-alias-state-business-primary, #4176e6)'
 const MODES: readonly { key: PinMode; label: string; hint: string }[] = [
-  { key: 'point', label: '点击', hint: 'hover 高亮元素，点击选中（元素级精度）' },
+  { key: 'browse', label: '浏览', hint: '普通鼠标，纯查看（不选中不标注）' },
+  { key: 'point', label: '点选', hint: 'hover 高亮元素，点击选中（元素级精度）' },
   { key: 'marquee', label: '框选', hint: '拖拽框选多个元素' },
   { key: 'text', label: '划字', hint: '划选文本作为引用' },
 ]
@@ -34,13 +35,16 @@ export function CanvasApp(): ReactNode {
   const [annotations, setAnnotations] = useState<CanvasAnnotation[]>([])
   const [targets, setTargets] = useState<AnnotationTarget[]>([])
   const [note, setNote] = useState('')
-  const [mode, setMode] = useState<PinMode>('point')
+  const [mode, setMode] = useState<PinMode>('browse')
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [editAnn, setEditAnn] = useState<CanvasAnnotation | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   const bridgeRef = useRef<CanvasAppClientBridge | null>(null)
+
+  // 0.12.8 版本隔离（用户拍板）：badge/评注列表只显示当前 revision 的注释
+  const revAnnotations = snapshot === null ? [] : annotations.filter(a => a.revision === snapshot.revision)
 
   const showToast = (msg: string): void => {
     setToast(msg)
@@ -166,7 +170,9 @@ export function CanvasApp(): ReactNode {
           callbacks={{
             onTargetsChange: (t) => { setTargets([...t]); setNote('') },
             onSave: () => saveAnnotation(),
-            annotations,
+            // 0.12.8 版本隔离（用户拍板）：badge 只显示当前 revision 的注释——
+            // v1 的选中标识和注释不再出现在 v2（存储不动，切回 v1 仍在）
+            annotations: revAnnotations,
             onEditAnnotation: (a) => setEditAnn(a),
             onDeleteAnnotation: (a) => setAnnotations(prev => prev.filter(x => x.id !== a.id)),
             onFocusNode: (id) => setFocusNodeId(id),
@@ -199,7 +205,7 @@ export function CanvasApp(): ReactNode {
                 onRemoveTarget={(i) => setTargets(prev => prev.filter((_, j) => j !== i))}
                 onSave={saveAnnotation}
                 onCancel={() => { setTargets([]); setNote('') }}
-                annotations={annotations}
+                annotations={revAnnotations}
                 onEdit={(a) => setEditAnn(a)}
                 onDelete={(a) => setAnnotations(prev => prev.filter(x => x.id !== a.id))}
                 focusNodeId={focusNodeId}
