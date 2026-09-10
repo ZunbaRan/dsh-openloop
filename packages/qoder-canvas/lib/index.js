@@ -1190,8 +1190,12 @@ function argsOf(args) {
 	const canvasId = typeof args.canvasId === "string" && args.canvasId.length > 0 ? args.canvasId : void 0;
 	const load = typeof args.load === "string" && args.load.length > 0 ? args.load : void 0;
 	const list = args.list === true;
+	let document = args.document;
+	if (typeof document === "string" && document.trim().length > 0) try {
+		document = JSON.parse(document);
+	} catch {}
 	return {
-		document: args.document,
+		document,
 		canvasId,
 		load,
 		list

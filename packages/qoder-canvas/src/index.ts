@@ -30,7 +30,13 @@ function argsOf(args: CanvasArgs): { document: unknown; canvasId: string | undef
   const canvasId = typeof args.canvasId === 'string' && args.canvasId.length > 0 ? args.canvasId : undefined
   const load = typeof args.load === 'string' && args.load.length > 0 ? args.load : undefined
   const list = args.list === true
-  return { document: args.document, canvasId, load, list }
+  // 0.12.15 容错（用户 session 2 实测：LLM 偶发把 document 双重序列化成字符串——
+  // 昨天同版本传对象今天传字符串，canvas 全链路因此全挂）——字符串先 parse
+  let document: unknown = args.document
+  if (typeof document === 'string' && document.trim().length > 0) {
+    try { document = JSON.parse(document) } catch { /* 保留字符串——校验层报面向 Agent 的错误 */ }
+  }
+  return { document, canvasId, load, list }
 }
 
 /** 模块级：最近一次写入的 workspaceKey（S4 端点默认 workspace 判定——
