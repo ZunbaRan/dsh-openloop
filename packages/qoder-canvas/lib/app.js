@@ -9591,12 +9591,16 @@ function CanvasApp() {
 	}, [snapshot]);
 	const saveAnnotation = () => {
 		if (snapshot === null || note.trim().length === 0 || targets.length === 0) return;
+		const safeTargets = targets.map((t) => {
+			const { el: _drop, ...rest } = t;
+			return rest;
+		});
 		bridgeRef.current?.send({
 			t: "annotation",
 			payload: {
 				canvasId: snapshot.canvasId,
 				revision: snapshot.revision,
-				targets,
+				targets: safeTargets,
 				note: note.trim()
 			}
 		});

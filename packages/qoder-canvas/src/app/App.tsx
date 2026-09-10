@@ -99,12 +99,20 @@ export function CanvasApp(): ReactNode {
   // 保存评注 → 桥传出（宿主接胶囊链路 + localStorage 持久化）
   const saveAnnotation = (): void => {
     if (snapshot === null || note.trim().length === 0 || targets.length === 0) return
+    // 0.12.15 修复（用户致命 bug 实测：评注填完不出现）：bridge.send 走 JSON.stringify
+    // 序列化整个 payload——但 0.12.7+ 给 targets.html-element 加的 `el` 是 DOM 引用，
+    // JSON.stringify 循环引用抛错 → 桥消息根本没到 host → 评注 / 胶囊都不出现。
+    // 保存前 sanitize（剥 el 等 transient 字段；复用 0.12.10 的 stripTransientTargets 思路）
+    const safeTargets = targets.map(t => {
+      const { el: _drop, ...rest } = t as AnnotationTarget & { el?: unknown }
+      return rest
+    })
     bridgeRef.current?.send({
       t: 'annotation',
       payload: {
         canvasId: snapshot.canvasId,
         revision: snapshot.revision,
-        targets,
+        targets: safeTargets,
         note: note.trim(),
       },
     })
