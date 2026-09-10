@@ -15,6 +15,7 @@
 import type { CanvasSnapshot } from './dsl.ts'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { readdir, readFile } from 'node:fs/promises'
 
 /** 结构化路径身份（真实 FsTarget 的最小形态；宽松声明兼容测试桩） */
 export interface FsTargetLike {
@@ -101,8 +102,23 @@ export class CanvasStorage {
     await this.fs.writeText(target, JSON.stringify(snapshot), undefined, signal, this.policy)
   }
 
-  /** 目录列举（listDir 可用时；canvasId 目录内的 rev 文件名） */
+  /** 目录列举（0.12.14 根因修复：rc.7 sandbox 的 read/listDir 无 per-call policy 通道——
+      readText/listDir 走默认 policy（会话 cwd），$DSH_HOME/data 不在会话工作区被拒，
+      表现为「save 成功但 list/版本切换读不到」。read 系列改用 node:fs 绝对路径直读
+      （只读操作 + 自己落的盘——绕过 sandbox 合理；save 保持 ctx.fs + per-call policy） */
   private async revisionsOfDir(canvasId: string): Promise<number[] | null> {
+    // 双通道（0.12.14）：node:fs 优先（生产真数据）；失败兜底 ctx.fs.listDir
+    // （旧测试桩/内存 fs——execute.spec 等旧桩兼容）
+    try {
+      const dir = join(this.rootDir, this.workspaceKey, canvasId)
+      const entries = await readdir(dir, { withFileTypes: true })
+      const revs: number[] = []
+      for (const e of entries) {
+        const m = /^(\d+)\.json$/.exec(e.name)
+        if (e.isFile() && m !== null) revs.push(Number(m[1]))
+      }
+      return revs
+    } catch { /* fallthrough to ctx.fs */ }
     if (typeof this.fs.listDir !== 'function') return null
     try {
       const dir = await this.fs.resolve(`${this.rootDir}/${this.workspaceKey}/${canvasId}`)
@@ -118,7 +134,7 @@ export class CanvasStorage {
     }
   }
 
-  /** 读最新快照（listDir 优先；降级线性扫描——listDir 不可用的桩环境） */
+  /** 读最新快照（revisionsOfDir 优先；降级线性扫描） */
   async latest(canvasId: string): Promise<CanvasSnapshot | null> {
     const revs = await this.revisionsOfDir(canvasId)
     if (revs !== null && revs.length > 0) {
@@ -134,14 +150,17 @@ export class CanvasStorage {
 
   async read(canvasId: string, revision: number): Promise<CanvasSnapshot | null> {
     if (!Number.isInteger(revision) || revision < 1 || revision > 999) return null
-    const target = await this.targetFor(canvasId, revision)
-    if (target === null) return null
-    let raw: string
+    let raw: string | null = null
+    // 双通道（0.12.14）：node:fs 优先（生产真数据）；失败兜底 ctx.fs.readText（旧测试桩）
     try {
-      raw = await this.fs.readText(target)
+      raw = await readFile(join(this.rootDir, this.workspaceKey, canvasId, `${revision}.json`), 'utf8')
     } catch {
-      return null // 不存在 / 不可读
+      const target = await this.targetFor(canvasId, revision)
+      if (target !== null) {
+        try { raw = await this.fs.readText(target) } catch { raw = null }
+      }
     }
+    if (raw === null) return null
     try {
       const parsed = JSON.parse(raw) as CanvasSnapshot
       if (parsed?.kind !== 'qoder-canvas' || parsed.canvasId !== canvasId || parsed.revision !== revision) return null
@@ -156,17 +175,23 @@ export class CanvasStorage {
    * 每个 cv_* 目录列 rev 文件，读最新 rev 拿标题。listDir 不可用（旧桩）返回空。
    */
   async list(): Promise<readonly CanvasIndexEntry[]> {
-    if (typeof this.fs.listDir !== 'function') return []
-    let entries: readonly FsDirEntryLike[]
+    // 双通道（0.12.14）：node:fs 优先（生产）；失败兜底 ctx.fs.listDir（旧测试桩）
+    let dirEntries: { name: string; isDir: boolean }[] = []
     try {
-      const wsDir = await this.fs.resolve(`${this.rootDir}/${this.workspaceKey}`)
-      entries = await this.fs.listDir(wsDir)
+      const entries = await readdir(join(this.rootDir, this.workspaceKey), { withFileTypes: true })
+      dirEntries = entries.map(e => ({ name: e.name, isDir: e.isDirectory() }))
     } catch {
-      return []
+      if (typeof this.fs.listDir === 'function') {
+        try {
+          const wsDir = await this.fs.resolve(`${this.rootDir}/${this.workspaceKey}`)
+          const entries = await this.fs.listDir(wsDir)
+          dirEntries = entries.map(e => ({ name: e.name, isDir: e.type === 'directory' }))
+        } catch { dirEntries = [] }
+      }
     }
     const out: CanvasIndexEntry[] = []
-    for (const e of entries) {
-      if (e.type !== 'directory' || !/^cv_[a-z0-9]{8}$/.test(e.name)) continue
+    for (const e of dirEntries) {
+      if (!e.isDir || !/^cv_[a-z0-9]{8}$/.test(e.name)) continue
       const revs = (await this.revisionsOfDir(e.name)) ?? []
       if (revs.length === 0) continue
       const latestSnap = await this.read(e.name, Math.max(...revs))

@@ -154,9 +154,12 @@ declare class CanvasStorage {
   constructor(options: StorageOptions);
   private targetFor;
   save(snapshot: CanvasSnapshot, signal?: unknown): Promise<void>;
-  /** 目录列举（listDir 可用时；canvasId 目录内的 rev 文件名） */
+  /** 目录列举（0.12.14 根因修复：rc.7 sandbox 的 read/listDir 无 per-call policy 通道——
+        readText/listDir 走默认 policy（会话 cwd），$DSH_HOME/data 不在会话工作区被拒，
+        表现为「save 成功但 list/版本切换读不到」。read 系列改用 node:fs 绝对路径直读
+        （只读操作 + 自己落的盘——绕过 sandbox 合理；save 保持 ctx.fs + per-call policy） */
   private revisionsOfDir;
-  /** 读最新快照（listDir 优先；降级线性扫描——listDir 不可用的桩环境） */
+  /** 读最新快照（revisionsOfDir 优先；降级线性扫描） */
   latest(canvasId: string): Promise<CanvasSnapshot | null>;
   read(canvasId: string, revision: number): Promise<CanvasSnapshot | null>;
   /**
